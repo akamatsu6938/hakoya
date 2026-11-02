@@ -124,14 +124,20 @@ def face_agents(models: dict) -> dict:
     return out
 
 
+# 組み込みで使ってよい道具：サブエージェントの呼び出し・Skill・構造化出力
+# ★StructuredOutput は、決めた形の JSON を最後に返すための Claude Code の道具（output_format を使うと必要）。
+#   1回目の試験ではこれをフックで止めてしまい、JSON が返らなかった（2026-11-02）
+BUILTIN_ALLOWED = ("Agent", "Skill", "StructuredOutput")
+
+
 def deny_non_app_tools():
-    """HAKOYA の道具・サブエージェントの呼び出し・Skill 以外の道具を止めるフック。"""
+    """HAKOYA の道具と BUILTIN_ALLOWED 以外の道具を止めるフック。"""
     from claude_agent_sdk import HookMatcher
     allowed_prefix = f"mcp__{SERVER}__"
 
     async def guard(input_data, tool_use_id, context):
         name = input_data.get("tool_name", "")
-        if name.startswith(allowed_prefix) or name in ("Agent", "Skill"):
+        if name.startswith(allowed_prefix) or name in BUILTIN_ALLOWED:
             return {}
         return {"hookSpecificOutput": {"hookEventName": input_data.get("hook_event_name", "PreToolUse"),
                                        "permissionDecision": "deny",
@@ -156,8 +162,8 @@ def build_options(ctx: ToolContext, connection: str = "claude_code"):
                        "直す案は数値を書かず value_source（majority:種類 / rule:項目 / glb / number）で指定する。決まらないことは question にする。"),
         model=merge["model"], effort=merge["effort"],
         mcp_servers={SERVER: build_server(ctx)},
-        tools=["Agent", "Skill"],
-        allowed_tools=["Agent", "Skill"] + tool_names(),
+        tools=list(BUILTIN_ALLOWED),
+        allowed_tools=list(BUILTIN_ALLOWED) + tool_names(),
         permission_mode="dontAsk",
         agents=face_agents(models),
         hooks=deny_non_app_tools(),
@@ -188,23 +194,77 @@ def finalize(ctx: ToolContext, raw_findings: list[dict]) -> list[dict]:
     return sorted(out, key=lambda x: order.get(x["severity"], 3))
 
 
+def _log_record(msg) -> dict:
+    """やりとりの1件を、記録に残せる形にする（画像は入れない）。"""
+    rec = {"type": type(msg).__name__}
+    parent = getattr(msg, "parent_tool_use_id", None)
+    if parent:
+        rec["parent_tool_use_id"] = parent           # サブエージェント（検品担当）の中のやりとり
+    blocks = getattr(msg, "content", None)
+    if isinstance(blocks, list):
+        out = []
+        for b in blocks:
+            kind = type(b).__name__
+            if kind == "TextBlock":
+                out.append({"text": b.text})
+            elif kind == "ToolUseBlock":
+                out.append({"tool_use": b.name, "id": b.id, "input": b.input})
+            elif kind == "ToolResultBlock":
+                c = b.content
+                if isinstance(c, list):
+                    c = [x.get("text", "[画像]") if isinstance(x, dict) else str(x) for x in c]
+                out.append({"tool_result": b.tool_use_id, "is_error": getattr(b, "is_error", None), "content": str(c)[:1500]})
+            elif kind == "ThinkingBlock":
+                out.append({"thinking": True})
+        rec["content"] = out
+    elif isinstance(blocks, str):
+        rec["content"] = blocks[:1500]
+    return rec
+
+
+def extract_findings(result) -> dict:
+    """結果から指摘の JSON を取り出す。structured_output → 文章の中の JSON の順に探す。"""
+    if isinstance(result.structured_output, dict):
+        return result.structured_output
+    text = result.result or ""
+    import re
+    for cand in re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S) + ([text[text.find("{"):text.rfind("}") + 1]] if "{" in text else []):
+        try:
+            data = json.loads(cand)
+            if isinstance(data, dict) and "findings" in data:
+                return data
+        except json.JSONDecodeError:
+            continue
+    raise RuntimeError("検品の結果から、決められた形の JSON が見つかりませんでした（inspect_result_raw.json を見てください）")
+
+
 async def run_inspection(alias: str, connection: str = "claude_code", on_event=None) -> dict:
     from claude_agent_sdk import AssistantMessage, ResultMessage, query
     ctx = ToolContext.load(alias)
     options = build_options(ctx, connection)
     result = None
-    async for msg in query(prompt=f"物件「{alias}」の模型を検品してください。", options=options):
-        if on_event and isinstance(msg, AssistantMessage):
-            on_event(msg)
-        if isinstance(msg, ResultMessage):
-            result = msg
+    log_path = out_dir(alias) / "inspect_log.jsonl"
+    with log_path.open("w", encoding="utf-8") as log:
+        async for msg in query(prompt=f"物件「{alias}」の模型を検品してください。", options=options):
+            log.write(json.dumps(_log_record(msg), ensure_ascii=False, default=str) + "\n")
+            log.flush()
+            if on_event and isinstance(msg, AssistantMessage):
+                on_event(msg)
+            if isinstance(msg, ResultMessage):
+                result = msg
+    if result is not None:  # 読み取る前に、結果をそのまま残す
+        raw = {k: getattr(result, k, None) for k in ("subtype", "is_error", "num_turns", "duration_ms", "total_cost_usd",
+                                                     "result", "structured_output", "permission_denials", "errors",
+                                                     "stop_reason", "terminal_reason", "model_usage")}
+        (out_dir(alias) / "inspect_result_raw.json").write_text(json.dumps(raw, ensure_ascii=False, indent=2, default=str),
+                                                                encoding="utf-8")
     if result is None or result.is_error:
         raise RuntimeError(f"検品が最後まで終わりませんでした（{getattr(result, 'subtype', '結果なし')}）")
-    data = result.structured_output or json.loads(result.result or "{}")
+    data = extract_findings(result)
     findings = finalize(ctx, data.get("findings", []))
     report = {"alias": alias, "connection": connection, "summary": data.get("summary", ""), "findings": findings,
               "cost_usd": result.total_cost_usd, "duration_s": round((result.duration_ms or 0) / 1000, 1),
-              "turns": result.num_turns}
+              "turns": result.num_turns, "permission_denials": result.permission_denials or []}
     (out_dir(alias) / "findings.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
 
