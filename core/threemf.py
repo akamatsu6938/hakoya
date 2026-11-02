@@ -29,7 +29,7 @@ def _mesh_xml(obj_id: int, name: str, verts: np.ndarray, tris: np.ndarray) -> st
             f'<vertices>{vs}</vertices><triangles>{ts}</triangles></mesh></object>')
 
 
-def write_3mf(path: Path, objects: list[dict], fuzzy: dict) -> None:
+def write_3mf(path: Path, objects: list[dict], fuzzy: dict, spacing: float = SPACING_MM) -> None:
     """objects: [{"name": 表示名, "parts": [{"name", "verts"(N,3), "tris"(M,3), "fuzzy_skin": bool}]}]
     頂点は印刷の向き・模型寸法。fuzzy: {"thickness": mm, "point_distance": mm}"""
     resources, build, settings = [], [], []
@@ -39,7 +39,10 @@ def write_3mf(path: Path, objects: list[dict], fuzzy: dict) -> None:
         lo, hi = allv.min(axis=0), allv.max(axis=0)
         size = hi - lo
         # 床に置き、造形範囲の真ん中へ。2つ目からは横に並べる
-        shift = np.array([k * SPACING_MM + (BED_MM - size[0]) / 2 - lo[0], (BED_MM - size[1]) / 2 - lo[1], -lo[2]])
+        if spacing < BED_MM:   # 小さい物（試験片）は造形範囲の中に横に並べる
+            shift = np.array([10 + k * spacing - lo[0], (BED_MM - size[1]) / 2 - lo[1], -lo[2]])
+        else:
+            shift = np.array([k * spacing + (BED_MM - size[0]) / 2 - lo[0], (BED_MM - size[1]) / 2 - lo[1], -lo[2]])
         part_ids = []
         part_settings = []
         for p in obj["parts"]:

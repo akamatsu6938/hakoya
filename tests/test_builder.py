@@ -104,3 +104,13 @@ def test_real_model_export():
     fuzzy = [p.find("metadata[@key='name']").get("value") for o in cfg for p in o.findall("part")
              if p.find("metadata[@key='fuzzy_skin']") is not None]
     assert fuzzy == ["1階の外壁"]
+
+
+def test_test_pieces_fit_without_overlap():
+    """試験片：組んだときに重ならない（はめあいの隙間がある）。すべて1つの閉じた立体。"""
+    from core.testpiece import build_pieces
+    p = build_pieces(load_rules("jisha"))
+    for label, solid, _ in p.values():
+        assert str(solid.status()).endswith("NoError") and len(solid.decompose()) == 1, label
+    assert abs((p["wall"][1] ^ p["roof"][1]).volume()) < 1e-6
+    assert abs((p["foundation"][1] ^ p["floor"][1]).volume()) < 1e-6
