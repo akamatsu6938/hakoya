@@ -17,6 +17,7 @@ from core.builder import ModelPart, build_model, union_all
 from core.checks import building_checks, part_checks
 from core.paths import out_dir
 from core.rules import load_rules
+from core.threemf import write_3mf
 
 COLORS = {"foundation": (150, 150, 150, 255), "floor1": (235, 220, 190, 255), "exterior1": (230, 120, 100, 255),
           "roof": (90, 110, 140, 255), "soffit": (120, 170, 120, 255)}
@@ -33,6 +34,19 @@ def to_trimesh(part: ModelPart, scale: float, for_print: bool = False) -> trimes
             mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0]))
         mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
     return mesh
+
+
+ORDER_3MF = ("foundation", "floor1", "roof", "soffit")   # 3MF のオブジェクトの並び（外壁は 1階に入る）
+
+
+def _print_mesh(part: ModelPart, scale: float) -> dict:
+    """3MF 用：模型寸法・印刷の向き（裏返すものは裏返す）の頂点と三角形。床への置き方は threemf が決める。"""
+    m = part.solid.to_mesh()
+    v = np.asarray(m.vert_properties, dtype=np.float64)[:, :3] / scale
+    f = np.asarray(m.tri_verts, dtype=np.int64)
+    if part.flip_for_print:  # X 軸まわりに 180 度（y→-y, z→-z）。向きが裏返らないので三角形の順はそのまま
+        v = v * np.array([1.0, -1.0, -1.0])
+    return {"verts": v, "tris": f}
 
 
 def make_model(alias: str, company: str | None = None) -> tuple[dict, dict[str, ModelPart], list[dict], dict]:
@@ -64,6 +78,19 @@ def write_outputs(alias: str, company: str | None = None) -> dict:
         obj = together[0] if len(together) == 1 else union_all(together)
         checks += part_checks(key, part.label, printable, [x.volume() for x in obj.decompose()])
     scene.export(dst / "model.glb", include_normals=False)  # 法線は表示側で計算（trimesh は法線に scipy が要るため）
+
+    # 3MF：同じオブジェクトの部品（1階の床・内壁と外壁）は、同じ向き・同じ位置のまま入れる
+    m = rules["model"]
+    objects = []
+    for key in ORDER_3MF:
+        if key not in parts:
+            continue
+        members = [p for p in parts.values() if (p.object_key or p.key) == key]
+        objects.append({"name": parts[key].label.split("（")[0],
+                        "parts": [{"name": p.label, "fuzzy_skin": p.fuzzy_skin and m.get("exterior_finish") == "plaster",
+                                   **_print_mesh(p, scale)} for p in members]})
+    write_3mf(dst / "model.3mf", objects,
+              {"thickness": float(m["fuzzy_skin_thickness_mm"]), "point_distance": float(m["fuzzy_skin_point_distance_mm"])})
     summary = {"parts": {k: {"label": p.label, "fuzzy_skin": p.fuzzy_skin, "object": p.object_key or k,
                              "flip_for_print": p.flip_for_print, "notes": p.notes} for k, p in parts.items()},
                "overrides": ov_results, "checks": checks}
