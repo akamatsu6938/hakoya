@@ -26,6 +26,8 @@ from core.paths import glb_working_copy, out_dir, property_files
 PX_PER_MM = 0.06          # 1mm（実寸）→ 0.06px（10m が 600px）
 MARGIN = 50
 VIEWS = ("S", "N", "E", "W", "plan")
+OCCLUSION_TOL_MM = 60.0   # 部材の手前の面より、これ以上手前に物があれば「隠れている」（実寸）
+VISIBLE_MIN = 0.3         # 見えている割合がこれ未満なら「隠れている」
 VIEW_LABELS = {"S": "南の立面", "N": "北の立面", "E": "東の立面", "W": "西の立面", "plan": "平面（屋根を外して上から）"}
 PART_COLORS = {"foundation": (160, 160, 160), "floor1": (225, 212, 185), "exterior1": (215, 125, 105),
                "roof": (110, 128, 155), "roof_ext": (200, 118, 98),
@@ -77,10 +79,14 @@ def _font(size: int):
 
 
 def draw_meshes(view: str, meshes: list[tuple[str, np.ndarray, np.ndarray]], canvas: Canvas, title: str) -> Image.Image:
-    """meshes: [(色の名前, 頂点(N,3), 三角形(M,3))]。奥から順に塗る。"""
-    img = Image.new("RGB", (canvas.w, canvas.h), "white")
-    d = ImageDraw.Draw(img)
-    polys = []
+    """meshes: [(色の名前, 頂点(N,3), 三角形(M,3))]。画素ごとに奥行きを比べて、いちばん手前の面の色を塗る（Z バッファ）。
+
+    ★最初は「三角形の真ん中の奥行きで並べて奥から塗る」方法だったが、大きな屋根の三角形と壁の三角形の順を間違え、
+      屋根の上に壁の色のくさびが描かれた。それを Claude の検品が「壁が屋根から出ている」と読んだ（2026-11-02）。
+    """
+    W, H = canvas.w, canvas.h
+    zbuf = np.full((H, W), -np.inf)
+    rgb = np.full((H, W, 3), 255, dtype=np.uint8)
     vdir = VIEW_DIR[view]
     for key, v, f in meshes:
         if not len(f):
@@ -92,21 +98,51 @@ def draw_meshes(view: str, meshes: list[tuple[str, np.ndarray, np.ndarray]], can
         tri, n = tri[ok], n[ok] / ln[ok, None]
         facing = n @ -vdir > 1e-6                  # こちらを向いている面だけ
         tri, n = tri[facing], n[facing]
+        if not len(tri):
+            continue
         uv, depth = project(view, tri.reshape(-1, 3))
         pix = canvas.px(uv).reshape(-1, 3, 2)
-        depth = depth.reshape(-1, 3).mean(axis=1)
+        depth = depth.reshape(-1, 3)
         shade = 0.55 + 0.45 * np.clip(n @ LIGHT, 0, 1)
-        base = np.array(PART_COLORS.get(key, (200, 200, 200)))
-        for p, dep, s in zip(pix, depth, shade):
-            polys.append((dep, [tuple(q) for q in p], tuple(int(c) for c in base * s)))
-    for _, pts, col in sorted(polys, key=lambda t: t[0]):
-        d.polygon(pts, fill=col, outline=col)
+        base = np.array(PART_COLORS.get(key, (200, 200, 200)), dtype=float)
+        for p, dz, s in zip(pix, depth, shade):
+            _raster(p, dz, (base * s).astype(np.uint8), zbuf, rgb)
+    canvas.zbuf = zbuf                              # 部材が隠れているかの判定に使う
+    img = Image.fromarray(rgb, "RGB")
+    d = ImageDraw.Draw(img)
     d.text((MARGIN, 12), title, fill="black", font=_font(16))
     # 縮尺（1m）
     x0, y0 = canvas.w - MARGIN - 1000 * canvas.k, canvas.h - 22
     d.line([(x0, y0), (x0 + 1000 * canvas.k, y0)], fill="black", width=2)
     d.text((x0, y0 - 16), "1m", fill="black", font=_font(12))
     return img
+
+
+def _raster(p: np.ndarray, dz: np.ndarray, col: np.ndarray, zbuf: np.ndarray, rgb: np.ndarray) -> None:
+    """1つの三角形を、画素ごとに奥行き（大きいほど手前）を比べて塗る。"""
+    H, W = zbuf.shape
+    x0, y0 = np.floor(p.min(axis=0)).astype(int)
+    x1, y1 = np.ceil(p.max(axis=0)).astype(int)
+    x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, W - 1), min(y1, H - 1)
+    if x1 < x0 or y1 < y0:
+        return
+    (ax, ay), (bx, by), (cx, cy) = p
+    den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+    if abs(den) < 1e-12:
+        return
+    xs, ys = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+    w0 = ((by - cy) * (xs - cx) + (cx - bx) * (ys - cy)) / den
+    w1 = ((cy - ay) * (xs - cx) + (ax - cx) * (ys - cy)) / den
+    w2 = 1.0 - w0 - w1
+    eps = -1e-3                                     # 縁の画素も塗る（三角形のつなぎ目に白い筋が出ないように）
+    inside = (w0 >= eps) & (w1 >= eps) & (w2 >= eps)
+    if not inside.any():
+        return
+    z = w0 * dz[0] + w1 * dz[1] + w2 * dz[2]
+    sub = zbuf[y0:y1 + 1, x0:x1 + 1]
+    upd = inside & (z > sub)
+    sub[upd] = z[upd]
+    rgb[y0:y1 + 1, x0:x1 + 1][upd] = col
 
 
 def _wall_frame(w: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -126,6 +162,20 @@ def elements(b: dict, view: str, canvas: Canvas, roof_top: float) -> list[dict]:
         uv, _ = project(view, np.asarray(pts3, float))
         p = canvas.px(uv)
         return [int(p[:, 0].min()), int(p[:, 1].min()), int(p[:, 0].max()), int(p[:, 1].max())]
+
+    def visible_ratio(pts3, box) -> float:
+        """手前の物に隠れていない割合（描いたときの奥行きの記録と比べる）。★ポーチの袖壁の奥の窓まで塗ってしまったため。"""
+        zbuf = getattr(canvas, "zbuf", None)
+        if zbuf is None or view == "plan":
+            return 1.0
+        _, depth = project(view, np.asarray(pts3, float))
+        front = float(np.max(depth))                       # 部材のいちばん手前の奥行き
+        x0, y0, x1, y1 = box
+        h, w_ = zbuf.shape
+        sub = zbuf[max(y0 + 1, 0):min(y1, h), max(x0 + 1, 0):min(x1, w_)]
+        if sub.size == 0:
+            return 1.0
+        return float(np.mean(sub <= front + OCCLUSION_TOL_MM))
 
     outline = Polygon(b["foundation"]["outline"]) if b.get("foundation", {}).get("outline") else None
     center = np.array(outline.centroid.coords[0]) if outline is not None else np.zeros(2)
@@ -158,7 +208,11 @@ def elements(b: dict, view: str, canvas: Canvas, roof_top: float) -> list[dict]:
         top = roof_top if w["height"] == "to_roof" else float(w["height"])
         t = w["thickness_mm"] / 2
         pts = [[*(s + n * sgn * t + d * a), z] for sgn in (-1, 1) for a in (0, L) for z in (w["bottom_mm"], top)]
-        out.append({"id": w["id"], "type": "wall", "kind": w["kind"], "bbox_px": bbox(pts)})
+        bx = bbox(pts)
+        item = {"id": w["id"], "type": "wall", "kind": w["kind"], "bbox_px": bx}
+        if visible_ratio(pts, bx) < VISIBLE_MIN:
+            item["hidden"] = True                        # 手前の物（ポーチの袖壁など）にほとんど隠れている
+        out.append(item)
     for o in b.get("openings", []):
         w = walls.get(o["wall"])
         if w is None or not faces_view(w):
@@ -167,8 +221,12 @@ def elements(b: dict, view: str, canvas: Canvas, roof_top: float) -> list[dict]:
         t = w["thickness_mm"] / 2
         a0, a1 = o["offset_mm"], o["offset_mm"] + o["width_mm"]
         pts = [[*(s + n * sgn * t + d * a), z] for sgn in (-1, 1) for a in (a0, a1) for z in (o["sill_mm"], o["head_mm"])]
-        out.append({"id": o["id"], "type": "opening", "kind": o["kind"], "wall": o["wall"], "bbox_px": bbox(pts),
-                    "head_fl_mm": o["head_fl_mm"], "width_mm": o["width_mm"]})
+        bx = bbox(pts)
+        item = {"id": o["id"], "type": "opening", "kind": o["kind"], "wall": o["wall"], "bbox_px": bx,
+                "head_fl_mm": o["head_fl_mm"], "width_mm": o["width_mm"]}
+        if visible_ratio(pts, bx) < VISIBLE_MIN:
+            item["hidden"] = True
+        out.append(item)
     return out
 
 
@@ -229,6 +287,8 @@ def draw_labels(img: Image.Image, elems: list[dict]) -> None:
     d = ImageDraw.Draw(img)
     f = _font(11)
     for e in elems:
+        if e.get("hidden"):
+            continue
         x0, y0, x1, y1 = e["bbox_px"]
         if e["type"] == "opening":
             d.rectangle([x0, y0, x1, y1], outline=(30, 90, 200), width=1)
@@ -271,6 +331,11 @@ def render_all(alias: str) -> dict:
         if view == "plan":
             draw_plan_walls(img_m, b, canvas)
         elems = elements(b, view, canvas, roof_top)
+        if view != "plan":  # 立面の開口は glb と同じくガラスの色で塗る（★素通しだと家の奥の壁が見え、「ふさがっている」と読まれた）
+            dg = ImageDraw.Draw(img_m)
+            for e in elems:
+                if e["type"] == "opening" and not e.get("hidden"):
+                    dg.rectangle(e["bbox_px"], fill=PART_COLORS["opening"])
         draw_labels(img_m, elems)
         img_m.save(dst / f"{view}_model.png")
         img_g = draw_meshes(view, gm, canvas, f"{alias}　glb（元の形）　{VIEW_LABELS[view]}")

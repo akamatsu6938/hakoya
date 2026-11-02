@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pytest
 
-from core.builder import build_model
+from core.builder import build_model, union_all
 from core.rules import load_rules
 
 
@@ -53,9 +53,14 @@ def test_all_parts_are_closed_solids(parts):
 
 def test_window_is_cut_and_walls_follow_roof(parts):
     ext = parts["exterior1"].solid
-    # 窓の高さ（2000）で切った断面は、窓のない高さ（1000）より「窓の幅 1700 × 壁の厚み 160」だけ小さい
-    diff = ext.slice(1000.0).area() - ext.slice(2000.0).area()
+    obj = union_all([ext, parts["floor1"].solid])
+    # オブジェクト全体（外壁の表面＋中身＋内壁）を窓の高さ（2000）で切ると、窓のない高さ（1000）より
+    # 「窓の幅 1700 × 壁の厚み 160」だけ小さい（自社は窓の枠を作らない：作者指定）
+    diff = obj.slice(1000.0).area() - obj.slice(2000.0).area()
     assert abs(diff - 1700 * 160) < 1.0
+    # ざらざらにする表面の層（外の面から 60mm）は、窓とそのまわり 75mm ずつの分だけ減る
+    skin_diff = ext.slice(1000.0).area() - ext.slice(2000.0).area()
+    assert abs(skin_diff - (1700 + 2 * 75) * 60) < 1.0
     # 1階の外壁は天井の高さ（FL 624 + 2400 = 3024）で切れている
     v = np.asarray(ext.to_mesh().vert_properties)[:, :3]
     assert abs(v[:, 2].max() - 3024) < 1
@@ -67,10 +72,12 @@ def test_window_is_cut_and_walls_follow_roof(parts):
 
 def test_door_cut_to_top_when_wall_above_is_too_thin(parts):
     """ドアの上端（3024）と内壁の上端（3024）の差が最小の太さ未満なので、上まで抜ける（SPEC §8）。"""
+    from shapely.geometry import Point, Polygon as SPolygon
+    from shapely.ops import unary_union
     floor1 = parts["floor1"].solid
-    sl = floor1.slice(3000.0)  # ドアの高さで切る：内壁がドアの所で途切れている
-    polys = sl.to_polygons()
-    assert len(polys) >= 2
+    sl = unary_union([SPolygon(p) for p in floor1.slice(3010.0).to_polygons()])  # ドアの上端より上で切る
+    assert not sl.contains(Point(3000, 1475))       # ドアの真ん中（W5 の始点から 1000〜1790）は、天井まで抜けている
+    assert sl.contains(Point(3000, 3000))           # ドアのない所は壁がある
 
 
 def test_roof_has_corner_blocks_and_flip(parts):
@@ -105,7 +112,7 @@ def test_real_model_export():
     cfg = ET.fromstring(z.read("Metadata/model_settings.config"))
     fuzzy = [p.find("metadata[@key='name']").get("value") for o in cfg for p in o.findall("part")
              if p.find("metadata[@key='fuzzy_skin']") is not None]
-    assert fuzzy == ["1階の外壁", "屋根の外壁"]
+    assert fuzzy == ["1階の外壁（表面）", "屋根の外壁"]
 
 
 def test_test_pieces_fit_without_overlap():
@@ -136,3 +143,14 @@ def test_inspection_images():
     for e in s["elements"]:
         x0, y0, x1, y1 = e["bbox_px"]
         assert 0 <= x0 <= x1 <= s["size_px"][0] and 0 <= y0 <= y1 <= s["size_px"][1]
+
+
+
+def test_window_frames_can_be_switched_on():
+    """会社ルールで窓の枠を作る設定にすると、枠（縦枠2本 50×80）が入る。"""
+    rules = load_rules("jisha")
+    rules["model"]["window_frames"] = True
+    p = build_model(_tiny_house(), rules)
+    obj = union_all([p["exterior1"].solid, p["floor1"].solid])
+    diff = obj.slice(1000.0).area() - obj.slice(2000.0).area()
+    assert abs(diff - (1700 * 160 - 2 * 50 * 80)) < 1.0

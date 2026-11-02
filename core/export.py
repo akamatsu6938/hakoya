@@ -50,6 +50,28 @@ def _print_mesh(part: ModelPart, scale: float) -> dict:
     return {"verts": v, "tris": f}
 
 
+OVERLAP_MM3 = 0.5   # 組んだときにパーツどうしがこれ以上重なっていたら「ぶつかる」とする（模型の体積）
+
+
+def overlap_checks(parts: dict[str, ModelPart], scale: float) -> list[dict]:
+    """組んだ状態で、別々のオブジェクト（基礎・1階・屋根）どうしが重なっていないか（ぶつかって組めない所がないか）。"""
+    objects: dict[str, list] = {}
+    for p in parts.values():
+        objects.setdefault(p.object_key or p.key, []).append(p.solid)
+    solids = {k: union_all(v) if len(v) > 1 else v[0] for k, v in objects.items()}
+    out = []
+    keys = list(solids)
+    for i, a in enumerate(keys):
+        for b2 in keys[i + 1:]:
+            vol = abs((solids[a] ^ solids[b2]).volume()) / scale ** 3
+            if vol > OVERLAP_MM3:
+                out.append({"part": f"{a}+{b2}", "level": "高", "item": "overlap",
+                            "message": f"{parts[a].label.split('（')[0]}と{parts[b2].label.split('（')[0]}が、組んだときに {vol:.1f}mm³ 重なっています（ぶつかって組めない可能性）"})
+    if not out:
+        out.append({"part": "all", "level": "情報", "item": "overlap", "message": "組んだときに、パーツどうしは重なっていません"})
+    return out
+
+
 def make_model(alias: str, company: str | None = None) -> tuple[dict, dict[str, ModelPart], list[dict], dict]:
     """building.json＋修正 → 組み立て。（修正を当てた building、パーツ、修正の結果、会社ルール）を返す。"""
     b = json.loads((out_dir(alias) / "building.json").read_text(encoding="utf-8"))
@@ -63,7 +85,7 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
     scale = float(rules["model"]["scale"])
     dst = out_dir(alias) / "model"
     dst.mkdir(parents=True, exist_ok=True)
-    checks = building_checks(b)
+    checks = building_checks(b) + overlap_checks(parts, scale)
     scene = trimesh.Scene()
     for key, part in parts.items():
         assembled = to_trimesh(part, scale)                 # 組んだ状態（画面の 3D 表示用）

@@ -27,4 +27,4 @@ def test_bambu_3mf_keeps_fuzzy_only_on_exterior():
     info = inspect_3mf(out_dir("物件A") / "model" / "model_bambu.3mf")
     assert info["printer_model"] == "Bambu Lab A1" and info["printable_area"][2] == "256x256"
     fuzzy = sorted(n for n, p in info["parts"].items() if p.get("fuzzy_skin") == "external")
-    assert fuzzy == ["1階の外壁", "屋根の外壁"]
+    assert fuzzy == ["1階の外壁（表面）", "屋根の外壁"]

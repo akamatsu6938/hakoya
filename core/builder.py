@@ -244,7 +244,13 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
 
     # 1階：床の板（土間の部屋は抜く）＋内壁＋家の中の単独の壁。外壁と重なる所は除く
     doma = [Polygon(r["polygon"]) for r in b.get("rooms", []) if r["floor_mm"] < fl - 50]
-    floor_poly = outline.difference(unary_union(doma)) if doma else outline
+    # 土間の穴は壁の面まで広げる（★部屋の形は glb の仕上げ面までで、作り直した壁（130）との間に床の細い帯が残った。検品 F7）
+    walls_fp = unary_union([wall_rect(w) for w in walls if w["bottom_mm"] <= fl + 1]) if walls else Polygon()
+    near_walls = walls_fp.buffer(DOMA_UNDER_WALL_MM, join_style="mitre")   # 壁の近くだけ広げる（框の側は広げない）
+    doma_holes = [d.union(d.buffer(DOMA_UNDER_WALL_MM, join_style="mitre").intersection(near_walls)).difference(walls_fp)
+                  .intersection(outline) for d in doma]
+    doma_holes = [max(getattr(h, "geoms", [h]), key=lambda g: g.area) for h in doma_holes if not h.is_empty]
+    floor_poly = outline.difference(unary_union(doma_holes)) if doma_holes else outline
     std_lo, std_up = [], []
     for w in std_in:
         lo, up = split_wall(w)
@@ -253,7 +259,9 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     floor1 = union_all([prism(floor_poly, ftop, fl)] + [lower_part(wall_solid(w)) for w in int_walls] + std_lo)
     floor1 = floor1 - exterior
     # 窓の枠は「床・内壁」の部品に入れる（外壁の部品に入れると、ファジースキンで枠までざらざらになるため）
-    frames = [lower_part(f) for w in ext_walls + int_walls + std_in for f in window_frames(w)]
+    # 窓の枠は会社ルールで切り替え（★自社は作らない：1/50 では枠が柱と紛らわしく、3連窓で線が増えるため）
+    frames = ([lower_part(f) for w in ext_walls + int_walls + std_in for f in window_frames(w)]
+              if m.get("window_frames", True) else [])
     if frames:
         floor1 = union_all([floor1] + frames)
         notes["floor1"].append(f"窓の枠を作った（{sum(1 for o in b.get('openings', []) if o['kind'] == 'window')} か所。引き違いは中央に縦桟）")
@@ -291,6 +299,29 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         exterior = exterior - recess
         notes["foundation"].append(f"位置合わせの三角を {len(f_blocks)} か所（基礎の帯の内側の角）")
 
+    # ファジースキンをかける所を、外壁の外の面の薄い層だけにする。窓・ドアのまわりは外す。
+    # ★窓の高さでは外壁の輪が途切れ、窓と窓の間の細い柱が島になる。島の全周（窓の脇・部屋側の面）が
+    #   「外側の輪郭」と見なされてざらざらになり、くちゅくちゅに見えた（2026-11-02 作者）。
+    band_mm = m.get("fuzzy_skin_band_mm")
+    if band_mm:
+        band = float(band_mm) * scale
+        margin = float(m.get("fuzzy_skin_opening_margin_mm", 0.0)) * scale
+        house = Polygon(outline.exterior)
+        skin2d = house.difference(house.buffer(-band, join_style="mitre"))
+        skin = prism(skin2d, ftop - 1, (z_cut if z_cut is not None else roof_zmax) + 1)
+        keep_out = []
+        for w in ext_walls:
+            for o in openings_by_wall.get(w["id"], []):
+                keep_out.append(prism(wall_rect(w, extra=40, t0=o["offset_mm"] - margin, t1=o["offset_mm"] + o["width_mm"] + margin),
+                                      float(o["sill_mm"]) - margin, float(o["head_mm"]) + margin))
+        if keep_out:
+            skin = skin - union_all(keep_out)
+        exterior_skin = exterior ^ skin
+        exterior_core = exterior - skin
+        floor1 = union_all([floor1, exterior_core])      # 中身はざらざらにしない部品（1階の床・内壁と同じ部品）へ
+        exterior = exterior_skin
+        notes["floor1"].append(f"ファジースキンは外壁の外の面から {band_mm}mm（模型）の層だけ。窓・ドアのまわり {m.get('fuzzy_skin_opening_margin_mm')}mm は外す")
+
     # 屋根のオブジェクト：①屋根板（4辺を板金の分だけ出す）＋ポーチの天井＋ずれ止めの三角
     #                     ②屋根の外壁（天井より上の外壁・ポーチの垂れ壁・屋根まで届く袖壁。ファジースキン）
     overhang = float(m.get("roof_overhang_mm", 0.0)) * scale
@@ -313,6 +344,10 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         roof_ext_parts.append(wall_solid(w, bottom=bottom))
     if roof_walls:
         notes["roof"].append("ポーチの上の垂れ壁と屋根まで届く袖壁（" + "・".join(w["id"] for w in roof_walls) + "）は屋根と一緒に印刷する")
+    if z_cut is not None:  # 天井の高さで上下に分けた壁（★検品が「W13 は屋根に入っていない」と誤解した。F3）
+        split_ids = [w["id"] for w in ext_walls + std_in if (_wall_top(w) is None or _wall_top(w) > z_cut + 1)]
+        if split_ids:
+            notes["roof"].append("天井の高さ（" + f"{z_cut:.0f}" + "）より上の部分を屋根の外壁に入れた壁：" + "・".join(split_ids))
 
     # ずれ止めの三角：外壁の内側の角（四隅に近いもの）。内壁とぶつかる角は使わない（SPEC §8）
     ext_inner = unary_union([wall_rect(w) for w in ext_walls])
@@ -341,7 +376,8 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     parts = {}
     parts["foundation"] = ModelPart("foundation", "基礎", foundation, notes=notes["foundation"])
     parts["floor1"] = ModelPart("floor1", "1階（床・内壁）", floor1, notes=notes["floor1"])
-    parts["exterior1"] = ModelPart("exterior1", "1階の外壁", exterior, fuzzy_skin=True, object_key="floor1")
+    parts["exterior1"] = ModelPart("exterior1", "1階の外壁（表面）" if band_mm else "1階の外壁", exterior,
+                                   fuzzy_skin=True, object_key="floor1")
     parts["roof"] = ModelPart("roof", "屋根（屋根板・ポーチの天井）", roof_solid, flip_for_print=True, notes=notes["roof"])
     if not roof_ext.is_empty():
         parts["roof_ext"] = ModelPart("roof_ext", "屋根の外壁", roof_ext, flip_for_print=True, fuzzy_skin=True, object_key="roof")
