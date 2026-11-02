@@ -28,7 +28,7 @@ MARGIN = 50
 VIEWS = ("S", "N", "E", "W", "plan")
 VIEW_LABELS = {"S": "南の立面", "N": "北の立面", "E": "東の立面", "W": "西の立面", "plan": "平面（屋根を外して上から）"}
 PART_COLORS = {"foundation": (160, 160, 160), "floor1": (225, 212, 185), "exterior1": (215, 125, 105),
-               "roof": (110, 128, 155), "soffit": (130, 175, 130),
+               "roof": (110, 128, 155), "roof_ext": (200, 118, 98),
                # glb の部材の種類ごとの色（模型と見比べやすいように、外壁・屋根・基礎は模型と同じ色）
                "exterior_wall": (215, 125, 105), "standalone_wall": (215, 125, 105), "room": (225, 212, 185),
                "opening": (150, 190, 230), "porch": (160, 160, 160), "porch_soffit": (130, 175, 130)}
@@ -260,7 +260,7 @@ def render_all(alias: str) -> dict:
     index = {}
     for view in VIEWS:
         hide_roof = view == "plan"
-        mm = [m for m in model_meshes if not (hide_roof and m[0] in ("roof", "soffit"))]
+        mm = [m for m in model_meshes if not (hide_roof and m[0] in ("roof", "roof_ext"))]
         gm = [m for m in glb_meshes if not (hide_roof and m[0] in ("roof", "porch_soffit"))]
         if hide_roof:  # 平面は天井より上を見せない（glb の天井で部屋が隠れるため）
             gm = [(k, v, f[(v[f][:, :, 2].min(axis=1) < float(b["levels"][0]["fl_mm"]) + 2000)]) for k, v, f in gm]

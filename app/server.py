@@ -28,8 +28,9 @@ from tools.plan_preview import render_svg
 HOST, PORT = "127.0.0.1", 8765
 STATIC = Path(__file__).resolve().parent / "static"
 MODEL_FILES = {"model.glb": "model/gltf-binary", "model.3mf": "application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
+               "model_bambu.3mf": "application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
                "foundation.stl": "model/stl", "floor1.stl": "model/stl", "exterior1.stl": "model/stl",
-               "roof.stl": "model/stl", "soffit.stl": "model/stl", "checks.json": "application/json"}
+               "roof.stl": "model/stl", "roof_ext.stl": "model/stl", "checks.json": "application/json"}
 
 app = FastAPI(title="HAKOYA")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

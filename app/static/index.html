@@ -29,8 +29,7 @@
         <label><input type="checkbox" data-part="foundation" checked>基礎</label>
         <label><input type="checkbox" data-part="floor1" checked>1階（床・内壁）</label>
         <label><input type="checkbox" data-part="exterior1" checked>外壁</label>
-        <label><input type="checkbox" data-part="soffit" checked>ポーチの天井</label>
-        <label><input type="checkbox" data-part="roof" checked>屋根</label>
+        <label><input type="checkbox" data-part="roof roof_ext" checked>屋根（天井より上の壁・ポーチの天井を含む）</label>
         <span class="sep"></span>
         <button data-view="iso">斜め</button>
         <button data-view="front">正面（南）</button>
@@ -59,7 +58,7 @@
     <div id="shist" class="pane"><ul id="history" class="list"></ul></div>
     <div id="schk" class="pane"><ul id="checks" class="list"></ul></div>
     <div id="sout" class="pane">
-      <p class="hint">3MF は Bambu Studio でそのまま開けます。外壁の部品にだけファジースキン（外側の輪郭）を設定しています。</p>
+      <p class="hint">「Bambu Studio 形式」の 3MF を開くと、外壁の部品にだけファジースキン（外側の輪郭）が設定されています。ファジースキンは形には出ません。スライスしてプレビューで外壁を拡大すると、線が細かく波打って見えます。<br>ふつうの形式の 3MF は形だけ読まれるので、外壁の部品（1階の外壁・屋根の外壁）を選び、「その他」→「ファジースキン」→「外側の輪郭」にしてください。2つ目以降のパーツはプレートの外に置いてあります。プレートを足して「並べる」で配置してください。</p>
       <ul id="downloads" class="list"></ul>
     </div>
   </aside>

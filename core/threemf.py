@@ -29,10 +29,16 @@ def _mesh_xml(obj_id: int, name: str, verts: np.ndarray, tris: np.ndarray) -> st
             f'<vertices>{vs}</vertices><triangles>{ts}</triangles></mesh></object>')
 
 
-def write_3mf(path: Path, objects: list[dict], fuzzy: dict, spacing: float = SPACING_MM) -> None:
+def write_3mf(path: Path, objects: list[dict], fuzzy: dict, spacing: float = SPACING_MM,
+              bambu_version: str | None = None) -> None:
     """objects: [{"name": 表示名, "parts": [{"name", "verts"(N,3), "tris"(M,3), "fuzzy_skin": bool}]}]
-    頂点は印刷の向き・模型寸法。fuzzy: {"thickness": mm, "point_distance": mm}"""
-    resources, build, settings = [], [], []
+    頂点は印刷の向き・模型寸法。fuzzy: {"thickness": mm, "point_distance": mm}
+
+    bambu_version を渡すと「Bambu 形式」で書く（試し）：★Bambu Studio は Bambu 製と認めない 3MF の設定を捨てて
+    形だけ読む（"The 3mf is not from Bambu Lab, load geometry data only."）。そこで同梱の見本の 3MF と同じく
+    Application・BambuStudio:3mfVersion・部品の matrix・プレートの割り当てを書く。プリンターや樹脂の設定
+    （project_settings.config）は入れない（使う人の設定を上書きしないため）。"""
+    resources, build, settings, plates = [], [], [], []
     next_id = 1
     for k, obj in enumerate(objects):
         allv = np.vstack([p["verts"] for p in obj["parts"]])
@@ -51,6 +57,8 @@ def write_3mf(path: Path, objects: list[dict], fuzzy: dict, spacing: float = SPA
             resources.append(_mesh_xml(pid, p["name"], p["verts"] + shift, p["tris"]))
             part_ids.append(pid)
             meta = [("name", p["name"])]
+            if bambu_version:
+                meta.append(("matrix", "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"))
             if p.get("fuzzy_skin"):
                 meta += [("fuzzy_skin", "external"), ("fuzzy_skin_thickness", f"{fuzzy['thickness']:g}"),
                          ("fuzzy_skin_point_distance", f"{fuzzy['point_distance']:g}")]
@@ -64,10 +72,17 @@ def write_3mf(path: Path, objects: list[dict], fuzzy: dict, spacing: float = SPA
             f'<part id="{pid}" subtype="normal_part">' + "".join(
                 f'<metadata key="{escape(k2)}" value="{escape(v)}"/>' for k2, v in meta) + "</part>"
             for pid, meta in part_settings)
-        settings.append(f'<object id="{oid}"><metadata key="name" value="{escape(obj["name"])}"/>{parts_xml}</object>')
+        extra = '<metadata key="extruder" value="1"/>' if bambu_version else ""
+        settings.append(f'<object id="{oid}"><metadata key="name" value="{escape(obj["name"])}"/>{extra}{parts_xml}</object>')
+        if bambu_version:  # オブジェクトごとに別のプレート（1つの造形範囲に1パーツ）
+            plates.append(f'<plate><metadata key="plater_id" value="{k + 1}"/><metadata key="plater_name" value="{escape(obj["name"])}"/>'
+                          f'<metadata key="locked" value="false"/><model_instance><metadata key="object_id" value="{oid}"/>'
+                          f'<metadata key="instance_id" value="0"/></model_instance></plate>')
 
+    app = f"BambuStudio-{bambu_version}" if bambu_version else "HAKOYA"
+    version_meta = '<metadata name="BambuStudio:3mfVersion">1</metadata>' if bambu_version else ""
     model = (f'<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="ja-JP" xmlns="{CORE_NS}">'
-             f'<metadata name="Title">HAKOYA 模型</metadata><metadata name="Application">HAKOYA</metadata>'
+             f'<metadata name="Application">{app}</metadata>{version_meta}<metadata name="Title">HAKOYA 模型</metadata>'
              f'<resources>{"".join(resources)}</resources><build>{"".join(build)}</build></model>')
     content_types = ('<?xml version="1.0" encoding="UTF-8"?>\n'
                      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
@@ -78,7 +93,7 @@ def write_3mf(path: Path, objects: list[dict], fuzzy: dict, spacing: float = SPA
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             '<Relationship Target="/3D/3dmodel.model" Id="rel0" '
             'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>')
-    config = f'<?xml version="1.0" encoding="UTF-8"?>\n<config>{"".join(settings)}</config>'
+    config = f'<?xml version="1.0" encoding="UTF-8"?>\n<config>{"".join(settings)}{"".join(plates)}</config>'
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", content_types)

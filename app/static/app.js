@@ -38,12 +38,12 @@ function resize() { const w = holder.clientWidth, h = holder.clientHeight || 400
 window.addEventListener('resize', resize);
 (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
 
-const LIFT = { foundation: 0, floor1: 1, exterior1: 1, soffit: 2, roof: 3 };
+const LIFT = { foundation: 0, floor1: 1, exterior1: 1, roof: 3, roof_ext: 3 };
 function applyVisibility() {
   if (!state.root) return;
   state.root.traverse((o) => {
     if (!o.isMesh) return;
-    const cb = document.querySelector(`input[data-part="${o.name}"]`);
+    const cb = document.querySelector(`input[data-part~="${o.name}"]`);   // 1つの切り替えで複数のパーツ（屋根＋屋根の外壁）
     o.visible = cb ? cb.checked : true;
     o.position.z = state.exploded ? (LIFT[o.name] || 0) * 60 : 0;
   });
@@ -158,8 +158,8 @@ async function renderChecks() {
 }
 
 function renderDownloads() {
-  const files = [['model.3mf', '3MF（Bambu Studio 用・全パーツ）'], ['model.glb', 'GLB（3D 表示用）'], ['foundation.stl', 'STL：基礎'],
-    ['floor1.stl', 'STL：1階（床・内壁）'], ['exterior1.stl', 'STL：1階の外壁'], ['roof.stl', 'STL：屋根'], ['soffit.stl', 'STL：ポーチの天井']];
+  const files = [['model_bambu.3mf', '3MF（Bambu Studio 形式・外壁のファジースキン設定済み）おすすめ'], ['model.3mf', '3MF（ふつうの形式・設定は手で）'], ['model.glb', 'GLB（3D 表示用）'], ['foundation.stl', 'STL：基礎'],
+    ['floor1.stl', 'STL：1階（床・内壁）'], ['exterior1.stl', 'STL：1階の外壁'], ['roof.stl', 'STL：屋根（屋根板・ポーチの天井）'], ['roof_ext.stl', 'STL：屋根の外壁']];
   $('#downloads').innerHTML = files.map(([f, label]) => `<li><a href="${api('/api/model/{a}/' + f)}" download>${label}</a></li>`).join('');
 }
 

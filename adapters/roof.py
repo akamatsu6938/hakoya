@@ -3,6 +3,7 @@
 ★物件Aで確かめたこと：
 - 屋根板の上の面は YANE_MAIN、下の面は YANE_NURA。どちらも1枚の平面（片流れ）。
 - 屋根板の端は4辺とも外壁の外の面とそろっている。低い側に約146mm出ているのは軒樋（YANE_NTOI）。
+- 屋根板の平面の形は L 字（北西の角が欠ける）。上の面の三角形を合わせて本当の形を取る。
 - 破風（HAFU）・鼻隠し（HANA・HAN2）・軒樋は模型では省く（SPEC §5-1 の include の既定）。
 """
 from __future__ import annotations
@@ -11,9 +12,9 @@ import math
 
 import numpy as np
 from shapely.geometry import Polygon
+from shapely.ops import unary_union
 
 from adapters.glb_reader import Part
-from adapters.walls import bbox_polygon
 
 TOP, BOTTOM, GUTTER = "YANE_MAIN", "YANE_NURA", "YANE_NTOI"
 
@@ -61,7 +62,9 @@ def detect_roof(part: Part, exterior_fp: Polygon) -> dict:
         vertical = c - bc
         roof["thickness_mm"] = round(vertical / math.sqrt(1 + slope * slope), 1)  # 面に垂直な厚み
     roof["top_z_range_mm"] = [round(float(top_pts[:, 2].min())), round(float(top_pts[:, 2].max()))]
-    slab = bbox_polygon(top_pts[:, :2])
+    # 屋根板の平面の形：上の面の三角形を合わせた本当の形（★物件Aは L 字。囲む長方形にすると欠けた角まで覆ってしまう）
+    slab = unary_union([Polygon(t[:, :2]) for pr in tops for t in pr.vertices[pr.triangles] if Polygon(t[:, :2]).area > 1])
+    slab = max(getattr(slab, "geoms", [slab]), key=lambda g: g.area).simplify(1.0)
     roof["footprint"] = [[round(float(x), 1), round(float(y), 1)] for x, y in list(slab.exterior.coords)[:-1]]
     roof["eave_mm"] = _eaves(top_pts[:, :2], exterior_fp)
     gutters = [pr for pr in part.primitives if pr.code == GUTTER]

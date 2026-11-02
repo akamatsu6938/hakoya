@@ -13,14 +13,15 @@ import numpy as np
 import trimesh
 
 from core import overrides as ov
-from core.builder import ModelPart, build_model, union_all
+from core.builder import ModelPart, build_model, drop_specks, union_all
 from core.checks import building_checks, part_checks
 from core.paths import out_dir
 from core.rules import load_rules
+from core.bambu import to_bambu_3mf
 from core.threemf import write_3mf
 
 COLORS = {"foundation": (150, 150, 150, 255), "floor1": (235, 220, 190, 255), "exterior1": (230, 120, 100, 255),
-          "roof": (90, 110, 140, 255), "soffit": (120, 170, 120, 255)}
+          "roof": (90, 110, 140, 255), "roof_ext": (200, 115, 95, 255)}
 
 
 def to_trimesh(part: ModelPart, scale: float, for_print: bool = False) -> trimesh.Trimesh:
@@ -36,7 +37,7 @@ def to_trimesh(part: ModelPart, scale: float, for_print: bool = False) -> trimes
     return mesh
 
 
-ORDER_3MF = ("foundation", "floor1", "roof", "soffit")   # 3MF のオブジェクトの並び（外壁は 1階に入る）
+ORDER_3MF = ("foundation", "floor1", "roof")   # 3MF のオブジェクトの並び（外壁は 1階に、屋根の外壁は屋根に入る）
 
 
 def _print_mesh(part: ModelPart, scale: float) -> dict:
@@ -57,7 +58,7 @@ def make_model(alias: str, company: str | None = None) -> tuple[dict, dict[str, 
     return applied, build_model(applied, rules), results, rules
 
 
-def write_outputs(alias: str, company: str | None = None) -> dict:
+def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = True) -> dict:
     b, parts, ov_results, rules = make_model(alias, company)
     scale = float(rules["model"]["scale"])
     dst = out_dir(alias) / "model"
@@ -75,7 +76,7 @@ def write_outputs(alias: str, company: str | None = None) -> dict:
         scene.add_geometry(assembled, node_name=key, geom_name=key)
         # 離れた塊は、同じオブジェクトに入る部品（1階の床・内壁と外壁）を合わせて数える（印刷では一体になるため）
         together = [q.solid for q in parts.values() if (q.object_key or q.key) == (part.object_key or key)]
-        obj = together[0] if len(together) == 1 else union_all(together)
+        obj = drop_specks(together[0] if len(together) == 1 else union_all(together))  # 合体の計算でできる厚みゼロのかけらは数えない
         checks += part_checks(key, part.label, printable, [x.volume() for x in obj.decompose()])
     scene.export(dst / "model.glb", include_normals=False)  # 法線は表示側で計算（trimesh は法線に scipy が要るため）
 
@@ -91,9 +92,17 @@ def write_outputs(alias: str, company: str | None = None) -> dict:
                                    **_print_mesh(p, scale)} for p in members]})
     write_3mf(dst / "model.3mf", objects,
               {"thickness": float(m["fuzzy_skin_thickness_mm"]), "point_distance": float(m["fuzzy_skin_point_distance_mm"])})
+    # Bambu Studio が入っていれば、Bambu 形式の 3MF（画面で開いても部品ごとの設定が残る）も作る（core/bambu.py）
+    bambu = to_bambu_3mf(dst / "model.3mf", dst / "model_bambu.3mf") if bambu_enabled else {"ok": False, "reason": "作らない設定"}
+    if bambu["ok"]:
+        checks.append({"part": "export", "level": "情報", "item": "bambu_3mf",
+                       "message": "Bambu 形式の 3MF（model_bambu.3mf）を作りました。外壁だけファジースキン（外側の輪郭）が設定済みです"})
+    else:
+        checks.append({"part": "export", "level": "情報", "item": "bambu_3mf",
+                       "message": f"{bambu['reason']}。model.3mf を開いたら、外壁の部品を選んで「その他」→「ファジースキン」→「外側の輪郭」にしてください"})
     summary = {"parts": {k: {"label": p.label, "fuzzy_skin": p.fuzzy_skin, "object": p.object_key or k,
                              "flip_for_print": p.flip_for_print, "notes": p.notes} for k, p in parts.items()},
-               "overrides": ov_results, "checks": checks}
+               "overrides": ov_results, "checks": checks, "bambu_3mf": bambu}
     (dst / "checks.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
 

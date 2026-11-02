@@ -45,7 +45,7 @@ def parts():
 
 
 def test_all_parts_are_closed_solids(parts):
-    assert set(parts) == {"foundation", "floor1", "exterior1", "roof"}
+    assert set(parts) == {"foundation", "floor1", "exterior1", "roof", "roof_ext"}
     for p in parts.values():
         assert not p.solid.is_empty() and str(p.solid.status()).endswith("NoError")
         assert p.solid.volume() > 0
@@ -56,11 +56,13 @@ def test_window_is_cut_and_walls_follow_roof(parts):
     # 窓の高さ（2000）で切った断面は、窓のない高さ（1000）より「窓の幅 1700 × 壁の厚み 160」だけ小さい
     diff = ext.slice(1000.0).area() - ext.slice(2000.0).area()
     assert abs(diff - 1700 * 160) < 1.0
-    # 西（x=0）は低く、東（x=6000）は高い：屋根の下の面 z = 0.15x + 3799 で切れている
+    # 1階の外壁は天井の高さ（FL 624 + 2400 = 3024）で切れている
     v = np.asarray(ext.to_mesh().vert_properties)[:, :3]
-    west_top = v[v[:, 0] < 1, 2].max()
-    east_top = v[v[:, 0] > 5999, 2].max()
-    assert abs(west_top - 3799) < 1 and abs(east_top - (0.15 * 6000 + 3799)) < 1
+    assert abs(v[:, 2].max() - 3024) < 1
+    # 天井より上は屋根の外壁：西（x=0）は低く、東（x=6000）は高い。屋根の下の面 z = 0.15x + 3799 で切れている
+    u = np.asarray(parts["roof_ext"].solid.to_mesh().vert_properties)[:, :3]
+    assert abs(u[:, 2].min() - 3024) < 1
+    assert abs(u[u[:, 0] < 1, 2].max() - 3799) < 1 and abs(u[u[:, 0] > 5999, 2].max() - (0.15 * 6000 + 3799)) < 1
 
 
 def test_door_cut_to_top_when_wall_above_is_too_thin(parts):
@@ -74,14 +76,14 @@ def test_door_cut_to_top_when_wall_above_is_too_thin(parts):
 def test_roof_has_corner_blocks_and_flip(parts):
     roof = parts["roof"]
     assert roof.flip_for_print
-    slab = 6000 * 4000 * 101  # 屋根板（鉛直の厚み 101）
-    assert slab < roof.solid.volume() < slab * 1.05   # 屋根板＋小さな三角ブロック
+    slab = 6100 * 4100 * 101  # 屋根板（4辺を 50mm ずつ出す。鉛直の厚み 101）
+    assert slab < roof.solid.volume() < slab * 1.25   # 屋根板＋三角（天井の高さから屋根の裏までの三角柱）
     assert any("4 か所" in n for n in roof.notes)
 
 
 def test_fuzzy_skin_only_on_exterior(parts):
-    assert [k for k, p in parts.items() if p.fuzzy_skin] == ["exterior1"]
-    assert parts["exterior1"].object_key == "floor1"
+    assert [k for k, p in parts.items() if p.fuzzy_skin] == ["exterior1", "roof_ext"]
+    assert parts["exterior1"].object_key == "floor1" and parts["roof_ext"].object_key == "roof"
 
 
 # ---------------------------------------------------------------- 物件A（実データ）
@@ -103,7 +105,7 @@ def test_real_model_export():
     cfg = ET.fromstring(z.read("Metadata/model_settings.config"))
     fuzzy = [p.find("metadata[@key='name']").get("value") for o in cfg for p in o.findall("part")
              if p.find("metadata[@key='fuzzy_skin']") is not None]
-    assert fuzzy == ["1階の外壁"]
+    assert fuzzy == ["1階の外壁", "屋根の外壁"]
 
 
 def test_test_pieces_fit_without_overlap():
