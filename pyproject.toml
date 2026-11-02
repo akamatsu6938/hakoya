@@ -1,7 +1,7 @@
 [project]
 name = "hakoya"
 version = "0.1.0"
-description = "HAKOYA・育ｮｱ螳ｶ・会ｼ啗alk in home 縺ｮ繝・・繧ｿ縺九ｉ 1/50 縺ｮ菴丞ｮ・ｨ｡蝙九・ 3D 繝励Μ繝ｳ繝育畑繝・・繧ｿ繧剃ｽ懊ｋ"
+description = "HAKOYA（箱家）：Walk in home のデータから 1/50 の住宅模型の 3D プリント用データを作る"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.0",
@@ -19,13 +19,13 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27"]
 
-# 繝輔か繝ｫ繝縺ｮ荳ｭ縺九ｉ蜍輔°縺吶た繝輔ヨ縺ｪ縺ｮ縺ｧ縲∬・蛻・・霄ｫ縺ｯ驛ｨ蜩√→縺励※蜿悶ｊ莉倥￠縺ｪ縺・ｼ医Λ繧､繝悶Λ繝ｪ縺縺大・繧後ｋ・・[tool.setuptools]
+# フォルダの中から動かすソフトなので、自分自身は部品として取り付けない（ライブラリだけ入れる）
+[tool.setuptools]
 packages = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "slow: 譎る俣縺ｮ縺九°繧九ユ繧ｹ繝茨ｼ育ｷｨ髮・・縺溘・縺ｮ閾ｪ蜍輔ユ繧ｹ繝医〒縺ｯ鬟帙・縺呻ｼ・,
-    "realdata: data/ 縺ｮ螳溘ョ繝ｼ繧ｿ繧剃ｽｿ縺・ユ繧ｹ繝茨ｼ・ata/ 縺後↑縺代ｌ縺ｰ鬟帙・縺呻ｼ・,
+    "slow: 時間のかかるテスト（編集のたびの自動テストでは飛ばす）",
+    "realdata: data/ の実データを使うテスト（data/ がなければ飛ばす）",
 ]
-
