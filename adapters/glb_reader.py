@@ -107,6 +107,26 @@ def _read_accessor(gltf: GLTF2, blob: bytes, index: int) -> np.ndarray:
     return arr.reshape(acc.count, ncomp) if ncomp > 1 else arr
 
 
+def _collect(gltf: GLTF2, blob: bytes, index: int, m: np.ndarray, part: Part) -> None:
+    """ノードの形（三角形）を部材に足す。子のノードがあれば、行列をかけ合わせて同じ部材に足す。
+    ★物件A は入れ子なし。物件B は照明（typeELight）の下に子のノードが1つあった（2026-11-03）。"""
+    node = gltf.nodes[index]
+    if node.mesh is not None:
+        for prim in gltf.meshes[node.mesh].primitives:
+            if prim.mode not in (None, 4):  # 三角形だけ
+                continue
+            pos = _read_accessor(gltf, blob, prim.attributes.POSITION).astype(np.float64)
+            pos = pos @ m[:3, :3].T + m[:3, 3]
+            if prim.indices is not None:
+                tri = _read_accessor(gltf, blob, prim.indices).astype(np.int64).reshape(-1, 3)
+            else:
+                tri = np.arange(len(pos)).reshape(-1, 3)
+            mat = gltf.materials[prim.material].name if prim.material is not None else ""
+            part.primitives.append(Primitive(material=mat or "", code=material_code(mat), vertices=pos, triangles=tri))
+    for k in node.children or []:
+        _collect(gltf, blob, k, m @ _node_matrix(gltf.nodes[k]), part)
+
+
 def read_glb(path: Path) -> GlbModel:
     gltf = GLTF2.load_binary(str(path))
     blob = gltf.binary_blob()
@@ -120,22 +140,8 @@ def read_glb(path: Path) -> GlbModel:
     parts: list[Part] = []
     for child in pobj.children or []:
         node = gltf.nodes[child]
-        m = pobj_m @ _node_matrix(node)
         part = Part(node=child, name=node.name or "", type_code=type_code(node.name or ""))
-        if node.mesh is not None:
-            for prim in gltf.meshes[node.mesh].primitives:
-                if prim.mode not in (None, 4):  # 三角形だけ
-                    continue
-                pos = _read_accessor(gltf, blob, prim.attributes.POSITION).astype(np.float64)
-                pos = pos @ m[:3, :3].T + m[:3, 3]
-                if prim.indices is not None:
-                    tri = _read_accessor(gltf, blob, prim.indices).astype(np.int64).reshape(-1, 3)
-                else:
-                    tri = np.arange(len(pos)).reshape(-1, 3)
-                mat = gltf.materials[prim.material].name if prim.material is not None else ""
-                part.primitives.append(Primitive(material=mat or "", code=material_code(mat), vertices=pos, triangles=tri))
-        if node.children:
-            raise ValueError(f"部材ノード #{child} の下にさらにノードがあります（想定外の構成）。")
+        _collect(gltf, blob, child, pobj_m @ _node_matrix(node), part)
         parts.append(part)
 
     extras = (gltf.asset.extras or {}) if gltf.asset else {}

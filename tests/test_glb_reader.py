@@ -58,6 +58,20 @@ def test_material_code_and_source(model):
     assert model.parts[1].primitives[0].code is None  # Bui… でないマテリアル
 
 
+def test_nested_nodes_are_merged_into_the_part(tmp_path):
+    """部材ノードの下に子のノードがあれば（物件B の照明）、行列をかけ合わせて同じ部材の形に足す。"""
+    p = tmp_path / "入れ子.glb"
+    _make_glb(p)
+    g = GLTF2.load_binary(str(p))
+    g.nodes[3].children = [4]                                                  # 家具の下に子を1つ
+    g.nodes.append(Node(name="", mesh=0, matrix=[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 500, 0, 1]))   # Y+500
+    g.save_binary(str(p))
+    m = read_glb(p)
+    assert len(m.parts) == 2 and len(m.parts[1].primitives) == 2
+    lo, hi = m.parts[1].bounds()
+    assert np.allclose(lo, [1000, 0, 624]) and np.allclose(hi, [1100, 600, 624])  # 子は 親（X+1000・Z+624）＋自分（Y+500）
+
+
 def test_coordinates_in_pobj_frame(model):
     """root の回転・×0.001 はかけず、部材の行列（移動）だけかける。"""
     lo, hi = model.parts[0].bounds()

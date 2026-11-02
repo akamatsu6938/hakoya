@@ -518,7 +518,9 @@ def merge_collinear(walls: list[Wall], region: Polygon | None, max_gap: float = 
     out: list[Wall] = []
     for g in groups:
         d, off, n = _line_key(g[0])
-        spans = sorted((min(np.dot(w.start, d), np.dot(w.end, d)), max(np.dot(w.start, d), np.dot(w.end, d)), w) for w in g)
+        # 範囲（始まり・終わり）だけで並べる。★同じ範囲の壁が2つあると、壁そのものを比べてエラーになった（物件B、2026-11-03）
+        spans = sorted(((min(np.dot(w.start, d), np.dot(w.end, d)), max(np.dot(w.start, d), np.dot(w.end, d)), w) for w in g),
+                       key=lambda s: (s[0], s[1]))
         cur_lo, cur_hi, members = spans[0][0], spans[0][1], [spans[0][2]]
         for lo, hi, w in spans[1:]:
             join = lo <= cur_hi + 1.0

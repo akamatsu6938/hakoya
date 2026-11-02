@@ -46,6 +46,14 @@ def test_two_levels_are_split():
 
 def test_rule_mismatch_is_reported():
     m = _two_story_model()
-    rules = {"levels": {"gl_to_foundation_top_mm": 500, "gl_to_1fl_mm": 624, "ceiling_height_mm": 2400}}
+    rules = {"levels": {"gl_to_foundation_top_mm": 500, "gl_to_1fl_mm": 624, "ceiling_height_mm": 2400,
+                        "story_height_mm": 3000, "story_height_choices_mm": [2850, 3000]}}
     checks = compare_with_rules(detect_ground(m), detect_levels(m), rules)
-    assert [c["match"] for c in checks] == [False, True, True]
+    # 階高（1階の床→2階の床）も会社ルールと比べる。物件ごとに変わる値なので、選択肢にあれば食い違いにしない
+    assert [c["match"] for c in checks] == [False, True, True, True, True]
+    story = checks[3]
+    assert story["item"] == "1階の階高（1階の床→2階の床）" and (story["glb_mm"], story["rule_mm"]) == (2850, 3000)
+    assert "物件ごとに変わる" in story["note"] and checks[4]["item"] == "2階の天井高"
+    # 選択肢にない階高は食い違いとして出す
+    rules["levels"]["story_height_choices_mm"] = [3000]
+    assert compare_with_rules(detect_ground(m), detect_levels(m), rules)[3]["match"] is False

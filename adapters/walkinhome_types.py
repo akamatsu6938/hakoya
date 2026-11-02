@@ -47,6 +47,7 @@ PART_TYPES: dict[str, PartType] = {
     "typeESiki": PartType("敷地", ROLE_SITE),
     "typeEPark": PartType("駐車場の床", ROLE_EXCLUDE),
     "typeEInte": PartType("家具・設備", ROLE_EXCLUDE),
+    "typeELight": PartType("照明", ROLE_EXCLUDE),        # 物件B で見つけた（子のノードを持つ）
     "typeEExte": PartType("外構", ROLE_EXCLUDE),
     "typeETree": PartType("植栽", ROLE_EXCLUDE),
 }

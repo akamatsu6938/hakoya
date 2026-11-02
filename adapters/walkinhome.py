@@ -131,9 +131,25 @@ def compare_with_rules(ground: dict, levels: list[dict], rules: dict) -> list[di
         pairs.append(("levels.gl_to_1fl_mm", levels[0]["fl_mm"] - ground["gl_mm"], "1FL（GL から）"))
         if "ceiling_mm" in levels[0]:
             pairs.append(("levels.ceiling_height_mm", levels[0]["ceiling_mm"], "1階の天井高"))
+    # 2階から上：階高（下の階の床 → この階の床）と天井高。
+    # ★階高は物件ごとに変わる（物件A 2,850・物件B 3,000）。比べていなかったため、物件B で気づけなかった（2026-11-03）
+    def jp(name: str) -> str:            # 「2F」→「2階」
+        return f"{name[:-1]}階" if name.endswith("F") and name[:-1].isdigit() else name
+    for lower, upper in zip(levels, levels[1:]):
+        lo, up = jp(lower["name"]), jp(upper["name"])
+        pairs.append(("levels.story_height_mm", upper["fl_mm"] - lower["fl_mm"], f"{lo}の階高（{lo}の床→{up}の床）"))
+        if "ceiling_mm" in upper:
+            pairs.append(("levels.ceiling_height_mm", upper["ceiling_mm"], f"{up}の天井高"))
+    # 階高は物件ごとに変わる（作者 2026-11-03：基礎高・壁厚は同じだが、階高は物件で変わる）。
+    # 会社ルールの選択肢にある値なら食い違いにしない。模型はいつも glb の値で作る
+    choices = (rules.get("levels") or {}).get("story_height_choices_mm") or []
     for key, measured, label in pairs:
         expected = rule(rules, key)
-        out.append({"item": label, "glb_mm": measured, "rule": key, "rule_mm": expected, "match": measured == expected})
+        row = {"item": label, "glb_mm": measured, "rule": key, "rule_mm": expected, "match": measured == expected}
+        if key == "levels.story_height_mm" and measured != expected and measured in choices:
+            row["match"] = True
+            row["note"] = f"階高は物件ごとに変わる（会社ルールの選択肢：{'・'.join(f'{c:,}' for c in choices)}）。glb の値を使う"
+        out.append(row)
     return out
 
 
@@ -449,7 +465,7 @@ def _print_summary(alias: str, b: dict) -> None:
     print("  会社ルールとの照合:")
     for c in b["rule_checks"]:
         mark = "一致" if c["match"] else "★食い違い"
-        print(f"    {c['item']}: glb {c['glb_mm']} / ルール {c['rule_mm']} → {mark}")
+        print(f"    {c['item']}: glb {c['glb_mm']} / ルール {c['rule_mm']} → {mark}" + (f"（{c['note']}）" if c.get("note") else ""))
     s = b.get("wall_stats")
     if s:
         print(f"  壁: {s['count']}  外形 {s['outer_size_mm'][0]}×{s['outer_size_mm'][1]}mm")
