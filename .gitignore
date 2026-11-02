@@ -1,0 +1,24 @@
+# このファイルは、リポジトリに置くときに名前を「.gitignore」に変える
+
+# 実物の図面・glb・物件の情報（絶対にコミットしない）
+data/
+*.jww
+*.jwc
+*.glb
+*.3mf
+local_paths.yaml
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# exe 化の作業フォルダ（PyInstaller）
+build/
+dist/
+
+# 秘密情報
+.env
+*.key

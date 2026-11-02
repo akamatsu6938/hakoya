@@ -1,0 +1,25 @@
+[project]
+name = "hakoya"
+version = "0.1.0"
+description = "HAKOYA（箱家）：Walk in home のデータから 1/50 の住宅模型の 3D プリント用データを作る"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",
+    "shapely>=2.0",
+    "pygltflib>=1.16",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+# フォルダの中から動かすソフトなので、自分自身は部品として取り付けない（ライブラリだけ入れる）
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: 時間のかかるテスト（編集のたびの自動テストでは飛ばす）",
+    "realdata: data/ の実データを使うテスト（data/ がなければ飛ばす）",
+]

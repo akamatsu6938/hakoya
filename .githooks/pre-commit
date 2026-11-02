@@ -1,0 +1,11 @@
+#!/bin/sh
+# コミットの前の検査（施主名・APIキー・図面や画像の混入を止める）。
+# 有効にするには、リポジトリで1回だけ: git config core.hooksPath .githooks
+ROOT="$(git rev-parse --show-toplevel)"
+PY="$ROOT/.venv/Scripts/python.exe"
+[ -x "$PY" ] || PY="$ROOT/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  echo "[コミット前の検査] .venv が見つかりません。README の手順で仮想環境を作ってください。"
+  exit 1
+fi
+PYTHONUTF8=1 exec "$PY" "$ROOT/tools/precommit_check.py"
