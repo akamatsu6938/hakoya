@@ -17,6 +17,7 @@ COLORS = {"exterior": "#d64545", "standalone": "#3355dd", "interior": "#1f9d55"}
 LABELS = {"exterior": "外壁", "standalone": "単独の壁", "interior": "内壁"}
 SCALE = 0.08     # 1mm → 0.08px（10m が 800px）
 MARGIN = 60
+LIST_WIDTH = 400  # 右側の壁の一覧の幅
 
 
 def wall_corners(w: dict) -> list[tuple[float, float]]:
@@ -32,8 +33,9 @@ def render_svg(b: dict, title: str) -> str:
     pts += [tuple(p) for r in b.get("rooms", []) for p in r["polygon"]]
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-    W = (x1 - x0) * SCALE + MARGIN * 2
-    H = (y1 - y0) * SCALE + MARGIN * 2 + 70
+    plan_w = (x1 - x0) * SCALE + MARGIN * 2
+    W = plan_w + LIST_WIDTH
+    H = max((y1 - y0) * SCALE + MARGIN * 2 + 70, MARGIN + 40 + 16 * (len(b["walls"]) + len(b.get("unresolved", [])) + 2))
 
     def P(x, y):  # 平面図の向き（Y が上）で描く
         return f"{(x - x0) * SCALE + MARGIN:.1f},{(y1 - y) * SCALE + MARGIN:.1f}"
@@ -54,7 +56,7 @@ def render_svg(b: dict, title: str) -> str:
                    f'{w.get("source", "")}</title></polygon>')
         mx, my = (w["start"][0] + w["end"][0]) / 2, (w["start"][1] + w["end"][1]) / 2
         out.append(f'<text x="{P(mx, my).split(",")[0]}" y="{P(mx, my).split(",")[1]}" font-size="10" '
-                   f'fill="{c}" text-anchor="middle" dy="-3">{w["id"]}</text>')
+                   f'fill="{c}" text-anchor="middle" dy="-3">{w["id"]} {w["thickness_mm"]:g}</text>')
     for u in b.get("unresolved", []):
         a, e = P(*u["start"]), P(*u["end"])
         out.append(f'<line x1="{a.split(",")[0]}" y1="{a.split(",")[1]}" x2="{e.split(",")[0]}" y2="{e.split(",")[1]}" '
@@ -70,7 +72,18 @@ def render_svg(b: dict, title: str) -> str:
                f'<text x="{lx + 36}" y="{ly + 10}" font-size="12">未解決の所</text>')
     lx += 130
     out.append(f'<text x="{lx}" y="{ly + 10}" font-size="12">破線＝途中の高さから始まる壁</text>')
-    sx = W - MARGIN - 1000 * SCALE
+    # 右側：壁の一覧（マウスを使わなくても読めるように）
+    tx, ty = plan_w + 10, MARGIN
+    out.append(f'<text x="{tx}" y="{ty}" font-size="13" font-weight="bold">壁の一覧（番号・種類・厚み・下端）</text>')
+    for w in b["walls"]:
+        ty += 16
+        extra = "　途中から始まる壁" if w["bottom_mm"] > 1500 else ""
+        out.append(f'<text x="{tx}" y="{ty}" font-size="12" fill="{COLORS[w["kind"]]}">'
+                   f'{w["id"]}　{LABELS[w["kind"]]}　厚み {w["thickness_mm"]:g}mm　下端 {w["bottom_mm"]}{extra}</text>')
+    for u in b.get("unresolved", []):
+        ty += 16
+        out.append(f'<text x="{tx}" y="{ty}" font-size="12" fill="#ff8800">{u["id"]}　未解決（壁があるか要確認）　幅 {u["width_mm"]}mm</text>')
+    sx = plan_w - MARGIN - 1000 * SCALE
     out.append(f'<line x1="{sx}" y1="{ly + 25}" x2="{sx + 1000 * SCALE}" y2="{ly + 25}" stroke="black" stroke-width="2"/>'
                f'<text x="{sx}" y="{ly + 20}" font-size="11">1m</text>')
     out.append("</svg>")
