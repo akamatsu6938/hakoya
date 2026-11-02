@@ -1,0 +1,15 @@
+# 仕事ごとのモデルと考える深さ（SPEC §7-2）。検品の当たり具合と費用を見ながら調整する。
+# claude_code：自分用（作者の Claude のプラン）。api_key：社外用（使う会社の API キー）。
+claude_code:
+  inspect_face:   {model: claude-opus-5-5, effort: high}     # 面ごとの検品（サブエージェント）
+  inspect_merge:  {model: claude-opus-5-5, effort: xhigh}    # 指摘のまとめ役
+  lasso:          {model: claude-opus-5-5, effort: high}     # 囲んで直す
+  room_names:     {model: claude-sonnet-5-5, effort: low}    # 部屋の名前
+api_key:
+  inspect_face:   {model: claude-sonnet-5-5, effort: medium}
+  inspect_merge:  {model: claude-opus-5-5, effort: high}
+  lasso:          {model: claude-sonnet-5-5, effort: medium}
+  room_names:     {model: claude-haiku-5-5, effort: low}
+limits:
+  max_budget_usd: 3.0     # 1回の検品の費用の上限（安全装置。プランでも目安として効く）
+  max_turns: 60           # まとめ役のやりとりの上限
