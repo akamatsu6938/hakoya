@@ -54,9 +54,24 @@ def classify(part: Part, sill: float, fl: float) -> tuple[str, str]:
     mado = codes.count("MADO")
     if mado >= 2:
         return "window", "sliding"             # 引き違い（模型では中央に縦桟1本。SPEC §8）
-    if mado == 0:
-        return "window", "fixed"               # FIX（枠だけ）
-    return "window", "unknown"
+    return "window", "fixed"                   # FIX（枠だけ）。★障子1枚の窓も FIX（物件Aで 作者確認）
+
+
+def snap_door_heads(items: list[dict], fl: float, door_top_fl: float, tol: float = 50.0) -> None:
+    """室内のドアの上端が会社ルールの値（door_top_fl）と tol 以内の差なら、ルールの値にそろえる。
+
+    ★物件Aの開き戸は glb で FL+2370 だったが、作者は「室内の建具はすべて 2400 のつもり」。
+    差が 50mm（模型で 1mm）以内なら入力のぶれとみなす。それより大きい差は glb のまま（検品で確かめる）。
+    """
+    for o in items:
+        if o["kind"] != "door":
+            continue
+        diff = door_top_fl - o["head_fl_mm"]
+        if 0 < abs(diff) <= tol:
+            o.setdefault("assumptions", []).append(
+                f"door_top: glb の上端 FL+{o['head_fl_mm']:.0f} を、会社ルール openings.door_top_fl_mm（FL+{door_top_fl:.0f}）にそろえた")
+            o["head_fl_mm"] = door_top_fl
+            o["head_mm"] = fl + door_top_fl
 
 
 def assign_wall(fp: Polygon, sill: float, head: float, walls: list[Wall]) -> Wall | None:

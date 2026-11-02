@@ -5,7 +5,7 @@ import numpy as np
 from shapely.geometry import box
 
 from adapters.glb_reader import Part, Primitive
-from adapters.openings import assign_wall, classify, hole
+from adapters.openings import assign_wall, classify, hole, snap_door_heads
 from adapters.roof import detect_roof
 from adapters.walls import Wall
 
@@ -78,3 +78,12 @@ def test_non_planar_roof_is_unknown():
     p = _roof_part()
     p.primitives[0].vertices[0, 2] += 500  # 上の面を折る（片流れでない）
     assert detect_roof(p, box(-11010, -11010, -817, 90))["shape"] == "unknown"
+
+
+def test_door_head_snaps_to_rule_only_when_close():
+    items = [{"kind": "door", "head_fl_mm": 2370.0, "head_mm": 2994.0},
+             {"kind": "door", "head_fl_mm": 2000.0, "head_mm": 2624.0},
+             {"kind": "window", "head_fl_mm": 2370.0, "head_mm": 2994.0}]
+    snap_door_heads(items, 624.0, 2400.0)
+    assert [o["head_fl_mm"] for o in items] == [2400.0, 2000.0, 2370.0]
+    assert items[0]["head_mm"] == 3024.0 and "assumptions" in items[0]

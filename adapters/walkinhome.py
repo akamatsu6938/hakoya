@@ -308,6 +308,7 @@ def reconstruct(model: GlbModel, level: dict, rules: dict) -> dict:
         room_list.append({"source": src, "polygon": inner, "floor_mm": _min_floor_z(model, src, fl)})
     # 手順5：開口（どの壁の穴か）。屋根
     opening_list, orphans = op.openings(tate, all_walls, fl)
+    op.snap_door_heads(opening_list, fl, float(rule(rules, "openings.door_top_fl_mm")))
     roofs = model.by_role("roof")
     roof = detect_roof(roofs[0], exterior_fp) if roofs else {"shape": "unknown", "note": "屋根（typeEYane）がない"}
     if len(roofs) > 1:
@@ -384,7 +385,12 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
                       "offset_mm": round(o["offset_mm"], 1), "width_mm": round(o["width_mm"], 1),
                       "sill_mm": round(o["sill_mm"]), "head_mm": round(o["head_mm"]),
                       "sill_fl_mm": round(o["sill_fl_mm"]), "head_fl_mm": round(o["head_fl_mm"]),
-                      "center": _xy(o["center"]), "source": o["source"]} for i, o in enumerate(ops, 1)]
+                      "center": _xy(o["center"]), "source": o["source"],
+                      **({"assumption": o["assumptions"]} if o.get("assumptions") else {})}
+                     for i, o in enumerate(ops, 1)]
+    for oj in openings_json:
+        for a in oj.get("assumption", []):
+            assumptions.append({"field": f"openings[{oj['id']}]", "note": a})
     rooms_json = [{"id": f"R{i}", "level": levels[0]["name"], "polygon": _poly_coords(r["polygon"]),
                    "floor_mm": r["floor_mm"], "area_m2": round(r["polygon"].area / 1e6, 2), "source": r["source"]}
                   for i, r in enumerate(sorted(rec["rooms"], key=lambda r: r["source"]), 1)]
