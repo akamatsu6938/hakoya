@@ -177,6 +177,27 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
             cuts.append(prism(wall_rect(w, extra=40, t0=o["offset_mm"], t1=o["offset_mm"] + o["width_mm"]), sill, head))
         return s - union_all(cuts) if cuts else s
 
+    def window_frames(w: dict) -> list[Manifold]:
+        """窓の簡略化した枠（SPEC §8）：太さは最小の太さ、奥行きは壁の厚みの半分（壁の真ん中）。
+        引き違いは中央に縦桟1本、FIX は枠だけ。ガラスは入れない。"""
+        out = []
+        depth_extra = -w["thickness_mm"] / 2          # wall_rect の厚みの足し分（マイナスで薄くする）
+        for o in openings_by_wall.get(w["id"], []):
+            if o["kind"] != "window":
+                continue
+            a, wdt = float(o["offset_mm"]), float(o["width_mm"])
+            sill, head = float(o["sill_mm"]), float(o["head_mm"])
+            fw = min_feat
+            if wdt < 3 * fw or head - sill < 3 * fw:
+                continue
+            bars = [(a, a + wdt, sill, sill + fw), (a, a + wdt, head - fw, head),          # 下枠・上枠
+                    (a, a + fw, sill, head), (a + wdt - fw, a + wdt, sill, head)]          # 縦枠
+            if o.get("style") == "sliding":
+                mid = a + wdt / 2
+                bars.append((mid - fw / 2, mid + fw / 2, sill, head))                     # 中央の縦桟
+            out += [prism(wall_rect(w, extra=depth_extra, t0=t0, t1=t1), z0, z1) for t0, t1, z0, z1 in bars]
+        return out
+
     # 1階の外壁（ファジースキンの部品）
     exterior = union_all([wall_solid(w) for w in ext_walls])
 
@@ -185,6 +206,11 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     floor_poly = outline.difference(unary_union(doma)) if doma else outline
     floor1 = union_all([prism(floor_poly, ftop, fl)] + [wall_solid(w) for w in int_walls + std_in])
     floor1 = floor1 - exterior
+    # 窓の枠は「床・内壁」の部品に入れる（外壁の部品に入れると、ファジースキンで枠までざらざらになるため）
+    frames = [f for w in ext_walls + int_walls + std_in for f in window_frames(w)]
+    if frames:
+        floor1 = union_all([floor1] + frames)
+        notes["floor1"].append(f"窓の枠を作った（{sum(1 for o in b.get('openings', []) if o['kind'] == 'window')} か所。引き違いは中央に縦桟）")
     if doma:
         notes["floor1"].append(f"土間（床が FL より低い部屋）{len(doma)} か所は床の板を抜き、基礎のパーツに土間を作った")
 
