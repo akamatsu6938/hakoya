@@ -74,7 +74,11 @@ def get_building(ctx: ToolContext) -> dict:
         "foundation_top_mm": b["ground"]["foundation_top_mm"],
         "outer_size_mm": b.get("wall_stats", {}).get("outer_size_mm"),
         "walls": dict(walls), "openings": dict(ops),
-        "roof": {k: r.get(k) for k in ("shape", "pitch", "low_side", "thickness_mm", "eave_mm", "eave_with_gutter_mm")},
+        "roof": {**{k: r.get(k) for k in ("shape", "pitch", "low_side", "thickness_mm", "eave_mm", "eave_with_gutter_mm")},
+                 # ★説明がないと「軒の出が glb（樋込み 146mm）より短い」と誤って指摘された（検品 3回目 F2）
+                 "note": "eave_mm は glb の屋根板の出、eave_with_gutter_mm は軒樋を含めた出。樋・破風・鼻隠しは模型では省く"
+                         f"（include.gutter / fascia）。模型の屋根板は板金の分として4辺を model.roof_overhang_mm"
+                         f"（{ctx.rules['model'].get('roof_overhang_mm', 0)}mm）出す。横から見ると軒裏が細い帯に見えるのは正しい"},
         "company_rules": {"walls": ctx.rules["walls"], "openings": ctx.rules["openings"],
                           "ceiling_height_mm": ctx.rules["levels"]["ceiling_height_mm"]},
         "unresolved": b.get("unresolved", []),
