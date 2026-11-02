@@ -186,43 +186,56 @@ def _blocks(content) -> list[dict]:
     return out
 
 
+async def tool_loop(client, ctx: ToolContext, prompt: str, *, model: str, effort: str, system, tools: list[dict],
+                    meter: Meter, max_turns: int, on_turn=None, on_tool=None) -> tuple[str, str, int]:
+    """道具を使うやりとりを、終わるまで（または上限まで）回す。返り値：(最後の文章, 止まった理由, 回数)。
+    検品の面ごとの担当と、囲んで直すの両方で使う。"""
+    messages: list[dict] = [{"role": "user", "content": prompt}]
+    for turn in range(1, max_turns + 1):
+        meter.check()
+        # 指示（system）の終わりと、やりとりの最後に「覚えておく印」を付け、2回目からは安い料金で読み直させる
+        resp = await client.messages.create(model=model, max_tokens=MAX_TOKENS, system=system, tools=tools,
+                                            messages=messages, output_config={"effort": effort},
+                                            cache_control={"type": "ephemeral"})
+        cost = meter.add(model, resp.usage)
+        if on_turn:
+            on_turn(turn, resp, cost)
+        uses = [b for b in resp.content if b.type == "tool_use"]
+        if resp.stop_reason != "tool_use" or not uses:
+            return "\n".join(b.text for b in resp.content if b.type == "text").strip(), resp.stop_reason, turn
+        messages.append({"role": "assistant", "content": resp.content})     # 考えた中身も含め、そのまま返す
+        results = []
+        for b in uses:
+            if on_tool:
+                on_tool(b.name)
+            results.append(tool_result(ctx, b))
+        if turn == max_turns - 1:
+            results.append({"type": "text", "text": NUDGE})
+        messages.append({"role": "user", "content": results})
+    raise RuntimeError(f"やりとりの上限（{max_turns} 回）までに終わりませんでした")
+
+
 async def run_face(client, ctx: ToolContext, face: str, *, model: str, effort: str, system, tools: list[dict],
                    meter: Meter, log, max_turns: int) -> dict:
-    """1つの面の検品担当。道具を使うやりとりを、終わるまで（または上限まで）回し、報告の文章を返す。"""
-    messages: list[dict] = [{"role": "user", "content": face_prompt(face)}]
+    """1つの面の検品担当。道具を使うやりとりを回し、報告の文章を返す。"""
     log({"type": "FaceStarted", "face": face})
     try:
-        for turn in range(1, max_turns + 1):
-            meter.check()
-            # 指示（system）の終わりと、やりとりの最後に「覚えておく印」を付け、2回目からは安い料金で読み直させる
-            resp = await client.messages.create(model=model, max_tokens=MAX_TOKENS, system=system, tools=tools,
-                                                messages=messages, output_config={"effort": effort},
-                                                cache_control={"type": "ephemeral"})
-            cost = meter.add(model, resp.usage)
-            log({"type": "FaceTurn", "face": face, "turn": turn, "stop_reason": resp.stop_reason,
-                 "cost_usd": round(cost, 4), "content": _blocks(resp.content)})
-            uses = [b for b in resp.content if b.type == "tool_use"]
-            if resp.stop_reason != "tool_use" or not uses:
-                text = "\n".join(b.text for b in resp.content if b.type == "text").strip()
-                status, note = "済み", ""
-                if resp.stop_reason == "refusal":
-                    status, note = "失敗", "Claude が答えを断りました"
-                elif resp.stop_reason == "max_tokens":
-                    note = "返事が長すぎて、途中で切れました"
-                log({"type": "FaceDone", "face": face, "status": status, "summary": (note or text)[:200]})
-                return {"face": face, "status": status, "report": text, "note": note, "turns": turn}
-            messages.append({"role": "assistant", "content": resp.content})     # 考えた中身も含め、そのまま返す
-            results = []
-            for b in uses:
-                log({"type": "FaceTool", "face": face, "tool": b.name})
-                results.append(tool_result(ctx, b))
-            if turn == max_turns - 1:
-                results.append({"type": "text", "text": NUDGE})
-            messages.append({"role": "user", "content": results})
-        raise RuntimeError(f"面「{FACES[face]}」の検品が、やりとりの上限（{max_turns} 回）までに終わりませんでした")
+        text, stop, turns = await tool_loop(
+            client, ctx, face_prompt(face), model=model, effort=effort, system=system, tools=tools, meter=meter,
+            max_turns=max_turns,
+            on_turn=lambda turn, resp, cost: log({"type": "FaceTurn", "face": face, "turn": turn, "stop_reason": resp.stop_reason,
+                                                  "cost_usd": round(cost, 4), "content": _blocks(resp.content)}),
+            on_tool=lambda name: log({"type": "FaceTool", "face": face, "tool": name}))
     except Exception as e:
         log({"type": "FaceDone", "face": face, "status": "失敗", "error": japanese_error(e), "detail": repr(e)[:500]})
         raise
+    status, note = "済み", ""
+    if stop == "refusal":
+        status, note = "失敗", "Claude が答えを断りました"
+    elif stop == "max_tokens":
+        note = "返事が長すぎて、途中で切れました"
+    log({"type": "FaceDone", "face": face, "status": status, "summary": (note or text)[:200]})
+    return {"face": face, "status": status, "report": text, "note": note, "turns": turns}
 
 
 async def merge(client, ctx: ToolContext, reports: list[dict], *, model: str, effort: str, system: str,

@@ -260,6 +260,69 @@ def inspection_image(alias: str, view: str, hl: str = "", source: str = "model")
     return FileResponse(res["image_path"], media_type="image/png", filename=f"hakoya_{view}_{source}.png")
 
 
+# ---------------------------------------------------------------- 囲んで直す（SPEC §9-3）
+
+class LassoIn(BaseModel):
+    polygon: list[list[float]]           # 囲み（平面の mm。平面図の画面が座標を直して送る）
+    text: str = ""
+    connection: str = "off"
+
+
+@app.post("/api/lasso/{alias}/select")
+def lasso_select(alias: str, body: LassoIn):
+    """囲みの中の部材（コードが決める）。"""
+    _check_alias(alias)
+    from core import lasso as geo
+    b, _ = _effective(alias)
+    try:
+        sel = geo.select(b, body.polygon)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _safe_json({"selection": geo.describe(b, sel)})
+
+
+@app.post("/api/lasso/{alias}/ask")
+def lasso_ask(alias: str, body: LassoIn):
+    """囲みと一言を Claude に渡し、直す案か質問を受け取る（保存はしない）。30秒〜数分かかる。"""
+    import asyncio
+    _check_alias(alias)
+    _effective(alias)                                   # 組み立て前なら 409
+    if body.connection not in ("claude_code", "api_key", "off"):
+        raise HTTPException(400, "connection は claude_code・api_key・off のどれかです")
+    if body.connection == "api_key" and not secret_store.has_api_key():
+        raise HTTPException(409, "API キーが設定されていません。「設定」タブで API キーを入れてください")
+    if RUNS.get(alias, {}).get("running"):
+        raise HTTPException(409, "この物件はいま検品中です。検品が終わってから頼んでください")
+    from core.ai.lasso import run_lasso
+    try:
+        res = asyncio.run(run_lasso(alias, body.connection, body.polygon, body.text))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    return _safe_json(res)
+
+
+class LassoApproveIn(BaseModel):
+    target: str
+    field: str
+    value_source: str
+    reason: str = ""
+
+
+@app.post("/api/lasso/{alias}/approve")
+def lasso_approve(alias: str, body: LassoApproveIn):
+    """直す案を承認して修正として記録し、模型を組み直す。数値はサーバーが出どころから計算し直す。"""
+    _check_alias(alias)
+    from core.ai.lasso import approve
+    try:
+        item = approve(alias, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    summary = write_outputs(alias)
+    return _safe_json({"override": item, "checks": summary["checks"]})
+
+
 # ---------------------------------------------------------------- 設定（SPEC §10 の 8）
 
 @app.get("/api/settings")

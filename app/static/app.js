@@ -79,6 +79,7 @@ function num(v) { return Math.round(v * 10) / 10; }
 function editableRow(cells, onApprove) {
   // cells: [{text}] または [{field, value}]（入力欄）。値を変えると「承認」の行が出る
   const tr = document.createElement('tr');
+  tr.dataset.id = cells[0].text;                   // 部材の番号（囲んで直すで行に色を付ける）
   const inputs = [];
   for (const c of cells) {
     const td = document.createElement('td');
@@ -167,10 +168,21 @@ function renderDownloads() {
 const VIEW_OF = { S: 'S', N: 'N', E: 'E', W: 'W', plan: 'plan', print: 'plan' };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+const FIELD = { thickness_mm: '厚み', width_mm: '幅', offset_mm: '壁の端からの位置', sill_fl_mm: '下端 FL+', head_fl_mm: '上端 FL+' };
+
+function sourceText(vs) {   // 数値の出どころを日本語にする（例：majority:exterior → 外壁の多数派）
+  const s = String(vs ?? '');
+  if (s.startsWith('majority:')) return `${KIND[s.slice(9)] || s.slice(9)}の多数派`;
+  if (s.startsWith('rule:')) return `会社ルール（${s.slice(5)}）`;
+  if (s.startsWith('human:number:')) return `人が書いた数値 ${s.slice(13)}`;
+  if (s === 'glb') return '元の形（glb）';
+  return s;
+}
+
 function proposalText(p) {
   if (!p) return '';
   if (p.field === '_delete') return `${esc(p.target)} を取り除く`;
-  return `${esc(p.target)} の ${esc(p.field)}：${esc(p.from)} → <b>${esc(p.to)}</b>（数値の出どころ：${esc(p.value_source)}）`;
+  return `${esc(p.target)} の ${esc(FIELD[p.field] || p.field)}：${esc(p.from)} → <b>${esc(p.to)}</b>（数値の出どころ：${esc(sourceText(p.value_source))}）`;
 }
 
 function findingItem(f, withActions) {
@@ -303,6 +315,133 @@ $('#apikey-del').addEventListener('click', async () => {
   await renderSettings();
 });
 renderSettings();
+
+// ---------------------------------------------------------------- 囲んで直す（平面図、SPEC §9-3）
+// 囲みの中の部材はサーバー（コード）が決める。画面は囲んだ点を平面の mm に直して送るだけ。
+const lasso = { on: false, pts: [], line: null, polygon: null, selection: [] };
+const planSvg = () => $('#plan svg');
+
+function svgPoint(svg, e) {
+  const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function toMm(svg, x, y) {   // 平面図の点 → 平面の mm（tools/plan_preview.py が書いた data-* を使う）
+  const d = svg.dataset; const s = Number(d.scale); const m = Number(d.margin);
+  return [(x - m) / s + Number(d.x0), Number(d.y1) - (y - m) / s];
+}
+
+function setLassoMode(on) {
+  lasso.on = on;
+  $('#lasso-toggle').classList.toggle('on', on);
+  $('#lasso-toggle').textContent = on ? '囲むのをやめる' : '囲む';
+  $('#plan').classList.toggle('lassoing', on);
+}
+
+function clearLasso() {
+  lasso.pts = []; lasso.polygon = null; lasso.selection = [];
+  if (lasso.line) { lasso.line.remove(); lasso.line = null; }
+  document.querySelectorAll('#plan [data-id].picked').forEach((el) => el.classList.remove('picked'));
+  $('#lasso-panel').hidden = true; $('#lasso-result').innerHTML = '';
+}
+
+$('#lasso-toggle').addEventListener('click', () => { if (planSvg()) setLassoMode(!lasso.on); });
+$('#lasso-clear').addEventListener('click', clearLasso);
+
+$('#plan').addEventListener('pointerdown', (e) => {
+  const svg = planSvg(); if (!lasso.on || !svg) return;
+  e.preventDefault(); clearLasso();
+  lasso.line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  lasso.line.setAttribute('class', 'lasso-line'); svg.appendChild(lasso.line);
+  const p = svgPoint(svg, e); lasso.pts = [[p.x, p.y]];
+  $('#plan').setPointerCapture(e.pointerId);
+});
+$('#plan').addEventListener('pointermove', (e) => {
+  const svg = planSvg(); if (!lasso.on || !lasso.line || !svg) return;
+  const p = svgPoint(svg, e); const last = lasso.pts[lasso.pts.length - 1];
+  if (Math.hypot(p.x - last[0], p.y - last[1]) < 3) return;
+  lasso.pts.push([p.x, p.y]);
+  lasso.line.setAttribute('points', lasso.pts.map((q) => q.join(',')).join(' '));
+});
+$('#plan').addEventListener('pointerup', async () => {
+  const svg = planSvg(); if (!lasso.on || !lasso.line || !svg) return;
+  if (lasso.pts.length < 3) { clearLasso(); return; }
+  lasso.line.setAttribute('points', lasso.pts.concat([lasso.pts[0]]).map((q) => q.join(',')).join(' '));   // 囲みを閉じる
+  setLassoMode(false);
+  lasso.polygon = lasso.pts.map(([x, y]) => toMm(svg, x, y));
+  try {
+    const res = await call('POST', '/api/lasso/{a}/select', { polygon: lasso.polygon });
+    showPicked(res.selection);
+  } catch (e) { setStatus('囲みを読めませんでした：' + e.message, 'err'); clearLasso(); }
+});
+
+function showPicked(rows) {
+  lasso.selection = rows;
+  for (const r of rows) document.querySelectorAll(`#plan [data-id="${CSS.escape(r.id)}"]`).forEach((el) => el.classList.add('picked'));
+  $('#lasso-picked').innerHTML = rows.length
+    ? '<b>囲んだ部材</b>' + rows.map((r) => `<div><span class="tag">${esc(r.id)}</span>${esc(r.label)}　${esc(r.text)}</div>`).join('')
+    : '<span class="hint">囲みの中に部材がありません。壁や窓をぐるっと囲んでください。</span>';
+  $('#lasso-panel').hidden = false; $('#lasso-result').innerHTML = '';
+  $('#lasso-ask').disabled = !rows.length; $('#lasso-table').disabled = !rows.length;
+  if (rows.length) $('#lasso-text').focus();
+}
+
+$('#lasso-table').addEventListener('click', () => {   // AI なし：囲んだ部材の表の行を開く
+  document.querySelector('.tabs button[data-tab="sedit"]').click();
+  document.querySelectorAll('#sedit tr.picked').forEach((tr) => tr.classList.remove('picked'));
+  const ids = new Set(lasso.selection.map((r) => r.id));
+  const rows = [...document.querySelectorAll('#sedit tr[data-id]')].filter((tr) => ids.has(tr.dataset.id));
+  rows.forEach((tr) => tr.classList.add('picked'));
+  if (rows[0]) rows[0].scrollIntoView({ block: 'center' });
+  setStatus(`囲んだ部材 ${rows.length} 件の行に色を付けました。値を変えて「承認」で直せます`, 'ok');
+});
+
+async function askLasso(extra = '') {
+  const text = $('#lasso-text').value.trim();
+  if (!text) { setStatus('一言を書いてから「Claude に頼む」を押してください', 'err'); return; }
+  const connection = $('#lasso-conn').value;
+  if (connection === 'api_key' && !confirm('API キーで Claude に頼みます。キーの持ち主に API の料金がかかります（1回の上限 $1.00）。よろしいですか？')) return;
+  $('#lasso-ask').disabled = true;
+  setStatus('Claude が考えています（30秒〜数分）…', 'busy');
+  try {
+    const res = await call('POST', '/api/lasso/{a}/ask', { polygon: lasso.polygon, text: text + extra, connection });
+    renderLassoResult(res);
+    setStatus(`Claude の答えが届きました${res.cost_usd ? `（費用の目安 $${Number(res.cost_usd).toFixed(2)}）` : ''}`, 'ok');
+  } catch (e) { setStatus('頼めませんでした：' + e.message, 'err'); }
+  $('#lasso-ask').disabled = false;
+}
+$('#lasso-ask').addEventListener('click', () => askLasso());
+
+function renderLassoResult(res) {
+  const box = $('#lasso-result'); box.innerHTML = '';
+  if (res.message) box.insertAdjacentHTML('beforeend', `<p class="msg">${esc(res.message)}</p>`);
+  for (const p of res.proposals || []) {
+    const div = document.createElement('div'); div.className = 'prop';
+    div.innerHTML = `直す案：${proposalText(p)}<div class="meta">理由：${esc(p.reason)}</div>`;
+    const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = '承認';
+    ok.addEventListener('click', async () => {
+      try {
+        setStatus('修正を記録して、模型を組み直しています…', 'busy');
+        await call('POST', '/api/lasso/{a}/approve', { target: p.target, field: p.field, value_source: p.value_source, reason: p.reason });
+        clearLasso(); await refresh();
+        setStatus(`${p.target} を直しました（修正の履歴から取り消せます）`, 'ok');
+      } catch (e) { setStatus('直せませんでした：' + e.message, 'err'); }
+    });
+    div.appendChild(ok); box.appendChild(div);
+  }
+  for (const q of res.questions || []) {   // 選択肢を押すと、答えを添えてもう一度頼む
+    const div = document.createElement('div'); div.className = 'question';
+    div.innerHTML = `<b>質問</b>　${esc(q.question)}${q.evidence ? `<div class="meta">根拠：${esc(q.evidence)}</div>` : ''}`;
+    for (const opt of q.options || []) {
+      const b = document.createElement('button'); b.textContent = opt;
+      b.addEventListener('click', () => askLasso(`\n（質問「${q.question}」への答え：${opt}）`));
+      div.appendChild(b);
+    }
+    box.appendChild(div);
+  }
+  if (res.connection !== 'off' && !(res.proposals || []).length && !(res.questions || []).length)
+    box.insertAdjacentHTML('beforeend', '<p class="hint">直す案も質問もありませんでした。一言を変えて、もう一度頼んでください。</p>');
+}
 
 // ---------------------------------------------------------------- 全体
 async function refresh() {

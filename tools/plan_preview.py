@@ -45,8 +45,10 @@ def render_svg(b: dict, title: str) -> str:
     def P(x, y):  # 平面図の向き（Y が上）で描く
         return f"{(x - x0) * SCALE + MARGIN:.1f},{(y1 - y) * SCALE + MARGIN:.1f}"
 
+    # data-*：画面で囲んだ点を平面の mm に直すための値（mm = (画面の点 − 余白) ÷ 縮尺 ＋ 原点。Y は上下が逆）
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.0f}" height="{H:.0f}" '
-           f'viewBox="0 0 {W:.0f} {H:.0f}" font-family="sans-serif">',
+           f'viewBox="0 0 {W:.0f} {H:.0f}" font-family="sans-serif" '
+           f'data-x0="{x0:.1f}" data-y1="{y1:.1f}" data-scale="{SCALE}" data-margin="{MARGIN}">',
            f'<rect width="100%" height="100%" fill="white"/>',
            f'<text x="{MARGIN}" y="30" font-size="16">{html.escape(title)}（平面図・壁の作り直し）</text>']
     for r in b.get("rooms", []):
@@ -56,7 +58,7 @@ def render_svg(b: dict, title: str) -> str:
         poly = " ".join(P(*c) for c in wall_corners(w))
         dash = ' stroke-dasharray="4,2"' if w["bottom_mm"] > 1500 else ""  # 途中の高さから始まる壁は破線
         c = COLORS[w["kind"]]
-        out.append(f'<polygon points="{poly}" fill="{c}" fill-opacity="0.35" stroke="{c}" stroke-width="1"{dash}>'
+        out.append(f'<polygon data-id="{w["id"]}" points="{poly}" fill="{c}" fill-opacity="0.35" stroke="{c}" stroke-width="1"{dash}>'
                    f'<title>{w["id"]} {LABELS[w["kind"]]} 厚み{w["thickness_mm"]}mm 下端{w["bottom_mm"]} '
                    f'{w.get("source", "")}</title></polygon>')
         mx, my = (w["start"][0] + w["end"][0]) / 2, (w["start"][1] + w["end"][1]) / 2
@@ -73,7 +75,7 @@ def render_svg(b: dict, title: str) -> str:
         piece = {"start": a, "end": e, "thickness_mm": w["thickness_mm"] + 40}
         poly = " ".join(P(*c) for c in wall_corners(piece))
         col = OPENING_COLORS[o["kind"]]
-        out.append(f'<polygon points="{poly}" fill="white" stroke="{col}" stroke-width="1.5"/>')
+        out.append(f'<polygon data-id="{o["id"]}" points="{poly}" fill="white" stroke="{col}" stroke-width="1.5"/>')
         cx, cy = P(*o["center"]).split(",")
         out.append(f'<text x="{cx}" y="{cy}" font-size="9" fill="{col}" text-anchor="middle" dy="12">'
                    f'{o["id"]} FL+{o["head_fl_mm"]}</text>')
