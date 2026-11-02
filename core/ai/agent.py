@@ -264,7 +264,8 @@ async def run_inspection(alias: str, connection: str = "claude_code", on_event=N
     findings = finalize(ctx, data.get("findings", []))
     report = {"alias": alias, "connection": connection, "summary": data.get("summary", ""), "findings": findings,
               "cost_usd": result.total_cost_usd, "duration_s": round((result.duration_ms or 0) / 1000, 1),
-              "turns": result.num_turns, "permission_denials": result.permission_denials or []}
+              "turns": result.num_turns, "permission_denials": result.permission_denials or [],
+              "questions": ctx.questions}   # 検品担当が ask_question で出した質問（人の答えを待つもの）
     (out_dir(alias) / "findings.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
 
