@@ -17,8 +17,10 @@ import numpy as np
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
+from adapters import openings as op
 from adapters import walls as wl
 from adapters.glb_reader import GlbModel, Part, read_glb
+from adapters.roof import detect_roof
 from adapters.walkinhome_types import part_type
 from core.paths import glb_working_copy, out_dir, property_files
 from core.privacy import assert_clean
@@ -197,14 +199,13 @@ def reconstruct(model: GlbModel, level: dict, rules: dict) -> dict:
     t_ext = float(rule(rules, "walls.exterior_thickness_mm"))
     t_int = float(rule(rules, "walls.interior_thickness_mm"))
 
-    # 開口（建具の箱）とドア（床まで届く建具）
+    # 開口（建具の穴）とドア（床まで届く建具）。穴の形は openings.hole（吊り戸のレール・取っ手は除く）
     tate = model.by_type("typeETate")
     opening_fps, door_fps = [], []
     for p in tate:
-        pts = np.vstack([pr.vertices[:, :2] for pr in p.primitives])
-        fp = wl.bbox_polygon(pts)
+        fp, sill, _ = op.hole(p)
         opening_fps.append(fp)
-        if p.bounds()[0][2] <= fl + 100:
+        if sill <= fl + 100:
             door_fps.append(fp)
 
     # 手順1：外壁、手順4：単独の壁
@@ -305,8 +306,15 @@ def reconstruct(model: GlbModel, level: dict, rules: dict) -> dict:
         if inner.is_empty:
             continue
         room_list.append({"source": src, "polygon": inner, "floor_mm": _min_floor_z(model, src, fl)})
-    return {"walls": all_walls, "rooms": room_list, "skipped": skipped, "stats": stats,
-            "unresolved": unresolved, "exceptions": exceptions, "region": region, "exterior_fp": exterior_fp}
+    # 手順5：開口（どの壁の穴か）。屋根
+    opening_list, orphans = op.openings(tate, all_walls, fl)
+    roofs = model.by_role("roof")
+    roof = detect_roof(roofs[0], exterior_fp) if roofs else {"shape": "unknown", "note": "屋根（typeEYane）がない"}
+    if len(roofs) > 1:
+        roof["note"] = f"屋根の部材が {len(roofs)} 個ある。1つ目だけ読んだ（下屋は物件Bで要検証）"
+    return {"walls": all_walls, "rooms": room_list, "skipped": skipped + orphans, "stats": stats,
+            "unresolved": unresolved, "exceptions": exceptions, "openings": opening_list, "roof": roof,
+            "region": region, "exterior_fp": exterior_fp}
 
 
 def _min_floor_z(model: GlbModel, source: str, fl: float) -> int:
@@ -370,6 +378,13 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
         if e.get("source"):
             d["source"] = e["source"]
         exceptions_json.append(d)
+    order = {"window": 0, "entrance_door": 1, "door": 2}
+    ops = sorted(rec["openings"], key=lambda o: (order[o["kind"]], wall_ids[id(o["wall"])], o["offset_mm"]))
+    openings_json = [{"id": f"O{i}", "wall": wall_ids[id(o["wall"])], "kind": o["kind"], "style": o["style"],
+                      "offset_mm": round(o["offset_mm"], 1), "width_mm": round(o["width_mm"], 1),
+                      "sill_mm": round(o["sill_mm"]), "head_mm": round(o["head_mm"]),
+                      "sill_fl_mm": round(o["sill_fl_mm"]), "head_fl_mm": round(o["head_fl_mm"]),
+                      "center": _xy(o["center"]), "source": o["source"]} for i, o in enumerate(ops, 1)]
     rooms_json = [{"id": f"R{i}", "level": levels[0]["name"], "polygon": _poly_coords(r["polygon"]),
                    "floor_mm": r["floor_mm"], "area_m2": round(r["polygon"].area / 1e6, 2), "source": r["source"]}
                   for i, r in enumerate(sorted(rec["rooms"], key=lambda r: r["source"]), 1)]
@@ -379,6 +394,8 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
         "ground": ground,
         "levels": levels,
         "walls": walls_json,
+        "openings": openings_json,
+        "roof": rec["roof"],
         "rooms": rooms_json,
         "wall_stats": rec["stats"],
         "skipped": rec["skipped"],
@@ -421,6 +438,18 @@ def _print_summary(alias: str, b: dict) -> None:
             print(f"      壁にしなかった部材: {sk['source']}（{sk['reason']}）")
         for u in b.get("unresolved", []):
             print(f"      未解決の所 {u['id']}: {u['start']}→{u['end']} 幅{u['width_mm']}mm（壁があるか要確認）")
+    ops = b.get("openings", [])
+    if ops:
+        kinds = collections.Counter(o["kind"] for o in ops)
+        print(f"  開口: 窓 {kinds.get('window', 0)} / 玄関ドア {kinds.get('entrance_door', 0)} / 室内のドア・引き戸 {kinds.get('door', 0)}")
+        heads = collections.Counter(o["head_fl_mm"] for o in ops if o["kind"] == "window")
+        print(f"      窓の上端（FL から）: " + "、".join(f"FL+{h} が {n} か所" for h, n in sorted(heads.items())))
+        dheads = collections.Counter(o["head_fl_mm"] for o in ops if o["kind"] == "door")
+        print(f"      室内のドアの上端（FL から）: " + "、".join(f"FL+{h} が {n} か所" for h, n in sorted(dheads.items())))
+    r = b.get("roof")
+    if r and r.get("shape") == "shed":
+        print(f"  屋根: 片流れ {r['pitch'][0]}/10、低い側 {r.get('low_side')}、厚み {r.get('thickness_mm')}mm、"
+              f"軒の出 {r['eave_mm']}（樋を含めると {r.get('eave_with_gutter_mm')}）")
     print("  部材の数:")
     for r in b["inventory"]:
         print(f"    {r['label']:<12}（{r['type']}）{r['count']:>3} 個 → {r['role']}")
