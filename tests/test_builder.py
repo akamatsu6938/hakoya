@@ -44,6 +44,28 @@ def parts():
     return build_model(_tiny_house(), load_rules("jisha"))
 
 
+def test_hanging_wall_goes_to_roof_part():
+    """下がり壁（天井から下がっている内壁）は1階ではなく屋根の部品に入る（作者 2026-11-03）。
+    1階の壁とは、はめあいの隙間の分だけ離し、組んでも重ならない。"""
+    rules = load_rules("jisha")
+    base = build_model(_tiny_house(), rules)
+    b = _tiny_house()
+    b["walls"].append({"id": "W6", "level": "1F", "kind": "interior", "start": [80, 2000], "end": [2920, 2000],
+                       "thickness_mm": 130, "bottom_mm": 2824, "height": 3024})     # 西の外壁 W4 から内壁 W5 まで
+    parts = build_model(b, rules)
+    z = 2900.0                                                                        # 下がり壁の高さ（2824〜3024）
+    assert parts["floor1"].solid.slice(z).area() == pytest.approx(base["floor1"].solid.slice(z).area())
+    clearance = rules["model"]["fit_clearance_mm"] * rules["model"]["scale"]
+    start = 80 + 160 / 2 + clearance                       # 西の外壁 W4 の内の面＋隙間
+    end = min(2920, 3000 - 130 / 2 - clearance)            # 東の端（内壁 W5 の面−隙間には届かないので 2920 のまま）
+    added = parts["roof"].solid.slice(z).area() - base["roof"].solid.slice(z).area()
+    assert added == pytest.approx((end - start) * 130, rel=0.001)
+    for other in ("floor1", "exterior1"):
+        assert (parts["roof"].solid ^ parts[other].solid).volume() < 0.5
+    assert str(parts["roof"].solid.status()).endswith("NoError")
+    assert any("下がり壁（W6）" in n for n in parts["roof"].notes)
+
+
 def test_all_parts_are_closed_solids(parts):
     assert set(parts) == {"foundation", "floor1", "exterior1", "roof", "roof_ext"}
     for p in parts.values():

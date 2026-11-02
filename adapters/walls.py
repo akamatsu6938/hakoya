@@ -625,6 +625,40 @@ def unresolved_regions(region: Polygon, walls: list[Wall], thickness: float, doo
     return out
 
 
+def envelope_standalone(walls: list[Wall], inside: Polygon, thickness: float, gap: float = 150.0,
+                        samples: int = 8) -> list[Wall]:
+    """単独の壁のうち、片側が家の中・反対側が外のものを、外壁の一部とみなして外壁の厚みにする。
+    外の面の位置はそのままにして、内側の面を寄せる（外壁の表面に段差を作らない。中心線は外側へずれる）。
+    両側とも外（袖壁・ポーチの壁）や、両側とも家の中のものは、glb の厚みのまま。
+    家の中かどうかは物件ごとに glb の形から決める（会社ごとの数値に頼らない）。
+    ★物件A：W12（ポーチと窓際の腰掛けの間）・W13 は 180→162、W11・W14（両側が外）は 180 のまま。
+      作者の答え（2026-11-03）と4枚とも一致した。"""
+    changed = []
+    need = int(math.ceil(samples * 0.75))
+    for w in walls:
+        if w.kind != "standalone" or abs(w.thickness - thickness) < 0.5:
+            continue
+        d = w.direction
+        n = np.array([-d[1], d[0]])
+        off = w.thickness / 2 + gap
+        pts = [w.start + (w.end - w.start) * t for t in np.linspace(0.15, 0.85, samples)]
+        left = sum(inside.contains(Point(*(p + n * off))) for p in pts)
+        right = sum(inside.contains(Point(*(p - n * off))) for p in pts)
+        if left >= need and right == 0:
+            to_inside = n
+        elif right >= need and left == 0:
+            to_inside = -n
+        else:
+            continue
+        old = w.thickness
+        shift = -to_inside * (old - thickness) / 2          # 外の面＝中心線 − 厚みの半分（外向き）を変えない
+        w.start, w.end, w.thickness = w.start + shift, w.end + shift, thickness
+        w.assumptions.append(f"片側が家の中・反対側が外なので外壁の一部とみなし、外壁の厚み {thickness:g}mm にした"
+                             f"（glb の単独の壁は {old:g}mm）。外の面の位置はそのまま")
+        changed.append(w)
+    return changed
+
+
 def footprint(walls: list[Wall]) -> Polygon:
     return unary_union([w.rect() for w in walls])
 

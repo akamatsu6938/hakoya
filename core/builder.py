@@ -208,6 +208,15 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     # 天井の高さで分ける（作者指定）：外壁などの天井より上は、屋根と一緒に印刷する
     z_cut = fl + float(lv.get("ceiling_mm", rules["levels"]["ceiling_height_mm"])) if m.get("split_at_ceiling") else None
 
+    # 下がり壁（床に届かず、天井から下がっている内壁）は屋根の部品へ（作者 2026-11-03）。
+    # ★1階の部品に入れると、下に何もないまま宙に渡す形になった（物件A の W15：約55mm）
+    def is_hanging(w: dict) -> bool:
+        top = _wall_top(w)
+        return (z_cut is not None and w["kind"] == "interior" and float(w["bottom_mm"]) >= fl + UPPER_WALL_ABOVE_FL
+                and top is not None and abs(top - z_cut) <= 1.0)
+    hanging = [w for w in int_walls if is_hanging(w)]
+    int_walls = [w for w in int_walls if not is_hanging(w)]
+
     def lower_part(s: Manifold) -> Manifold:
         return s if z_cut is None else s.trim_by_plane((0.0, 0.0, -1.0), -z_cut)
 
@@ -344,6 +353,18 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         roof_ext_parts.append(wall_solid(w, bottom=bottom))
     if roof_walls:
         notes["roof"].append("ポーチの上の垂れ壁と屋根まで届く袖壁（" + "・".join(w["id"] for w in roof_walls) + "）は屋根と一緒に印刷する")
+    if hanging:
+        # 屋根の裏まで立ち上げて屋根と一体にする（裏返して印刷すると屋根板から立つ壁になる。天井より上は組むと屋根裏に隠れる）。
+        # 天井より下は、1階の壁（床から立つ壁）の所を、はめあいの隙間の分だけ広く抜く（屋根を載せるときにぶつからない）
+        standing = [wall_rect(o) for o in walls if float(o["bottom_mm"]) <= fl + 1]
+        keep_out = unary_union(standing).buffer(clearance, join_style="mitre") if standing else None
+        for w in hanging:
+            s = keep_below(prism(wall_rect(w), float(w["bottom_mm"]), roof_zmax), rt)
+            if keep_out is not None:
+                s = s - prism(keep_out, float(w["bottom_mm"]) - 1, z_cut)
+            roof_parts.append(s)
+        notes["roof"].append("下がり壁（" + "・".join(w["id"] for w in hanging) + "）は屋根と一緒に印刷する。"
+                             "屋根の裏まで立ち上げ、天井より上の部分は組むと屋根裏に隠れる")
     if z_cut is not None:  # 天井の高さで上下に分けた壁（★検品が「W13 は屋根に入っていない」と誤解した。F3）
         split_ids = [w["id"] for w in ext_walls + std_in if (_wall_top(w) is None or _wall_top(w) > z_cut + 1)]
         if split_ids:
@@ -353,7 +374,7 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     ext_inner = unary_union([wall_rect(w) for w in ext_walls])
     house_inside = Polygon(outline.exterior).difference(ext_inner)
     house_inside = max(getattr(house_inside, "geoms", [house_inside]), key=lambda g: g.area)
-    avoid = unary_union([wall_rect(w) for w in int_walls]) if int_walls else None
+    avoid = unary_union([wall_rect(w) for w in int_walls + hanging]) if int_walls + hanging else None
     r_corners = _pick_corners(house_inside, leg=leg, avoid=avoid)
     for v, e1, e2 in r_corners:
         tri = Polygon([v, v + e1 * leg, v + e2 * leg])

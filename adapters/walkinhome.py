@@ -389,6 +389,12 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
     levels = detect_levels(model)
     rec = reconstruct(model, levels[0], rules)
     found = xp.foundation(model.by_role("foundation"), ground["foundation_top_mm"])
+    porch_list = xp.porches(model.by_role("porch"))
+    # 単独の壁で、片側が家の中・反対側が外のものは外壁の一部 → 外壁の厚み（作者 2026-11-03）。
+    # 「家の中」＝基礎の外形の内側からポーチを除いた範囲（部屋の床だけだと、窓際の腰掛けのくぼみが外に見える）
+    if found.get("outline"):
+        inside = Polygon(found["outline"]).difference(unary_union([Polygon(p["polygon"]) for p in porch_list]))
+        wl.envelope_standalone(rec["walls"], inside, float(rule(rules, "walls.exterior_thickness_mm")))
     # 「家の中」は部屋の床の範囲で判断する（基礎の外形はポーチ北のへこみも含むため）
     indoor = unary_union([r["polygon"] for r in rec["rooms"]])
     soffit_list, soffit_skipped = xp.soffits(model.by_role("porch_soffit"), indoor)
@@ -426,7 +432,7 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
         "openings": openings_json,
         "roof": rec["roof"],
         "foundation": found,
-        "porches": xp.porches(model.by_role("porch")),
+        "porches": porch_list,
         "porch_soffits": soffit_list,
         "rooms": rooms_json,
         "wall_stats": rec["stats"],

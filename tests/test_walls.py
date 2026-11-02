@@ -162,6 +162,27 @@ def test_upper_wall_keeps_its_bottom():
     assert sorted(round(w.bottom) for w in ext) == [480, 2824]
 
 
+def test_envelope_standalone_walls_get_exterior_thickness():
+    """片側が家の中・反対側が外の単独の壁だけ、外壁の厚みにする。外の面の位置は変えない。"""
+    inside = box(0, 0, 4000, 4000)
+
+    def wall(a, b, t=180.0, kind="standalone"):
+        return wl.Wall(start=np.array(a, float), end=np.array(b, float), thickness=t, kind=kind, bottom=480, top=2824)
+    env = wall((500, 0), (3500, 0))               # 家の外周の上（北が家の中、南が外）
+    env_rev = wall((0, 3500), (0, 500))           # 向きが逆でも同じ（東が家の中、西が外）
+    fence = wall((-600, 0), (-600, 3000))         # 両側とも外（袖壁など）
+    inner = wall((2000, 1000), (2000, 3000))      # 両側とも家の中
+    done = wall((1000, 4000), (3000, 4000), t=162.0)
+    ext = wall((500, 4000), (900, 4000), kind="exterior")
+    changed = wl.envelope_standalone([env, env_rev, fence, inner, done, ext], inside, 162.0)
+    assert changed == [env, env_rev]
+    assert env.thickness == 162.0 and fence.thickness == inner.thickness == 180.0
+    # 外の面（南の面 y=-90、西の面 x=-90）はそのまま。内側の面だけが寄る
+    assert env.rect().bounds[1] == pytest.approx(-90) and env.rect().bounds[3] == pytest.approx(72)
+    assert env_rev.rect().bounds[0] == pytest.approx(-90) and env_rev.rect().bounds[2] == pytest.approx(72)
+    assert "外壁の一部" in env.assumptions[0]
+
+
 def test_thin_cap_is_not_a_standalone_wall():
     cap = np.concatenate([_quad((0, 0), (2000, 0), 1004, 1024, (0, -1)), _quad((0, 145), (2000, 145), 1004, 1024, (0, 1))])
     assert wl.standalone_wall(cap, "glb:typeEKabe#61") is None
