@@ -24,6 +24,7 @@ from typing import Any
 import yaml
 
 from core.ai.tools import TOOL_SPECS, ToolContext, call_tool, propose_override, ToolError
+from core.findings import code_findings
 from core.paths import REPO_ROOT, out_dir
 
 SERVER = "hakoya"
@@ -200,6 +201,11 @@ def _log_record(msg) -> dict:
     parent = getattr(msg, "parent_tool_use_id", None)
     if parent:
         rec["parent_tool_use_id"] = parent           # サブエージェント（検品担当）の中のやりとり
+    # 検品担当（裏で動くサブエージェント）の開始・進み具合・終了の知らせ（画面の進み具合に使う）
+    for key in ("task_id", "tool_use_id", "description", "status", "summary", "last_tool_name", "patch", "task_type"):
+        val = getattr(msg, key, None)
+        if val is not None and not callable(val):
+            rec[key] = val if isinstance(val, (str, int, float, bool, dict, list)) else str(val)
     blocks = getattr(msg, "content", None)
     if isinstance(blocks, list):
         out = []
@@ -265,7 +271,8 @@ async def run_inspection(alias: str, connection: str = "claude_code", on_event=N
     report = {"alias": alias, "connection": connection, "summary": data.get("summary", ""), "findings": findings,
               "cost_usd": result.total_cost_usd, "duration_s": round((result.duration_ms or 0) / 1000, 1),
               "turns": result.num_turns, "permission_denials": result.permission_denials or [],
-              "questions": ctx.questions}   # 検品担当が ask_question で出した質問（人の答えを待つもの）
+              "questions": ctx.questions,   # 検品担当が ask_question で出した質問（人の答えを待つもの）
+              "code_findings": code_findings(alias)}   # コードの検査からの指摘（glb の例外・未解決の所・検査の警告）
     (out_dir(alias) / "findings.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from adapters.walkinhome import build, write_building
+from core import findings as fd
 from core import overrides as ov
 from core.export import write_outputs
 from core.paths import load_local_paths, out_dir, property_files
@@ -146,8 +148,98 @@ def undo_override(alias: str, override_id: str):
         item = ov.undo(alias, override_id)
     except KeyError as e:
         raise HTTPException(404, str(e).strip("'\""))
+    fd.revert_override(alias, override_id)      # この修正を生んだ指摘は「未確認」に戻す
     summary = write_outputs(alias)
     return _safe_json({"undone": item, "checks": summary["checks"]})
+
+
+# ---------------------------------------------------------------- 検品（SPEC §9-2・§10）
+
+RUNS: dict[str, dict] = {}           # 物件ごとの検品の実行状態
+RUNS_LOCK = threading.Lock()
+
+
+def _run_inspection_thread(alias: str, connection: str) -> None:
+    import asyncio
+    state = RUNS[alias]
+    try:
+        from core.render import render_all
+        render_all(alias)                                        # 面ごとの図を最新の模型で作り直す
+        if connection == "off":
+            fd.run_off(alias)
+        else:
+            from core.ai.agent import run_inspection
+            rep = asyncio.run(run_inspection(alias, connection))
+            state["cost_usd"] = rep.get("cost_usd")
+    except Exception as e:  # 画面に日本語で出す
+        state["error"] = str(e)
+    finally:
+        state["running"] = False
+        state["finished_at"] = time.time()
+
+
+@app.post("/api/inspect/{alias}")
+def start_inspection(alias: str, connection: str = "claude_code"):
+    """検品を始める（裏で動く）。connection は claude_code（Claude）か off（コードの検査だけ）。"""
+    _check_alias(alias)
+    if connection not in ("claude_code", "off"):
+        raise HTTPException(400, "connection は claude_code か off です")
+    with RUNS_LOCK:
+        if RUNS.get(alias, {}).get("running"):
+            raise HTTPException(409, "この物件はいま検品中です")
+        if connection == "claude_code":
+            log = out_dir(alias) / "inspect_log.jsonl"
+            if log.exists():
+                log.unlink()                                     # 前回の記録を消して、進み具合を最初から数える
+        RUNS[alias] = {"running": True, "connection": connection, "started_at": time.time(), "error": None}
+    threading.Thread(target=_run_inspection_thread, args=(alias, connection), daemon=True).start()
+    return _safe_json({"started": True, "connection": connection})
+
+
+@app.get("/api/inspect/{alias}/status")
+def inspection_status(alias: str):
+    _check_alias(alias)
+    from core.ai.progress import FACE_LABELS, read_progress
+    state = dict(RUNS.get(alias, {"running": False}))
+    if state.get("started_at"):
+        state["elapsed_s"] = round((state.get("finished_at") or time.time()) - state["started_at"])
+    prog = read_progress(out_dir(alias) / "inspect_log.jsonl") if state.get("connection") == "claude_code" else None
+    return _safe_json({"state": state, "progress": prog, "face_labels": FACE_LABELS})
+
+
+@app.get("/api/findings/{alias}")
+def findings(alias: str):
+    _check_alias(alias)
+    return _safe_json(fd.load(alias) or {"findings": [], "code_findings": [], "summary": "まだ検品していません"})
+
+
+class DecisionIn(BaseModel):
+    action: str
+
+
+@app.post("/api/findings/{alias}/{fid}")
+def decide_finding(alias: str, fid: str, body: DecisionIn):
+    """指摘を承認／却下／あとでにする。承認すると修正として記録し、模型を組み直す。"""
+    _check_alias(alias)
+    try:
+        f = fd.decide(alias, fid, body.action)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(400, str(e).strip("'\""))
+    if body.action == "approve":
+        write_outputs(alias)
+    return _safe_json({"finding": f})
+
+
+@app.get("/api/inspect/{alias}/image/{view}")
+def inspection_image(alias: str, view: str, hl: str = "", source: str = "model"):
+    """面の図（検品の材料）。hl に部材の番号をカンマ区切りで渡すと、赤い枠で強調する。"""
+    _check_alias(alias)
+    from core.ai.tools import ToolContext, call_tool
+    res = call_tool(ToolContext.load(alias), "render_view",
+                    {"view": view, "source": source, "highlight": [h for h in hl.split(",") if h]})
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return FileResponse(res["image_path"], media_type="image/png", filename=f"hakoya_{view}_{source}.png")
 
 
 def main() -> int:

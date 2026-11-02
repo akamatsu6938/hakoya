@@ -43,11 +43,27 @@
   </section>
   <aside class="side">
     <nav class="tabs" data-group="side">
+      <button data-tab="sinsp">検品</button>
       <button data-tab="sedit" class="on">表で直す</button>
       <button data-tab="shist">修正の履歴</button>
       <button data-tab="schk">検査</button>
       <button data-tab="sout">書き出し</button>
     </nav>
+    <div id="sinsp" class="pane">
+      <div class="inspect-actions">
+        <button id="inspect-ai" class="primary">Claude に検品してもらう</button>
+        <button id="inspect-off">コードの検査だけ（AI なし）</button>
+      </div>
+      <p class="hint">Claude が東・西・南・北・平面・印刷の6つの面を同時に見比べ、食い違いを根拠つきで挙げます。直す案は「承認」すると修正として記録され、模型が組み直されます。</p>
+      <div id="inspect-progress" class="progress"></div>
+      <p id="inspect-summary" class="hint"></p>
+      <h3>Claude の指摘</h3>
+      <ul id="findings" class="list"></ul>
+      <h3>Claude からの質問</h3>
+      <ul id="questions" class="list"></ul>
+      <h3>コードの検査の結果</h3>
+      <ul id="code-findings" class="list"></ul>
+    </div>
     <div id="sedit" class="pane on">
       <p class="hint">値を変えて理由を書き、「承認」を押すと修正として記録され、模型が組み直されます。数値は mm（実寸）です。</p>
       <h3>窓・ドア</h3>

@@ -43,4 +43,20 @@ tr.approve input[type=text] { width: 100%; }
 .list li { padding: 6px 2px; border-bottom: 1px solid var(--line); line-height: 1.5; }
 .lv-高 { color: var(--bad); font-weight: 600; } .lv-中 { color: var(--warn); } .lv-情報 { color: var(--muted); }
 .tag { display: inline-block; padding: 0 6px; border-radius: 3px; background: var(--bg); color: var(--muted); font-size: 12px; margin-right: 4px; }
+.inspect-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
+.progress { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 6px 0; }
+.face { border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font-size: 13px; }
+.face b { display: block; }
+.face.待ち { color: var(--muted); }
+.face.見ている { border-color: var(--warn); background: #fff8e6; }
+.face.済み { border-color: var(--ok); background: #eef8f1; }
+.face.失敗 { border-color: var(--bad); background: #fdeeee; }
+.finding { padding: 8px 2px; }
+.finding .msg { margin: 2px 0 4px; }
+.finding .meta { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.finding .prop { background: var(--bg); border-radius: 4px; padding: 4px 6px; margin: 4px 0; font-size: 13px; }
+.finding .acts { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.finding img { max-width: 100%; border: 1px solid var(--line); margin-top: 6px; }
+.st { font-size: 12px; padding: 0 6px; border-radius: 3px; background: var(--bg); }
+.st.承認 { background: #eef8f1; color: var(--ok); } .st.却下 { background: #fdeeee; color: var(--bad); } .st.あとで { background: #fff8e6; color: var(--warn); }
 @media (max-width: 1000px) { main { grid-template-columns: 1fr; height: auto; } #canvas { height: 420px; } }

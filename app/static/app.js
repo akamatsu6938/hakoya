@@ -163,6 +163,109 @@ function renderDownloads() {
   $('#downloads').innerHTML = files.map(([f, label]) => `<li><a href="${api('/api/model/{a}/' + f)}" download>${label}</a></li>`).join('');
 }
 
+// ---------------------------------------------------------------- 検品（SPEC §9-2・§10）
+const VIEW_OF = { S: 'S', N: 'N', E: 'E', W: 'W', plan: 'plan', print: 'plan' };
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function proposalText(p) {
+  if (!p) return '';
+  if (p.field === '_delete') return `${esc(p.target)} を取り除く`;
+  return `${esc(p.target)} の ${esc(p.field)}：${esc(p.from)} → <b>${esc(p.to)}</b>（数値の出どころ：${esc(p.value_source)}）`;
+}
+
+function findingItem(f, withActions) {
+  const li = document.createElement('li'); li.className = 'finding';
+  const ev = (f.evidence || []).map(esc).join('、');
+  li.innerHTML = `<span class="tag lv-${esc(f.severity)}">${esc(f.severity)}</span><span class="tag">${esc(f.id)}</span>`
+    + `<span class="st ${esc(f.status)}">${esc(f.status || '未確認')}</span>`
+    + `<div class="msg">${esc(f.message)}</div>`
+    + `<div class="meta">対象：${(f.targets || []).map(esc).join('・') || 'なし'}　根拠：${ev || 'なし'}${f.confidence ? '　確からしさ：' + esc(f.confidence) : ''}</div>`
+    + (f.proposal ? `<div class="prop">直す案：${proposalText(f.proposal)}</div>` : '')
+    + (f.proposal_error ? `<div class="meta">直す案は作れませんでした：${esc(f.proposal_error)}</div>` : '');
+  const acts = document.createElement('div'); acts.className = 'acts';
+  const view = VIEW_OF[f.view] || 'plan';
+  const img = document.createElement('img'); img.hidden = true;
+  const show = document.createElement('button'); show.textContent = '図を見る';
+  show.addEventListener('click', () => {
+    if (img.hidden) { img.src = api(`/api/inspect/{a}/image/${view}`) + `?hl=${encodeURIComponent((f.targets || []).join(','))}&t=${Date.now()}`; }
+    img.hidden = !img.hidden; show.textContent = img.hidden ? '図を見る' : '図を閉じる';
+  });
+  acts.appendChild(show);
+  if (withActions) {
+    for (const [action, label] of [['approve', '承認'], ['reject', '却下'], ['later', 'あとで']]) {
+      if (action === 'approve' && !f.proposal) continue;
+      const b = document.createElement('button'); b.textContent = label; if (action === 'approve') b.className = 'primary';
+      b.addEventListener('click', async () => {
+        try {
+          setStatus(action === 'approve' ? '直す案を修正として記録し、模型を組み直しています…' : '記録しています…', 'busy');
+          await call('POST', `/api/findings/{a}/${encodeURIComponent(f.id)}`, { action });
+          if (action === 'approve') await refresh(); else await renderFindings();
+          setStatus(`${f.id} を「${label}」にしました${action === 'approve' ? '（修正の履歴から取り消せます）' : ''}`, 'ok');
+        } catch (e) { setStatus('できませんでした：' + e.message, 'err'); }
+      });
+      acts.appendChild(b);
+    }
+  }
+  li.appendChild(acts); li.appendChild(img);
+  return li;
+}
+
+async function renderFindings() {
+  const rep = await call('GET', '/api/findings/{a}');
+  const fill = (sel, items, withActions, empty) => {
+    const ul = $(sel); ul.innerHTML = '';
+    if (!items || !items.length) { ul.innerHTML = `<li class="hint">${empty}</li>`; return; }
+    for (const f of items) ul.appendChild(findingItem(f, withActions));
+  };
+  fill('#findings', rep.findings, true, rep.connection === 'off' ? 'AI なしで検品したので、Claude の指摘はありません' : 'まだありません');
+  fill('#code-findings', rep.code_findings, true, 'ありません');
+  const qs = $('#questions'); qs.innerHTML = '';
+  const questions = (rep.questions || []).concat((rep.findings || []).filter((f) => f.question).map((f) => ({ id: f.id, ...f.question })));
+  if (!questions.length) qs.innerHTML = '<li class="hint">ありません</li>';
+  for (const q of questions) qs.insertAdjacentHTML('beforeend', `<li><span class="tag">${esc(q.id)}</span>${esc(q.question)}<div class="meta">選択肢：${(q.options || []).map(esc).join(' ／ ')}${q.evidence ? '　根拠：' + esc(q.evidence) : ''}</div></li>`);
+  const cost = rep.cost_usd ? `　費用の目安 $${Number(rep.cost_usd).toFixed(2)}` : '';
+  $('#inspect-summary').textContent = rep.summary ? `${rep.summary}${rep.duration_s ? `（${rep.duration_s} 秒${cost}）` : ''}` : '';
+}
+
+function renderProgress(st) {
+  const box = $('#inspect-progress');
+  const prog = st.progress; const s = st.state || {};
+  if (!s.connection) { box.innerHTML = ''; return; }
+  if (s.connection === 'off') { box.innerHTML = `<div class="face ${s.running ? '見ている' : '済み'}"><b>コードの検査</b>${s.running ? '検査中…' : '済み'}</div>`; return; }
+  if (!prog) { box.innerHTML = ''; return; }
+  box.innerHTML = Object.entries(prog.faces).map(([k, f]) =>
+    `<div class="face ${esc(f.state)}"><b>${esc(st.face_labels[k] || k)}</b>${esc(f.state)}${f.doing ? '：' + esc(f.doing) : ''}</div>`).join('');
+}
+
+async function pollInspection() {
+  try {
+    const st = await call('GET', '/api/inspect/{a}/status');
+    renderProgress(st);
+    const s = st.state || {};
+    if (s.running) {
+      const phase = st.progress ? st.progress.phase : 'コードの検査中';
+      setStatus(`検品中（${phase}・${s.elapsed_s || 0} 秒）…`, 'busy');
+      setTimeout(pollInspection, 2000);
+    } else if (s.connection) {
+      $('#inspect-ai').disabled = false; $('#inspect-off').disabled = false;
+      if (s.error) setStatus('検品が終わりませんでした：' + s.error, 'err');
+      else { await renderFindings(); setStatus(`検品が終わりました（${s.elapsed_s || 0} 秒）`, 'ok'); }
+    }
+  } catch (e) { setStatus('進み具合を読めませんでした：' + e.message, 'err'); }
+}
+
+async function startInspection(connection) {
+  if (!state.alias) return;
+  if (connection === 'claude_code' && !confirm('Claude に検品してもらいます。5分ほどかかり、Claude のプランの利用枠を使います。よろしいですか？')) return;
+  try {
+    await call('POST', `/api/inspect/{a}?connection=${connection}`);
+    $('#inspect-ai').disabled = true; $('#inspect-off').disabled = true;
+    pollInspection();
+  } catch (e) { setStatus('検品を始められませんでした：' + e.message, 'err'); }
+}
+$('#inspect-ai').addEventListener('click', () => startInspection('claude_code'));
+$('#inspect-off').addEventListener('click', () => startInspection('off'));
+
 // ---------------------------------------------------------------- 全体
 async function refresh() {
   const data = await call('GET', '/api/building/{a}');
@@ -170,7 +273,7 @@ async function refresh() {
   renderTables(data.building);
   await renderHistory(data.override_results);
   $('#plan').innerHTML = await call('GET', '/api/plan/{a}');
-  await renderChecks(); renderDownloads(); await loadModel();
+  await renderChecks(); renderDownloads(); await renderFindings(); await loadModel();
 }
 
 async function selectAlias(alias, built) {
@@ -187,6 +290,12 @@ $('#build').addEventListener('click', async () => {
   catch (e) { setStatus('組み立てられませんでした：' + e.message, 'err'); }
   finally { btn.disabled = false; }
 });
+
+// URL の末尾でタブを開く（例：#sinsp で検品、#vplan で平面図）。撮影や説明のとき用
+for (const id of (location.hash || '').slice(1).split(',').filter(Boolean)) {
+  const btn = document.querySelector(`.tabs button[data-tab="${id}"]`);
+  if (btn) btn.click();
+}
 
 (async () => {
   const props = await call('GET', '/api/properties');
