@@ -24,6 +24,7 @@ from adapters.glb_reader import GlbModel, Part, read_glb
 from adapters.roof import detect_roof
 from adapters.walkinhome_types import part_type
 from core.paths import glb_working_copy, out_dir, property_files
+from core.ids import stabilize
 from core.privacy import assert_clean
 from core.rules import load_rules, rule
 
@@ -426,10 +427,15 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
 
 
 def write_building(alias: str, building: dict) -> Path:
+    """building.json を書き出す。前回のものがあれば番号を引き継ぎ（core/ids.py）、前回の分は .prev に残す。"""
+    path = out_dir(alias) / "building.json"
+    previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    stabilize(building, previous)
     text = json.dumps(building, ensure_ascii=False, indent=2)
     assert_clean(text, "building.json")
-    path = out_dir(alias) / "building.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.replace(path.with_suffix(".prev.json"))
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -479,6 +485,9 @@ def main(argv: list[str] | None = None) -> int:
     building = build(args.alias, args.company)
     path = write_building(args.alias, building)
     _print_summary(args.alias, building)
+    ch = building.get("id_changes", {})
+    if "new" in ch:
+        print(f"  番号: 前回から引き継ぎ。新しい番号 {ch['new'] or 'なし'} / なくなった番号 {ch['removed'] or 'なし'}")
     print(f"  → 書き出し: data/out/{args.alias}/{path.name}")
     return 0
 
