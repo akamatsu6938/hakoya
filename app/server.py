@@ -15,14 +15,15 @@ import time
 import webbrowser
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from adapters.walkinhome import build, write_building
 from core import findings as fd
 from core import overrides as ov
+from core import secret_store
 from core.export import write_outputs
 from core.paths import load_local_paths, out_dir, property_files
 from core.privacy import assert_clean
@@ -37,6 +38,16 @@ MODEL_FILES = {"model.glb": "model/gltf-binary", "model.3mf": "application/vnd.m
 
 app = FastAPI(title="HAKOYA")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.middleware("http")
+async def same_origin_only(request: Request, call_next):
+    """書き換える操作（GET 以外）は、HAKOYA の画面から来たものだけ受け付ける。
+    ほかのサイトを開いたブラウザから、勝手に検品（API の料金がかかる）を始められたり、キーを書き換えられたりしないため。"""
+    origin = request.headers.get("origin")
+    if request.method not in ("GET", "HEAD", "OPTIONS") and origin and origin != f"http://{request.headers.get('host', '')}":
+        return JSONResponse({"detail": "HAKOYA の画面以外からの操作は受け付けません"}, status_code=403)
+    return await call_next(request)
 
 
 def _aliases() -> list[str]:
@@ -168,6 +179,10 @@ def _run_inspection_thread(alias: str, connection: str) -> None:
         render_all(alias)                                        # 面ごとの図を最新の模型で作り直す
         if connection == "off":
             fd.run_off(alias)
+        elif connection == "api_key":
+            from core.ai.api_runner import run_inspection_api
+            rep = asyncio.run(run_inspection_api(alias))
+            state["cost_usd"] = rep.get("cost_usd")
         else:
             from core.ai.agent import run_inspection
             rep = asyncio.run(run_inspection(alias, connection))
@@ -181,14 +196,16 @@ def _run_inspection_thread(alias: str, connection: str) -> None:
 
 @app.post("/api/inspect/{alias}")
 def start_inspection(alias: str, connection: str = "claude_code"):
-    """検品を始める（裏で動く）。connection は claude_code（Claude）か off（コードの検査だけ）。"""
+    """検品を始める（裏で動く）。connection は claude_code（Claude のプラン）・api_key（API キー）・off（コードの検査だけ）。"""
     _check_alias(alias)
-    if connection not in ("claude_code", "off"):
-        raise HTTPException(400, "connection は claude_code か off です")
+    if connection not in ("claude_code", "api_key", "off"):
+        raise HTTPException(400, "connection は claude_code・api_key・off のどれかです")
+    if connection == "api_key" and not secret_store.has_api_key():
+        raise HTTPException(409, "API キーが設定されていません。「設定」タブで API キーを入れてください")
     with RUNS_LOCK:
         if RUNS.get(alias, {}).get("running"):
             raise HTTPException(409, "この物件はいま検品中です")
-        if connection == "claude_code":
+        if connection != "off":
             log = out_dir(alias) / "inspect_log.jsonl"
             if log.exists():
                 log.unlink()                                     # 前回の記録を消して、進み具合を最初から数える
@@ -204,7 +221,7 @@ def inspection_status(alias: str):
     state = dict(RUNS.get(alias, {"running": False}))
     if state.get("started_at"):
         state["elapsed_s"] = round((state.get("finished_at") or time.time()) - state["started_at"])
-    prog = read_progress(out_dir(alias) / "inspect_log.jsonl") if state.get("connection") == "claude_code" else None
+    prog = read_progress(out_dir(alias) / "inspect_log.jsonl") if state.get("connection") in ("claude_code", "api_key") else None
     return _safe_json({"state": state, "progress": prog, "face_labels": FACE_LABELS})
 
 
@@ -241,6 +258,42 @@ def inspection_image(alias: str, view: str, hl: str = "", source: str = "model")
     if "error" in res:
         raise HTTPException(400, res["error"])
     return FileResponse(res["image_path"], media_type="image/png", filename=f"hakoya_{view}_{source}.png")
+
+
+# ---------------------------------------------------------------- 設定（SPEC §10 の 8）
+
+@app.get("/api/settings")
+def settings():
+    """設定の状態。API キーは「入っているかどうか」だけを返す（キーそのものは返さない）。"""
+    try:
+        return _safe_json({"api_key_set": secret_store.has_api_key()})
+    except secret_store.SecretStoreError as e:
+        raise HTTPException(500, str(e))
+
+
+class ApiKeyIn(BaseModel):
+    api_key: str
+
+
+@app.post("/api/settings/api_key")
+def save_api_key(body: ApiKeyIn):
+    """API キーを Windows の資格情報マネージャーに保存する（ファイルや記録には書かない）。"""
+    try:
+        secret_store.set_api_key(body.api_key)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except secret_store.SecretStoreError as e:
+        raise HTTPException(500, str(e))
+    return _safe_json({"api_key_set": True})
+
+
+@app.delete("/api/settings/api_key")
+def remove_api_key():
+    try:
+        secret_store.delete_api_key()
+    except secret_store.SecretStoreError as e:
+        raise HTTPException(500, str(e))
+    return _safe_json({"api_key_set": False})
 
 
 def _port_in_use(port: int) -> bool:

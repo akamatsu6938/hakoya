@@ -48,10 +48,12 @@
       <button data-tab="shist">修正の履歴</button>
       <button data-tab="schk">検査</button>
       <button data-tab="sout">書き出し</button>
+      <button data-tab="sset">設定</button>
     </nav>
     <div id="sinsp" class="pane">
       <div class="inspect-actions">
         <button id="inspect-ai" class="primary">Claude に検品してもらう</button>
+        <button id="inspect-api">API キーで検品する</button>
         <button id="inspect-off">コードの検査だけ（AI なし）</button>
       </div>
       <p class="hint">Claude が東・西・南・北・平面・印刷の6つの面を同時に見比べ、食い違いを根拠つきで挙げます。直す案は「承認」すると修正として記録され、模型が組み直されます。</p>
@@ -76,6 +78,16 @@
     <div id="sout" class="pane">
       <p class="hint">「Bambu Studio 形式」の 3MF を開くと、外壁の部品にだけファジースキン（外側の輪郭）が設定されています。ファジースキンは形には出ません。スライスしてプレビューで外壁を拡大すると、線が細かく波打って見えます。<br>ふつうの形式の 3MF は形だけ読まれるので、外壁の部品（1階の外壁・屋根の外壁）を選び、「その他」→「ファジースキン」→「外側の輪郭」にしてください。2つ目以降のパーツはプレートの外に置いてあります。プレートを足して「並べる」で配置してください。</p>
       <ul id="downloads" class="list"></ul>
+    </div>
+    <div id="sset" class="pane">
+      <h3>API キー（「API キーで検品する」に使う）</h3>
+      <p id="apikey-state" class="hint"></p>
+      <div class="apikey">
+        <input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="API キーを貼り付ける">
+        <button id="apikey-save" class="primary">保存</button>
+        <button id="apikey-del">消す</button>
+      </div>
+      <p class="hint">キーは Windows の資格情報マネージャーに保存します。画面・ファイル・記録には出しません。<br>API キーで検品すると、キーの持ち主に Claude の API の料金がかかります。1回の上限は rules/ai_models.yaml の max_budget_usd（いまは $3.00）で、超えそうになると止まります。</p>
     </div>
   </aside>
 </main>

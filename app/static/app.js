@@ -247,24 +247,62 @@ async function pollInspection() {
       setStatus(`検品中（${phase}・${s.elapsed_s || 0} 秒）…`, 'busy');
       setTimeout(pollInspection, 2000);
     } else if (s.connection) {
-      $('#inspect-ai').disabled = false; $('#inspect-off').disabled = false;
+      inspectButtons(false);
       if (s.error) setStatus('検品が終わりませんでした：' + s.error, 'err');
       else { await renderFindings(); setStatus(`検品が終わりました（${s.elapsed_s || 0} 秒）`, 'ok'); }
     }
   } catch (e) { setStatus('進み具合を読めませんでした：' + e.message, 'err'); }
 }
 
+function inspectButtons(disabled) {
+  for (const id of ['#inspect-ai', '#inspect-api', '#inspect-off']) $(id).disabled = disabled;
+}
+
 async function startInspection(connection) {
   if (!state.alias) return;
   if (connection === 'claude_code' && !confirm('Claude に検品してもらいます。5分ほどかかり、Claude のプランの利用枠を使います。よろしいですか？')) return;
+  if (connection === 'api_key') {
+    const st = await call('GET', '/api/settings');
+    if (!st.api_key_set) { setStatus('API キーが設定されていません。「設定」タブで API キーを入れてください', 'err'); return; }
+    if (!confirm('API キーで Claude に検品してもらいます。5分ほどかかり、キーの持ち主に API の料金がかかります（1回の上限 $3.00）。よろしいですか？')) return;
+  }
   try {
     await call('POST', `/api/inspect/{a}?connection=${connection}`);
-    $('#inspect-ai').disabled = true; $('#inspect-off').disabled = true;
+    inspectButtons(true);
     pollInspection();
   } catch (e) { setStatus('検品を始められませんでした：' + e.message, 'err'); }
 }
 $('#inspect-ai').addEventListener('click', () => startInspection('claude_code'));
+$('#inspect-api').addEventListener('click', () => startInspection('api_key'));
 $('#inspect-off').addEventListener('click', () => startInspection('off'));
+
+// ---------------------------------------------------------------- 設定（API キー）
+async function renderSettings() {
+  try {
+    const st = await call('GET', '/api/settings');
+    $('#apikey-state').textContent = st.api_key_set ? 'API キー：保存してあります' : 'API キー：まだ入っていません';
+    $('#apikey-del').disabled = !st.api_key_set;
+  } catch (e) { $('#apikey-state').textContent = '設定を読めませんでした：' + e.message; }
+}
+$('#apikey-save').addEventListener('click', async () => {
+  const key = $('#apikey').value.trim();
+  if (!key) { setStatus('API キーを貼り付けてから「保存」を押してください', 'err'); return; }
+  try {
+    await call('POST', '/api/settings/api_key', { api_key: key });
+    $('#apikey').value = '';                       // 画面に残さない
+    setStatus('API キーを資格情報マネージャーに保存しました', 'ok');
+  } catch (e) { setStatus('保存できませんでした：' + e.message, 'err'); }
+  await renderSettings();
+});
+$('#apikey-del').addEventListener('click', async () => {
+  if (!confirm('保存してある API キーを消します。よろしいですか？')) return;
+  try {
+    await call('DELETE', '/api/settings/api_key');
+    setStatus('API キーを消しました', 'ok');
+  } catch (e) { setStatus('消せませんでした：' + e.message, 'err'); }
+  await renderSettings();
+});
+renderSettings();
 
 // ---------------------------------------------------------------- 全体
 async function refresh() {

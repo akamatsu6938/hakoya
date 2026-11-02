@@ -4,6 +4,7 @@
 - まとめ役が Agent の道具で検品担当を呼ぶ（input の subagent_type が "inspect-S" など）。
 - 検品担当は裏で動き、開始・進み具合・終了は Task… の知らせで届く（tool_use_id で呼び出しと結びつく）。
   終了は TaskNotificationMessage か、TaskUpdatedMessage の patch.status が終わりの値のどちらかで届く（SDK の説明）。
+- api_key 接続では、FaceStarted・FaceTool・FaceDone・ApiResult の記録を読む。
 """
 from __future__ import annotations
 
@@ -66,7 +67,18 @@ def read_progress(log_path: Path) -> dict:
                 faces[face]["doing"] = ""
                 if r.get("summary"):
                     faces[face]["summary"] = r["summary"]
-        if t == "ResultMessage":
+        # api_key 接続（core/ai/api_runner.py）は、面ごとの開始・道具・終わりをそのまま記録する
+        face = r.get("face")
+        if t == "FaceStarted" and face in faces:
+            faces[face]["state"] = "見ている"
+            out["phase"] = "面ごとに検品中"
+        elif t == "FaceTool" and face in faces and faces[face]["state"] == "見ている":
+            faces[face]["doing"] = _tool_label(r.get("tool"))
+        elif t == "FaceDone" and face in faces:
+            faces[face]["state"] = "済み" if r.get("status") == "済み" else "失敗"
+            faces[face]["doing"] = ""
+            faces[face]["summary"] = r.get("summary") or r.get("error") or ""
+        if t in ("ResultMessage", "ApiResult"):
             out["finished"] = True
     called = [f for f in FACES if faces[f]["state"] != "待ち"]
     if called and all(faces[f]["state"] in ("済み", "失敗") for f in called) and not out["finished"]:

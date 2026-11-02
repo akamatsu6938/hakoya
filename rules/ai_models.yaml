@@ -13,3 +13,10 @@ api_key:
 limits:
   max_budget_usd: 3.0     # 1回の検品の費用の上限（安全装置。プランでも目安として効く）
   max_turns: 60           # まとめ役のやりとりの上限
+  max_turns_per_face: 12  # api_key：面ごとの検品担当のやりとりの上限
+# api_key のときの費用の計算に使う料金（100万トークンあたりのドル）。2026-11 の公表値。変わったらここを直す。
+# cache_write は「指示を覚えさせる」とき、cache_read は「覚えさせた指示を読み直す」ときの料金。
+prices_usd_per_mtok:
+  claude-opus-5-5:   {input: 4.0,  output: 20.0, cache_write: 5.0,   cache_read: 0.20}
+  claude-sonnet-5-5: {input: 2.0,  output: 10.0, cache_write: 2.5,   cache_read: 0.20}   # cache_write は入力の1.25倍 (推定)
+  claude-haiku-5-5:  {input: 0.10, output: 0.50, cache_write: 0.125, cache_read: 0.01}   # 入力10万トークン以下のとき。cache は (推定)
