@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
@@ -242,13 +243,26 @@ def inspection_image(alias: str, view: str, hl: str = "", source: str = "model")
     return FileResponse(res["image_path"], media_type="image/png", filename=f"hakoya_{view}_{source}.png")
 
 
+def _port_in_use(port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex((HOST, port)) == 0
+
+
 def main() -> int:
     import uvicorn
     sys.stdout.reconfigure(encoding="utf-8")
-    url = f"http://{HOST}:{PORT}/"
+    port = int(os.environ.get("HAKOYA_PORT", PORT))       # 口の番号は HAKOYA_PORT で変えられる
+    url = f"http://{HOST}:{port}/"
+    if _port_in_use(port):
+        # ★古い HAKOYA が開いたままだと、新しい方が起動できない（2026-11-02、試験で起きた）
+        print(f"口 {port} 番はもう使われています。HAKOYA がすでに起動しているかもしれません。"
+              f"前に開いた黒い画面を閉じてから、もう一度起動してください。")
+        return 3
     print(f"HAKOYA を起動しました → {url}（止めるときはこの画面で Ctrl+C）")
-    threading.Timer(1.5, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
+    if not os.environ.get("HAKOYA_NO_BROWSER"):      # 試験のときはブラウザを開かない
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    uvicorn.run(app, host=HOST, port=port, log_level="warning")
     return 0
 
 

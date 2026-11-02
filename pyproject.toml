@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev = ["pytest>=8", "httpx>=0.27", "pyinstaller>=6.10"]
 
 # フォルダの中から動かすソフトなので、自分自身は部品として取り付けない（ライブラリだけ入れる）
 [tool.setuptools]

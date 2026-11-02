@@ -5,14 +5,24 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = REPO_ROOT / "data"
+# 同梱物（rules/・skills/・app/static/）の場所。exe のときは PyInstaller が展開した場所（sys._MEIPASS）
+REPO_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+# 使う人のデータ（local_paths.yaml・書き出し）の場所。exe のときは exe の隣の data/（exe の中だと書き出しが消えるため）。
+# HAKOYA_DATA_DIR で変えられる
+if os.environ.get("HAKOYA_DATA_DIR"):
+    DATA_DIR = Path(os.environ["HAKOYA_DATA_DIR"])
+elif getattr(sys, "frozen", False):
+    DATA_DIR = Path(sys.executable).resolve().parent / "data"
+else:
+    DATA_DIR = REPO_ROOT / "data"
 LOCAL_PATHS = DATA_DIR / "local_paths.yaml"
 
 
