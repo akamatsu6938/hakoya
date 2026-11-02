@@ -1,2 +1,3 @@
 # git のフック（sh で動く）は、Windows でも改行を LF のまま保つ（CRLF だと動かない）
 .githooks/* text eol=lf
+*.bat text eol=crlf
