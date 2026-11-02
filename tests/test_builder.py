@@ -114,3 +114,23 @@ def test_test_pieces_fit_without_overlap():
         assert str(solid.status()).endswith("NoError") and len(solid.decompose()) == 1, label
     assert abs((p["wall"][1] ^ p["roof"][1]).volume()) < 1e-6
     assert abs((p["foundation"][1] ^ p["floor"][1]).volume()) < 1e-6
+
+
+@pytest.mark.realdata
+@pytest.mark.slow
+def test_inspection_images():
+    """検品の材料：面ごとに模型の図・glb の図・部材の一覧ができ、立面にはその面の外壁と開口だけが入る。"""
+    from core.paths import out_dir
+    from core.render import VIEWS, render_all
+    render_all("物件A")
+    d = out_dir("物件A") / "inspect"
+    for v in VIEWS:
+        assert (d / f"{v}_model.png").exists() and (d / f"{v}_glb.png").exists()
+    s = json.loads((d / "S.json").read_text(encoding="utf-8"))
+    ops = [e["id"] for e in s["elements"] if e["type"] == "opening"]
+    walls = {e["id"] for e in json.loads((d / "plan.json").read_text(encoding="utf-8"))["elements"] if e["type"] == "wall"}
+    assert len(ops) == 3                                  # 南の窓は3つ（北の窓は入らない）
+    assert len(walls) == 28                               # 平面にはすべての壁
+    for e in s["elements"]:
+        x0, y0, x1, y1 = e["bbox_px"]
+        assert 0 <= x0 <= x1 <= s["size_px"][0] and 0 <= y0 <= y1 <= s["size_px"][1]
