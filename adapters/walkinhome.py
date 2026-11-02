@@ -17,6 +17,7 @@ import numpy as np
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
+from adapters import exterior_parts as xp
 from adapters import openings as op
 from adapters import walls as wl
 from adapters.glb_reader import GlbModel, Part, read_glb
@@ -370,6 +371,11 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
     ground = detect_ground(model)
     levels = detect_levels(model)
     rec = reconstruct(model, levels[0], rules)
+    found = xp.foundation(model.by_role("foundation"), ground["foundation_top_mm"])
+    # 「家の中」は部屋の床の範囲で判断する（基礎の外形はポーチ北のへこみも含むため）
+    indoor = unary_union([r["polygon"] for r in rec["rooms"]])
+    soffit_list, soffit_skipped = xp.soffits(model.by_role("porch_soffit"), indoor)
+    rec["skipped"] += soffit_skipped
     walls_json, assumptions, wall_ids = walls_to_json(rec["walls"], levels[0]["name"])
     exceptions_json = []
     for e in rec["exceptions"]:
@@ -402,6 +408,9 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
         "walls": walls_json,
         "openings": openings_json,
         "roof": rec["roof"],
+        "foundation": found,
+        "porches": xp.porches(model.by_role("porch")),
+        "porch_soffits": soffit_list,
         "rooms": rooms_json,
         "wall_stats": rec["stats"],
         "skipped": rec["skipped"],
