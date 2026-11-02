@@ -212,7 +212,11 @@ def reconstruct(model: GlbModel, level: dict, rules: dict) -> dict:
     ext_planes = wl.group_planes(ext_tris)
     ext = wl.exterior_walls(ext_planes, t_ext, fl, opening_fps)
     wl.fill_inside_corners(ext)
-    ext = wl.merge_back_to_back(ext, t_ext)
+    ceiling_abs = fl + float(level.get("ceiling_mm", rule(rules, "levels.ceiling_height_mm")))
+    # ★背中合わせの外壁の面は、実際は内壁（物件Aで 作者確認）。内壁の厚み・天井までで作る
+    ext = wl.merge_back_to_back(ext, t_ext, as_kind="interior", new_thickness=t_int, new_top=ceiling_abs)
+    back_to_back = [w for w in ext if w.kind == "interior"]
+    ext = [w for w in ext if w.kind == "exterior"]
     standalone, skipped = [], []
     for p in model.by_role("standalone_wall"):
         w = wl.standalone_wall(p.faces(), p.source)
@@ -220,7 +224,9 @@ def reconstruct(model: GlbModel, level: dict, rules: dict) -> dict:
             skipped.append({"source": p.source, "reason": "垂直な面がほとんどないか、高さが300mm未満（上端・下端の板や笠木）のため壁にしない"})
         else:
             standalone.append(w)
-    outer = wl.drop_covered(ext + standalone)
+    # 背中合わせの壁の端の小口の面なども、背中合わせから作った壁に覆われていれば除く
+    outer = [w for w in wl.drop_covered(ext + standalone + back_to_back, keep_kinds=("standalone", "interior"))
+             if w.kind != "interior"]
     exterior_fp = wl.footprint(outer)
 
     # 手順2・3・6：部屋の内側 → 内壁
@@ -236,10 +242,49 @@ def reconstruct(model: GlbModel, level: dict, rules: dict) -> dict:
         interior = wl.merge_collinear(interior, region)
     kept = wl.drop_covered(outer + interior, keep_kinds=("exterior", "standalone"), ratio=0.5)
     interior = [w for w in kept if w.kind == "interior"]
+    # 背中合わせから作った壁は後回し：向かい合う仕上げ面から作った内壁で覆われていれば、そちらを使う
+    if interior:
+        inner_fp = unary_union([w.rect() for w in interior])
+        for b in back_to_back:
+            r = b.rect()
+            if r.intersection(inner_fp).area / r.area < 0.5:
+                interior.append(b)
     for w in interior:  # 巾木の上から始まっている内壁は、床（FL）から立てる
         if w.bottom <= fl + LOW_FACE_MM:
             w.bottom = fl
+
+    # 腰掛け・カウンター（造作）と重なる低い部分は壁にしない（SPEC §1：造作は作らない）
+    for p in model.by_type("typeEKaun"):
+        lo, hi = p.bounds()
+        fp = wl.bbox_polygon(np.vstack([pr.vertices[:, :2] for pr in p.primitives]))
+        for w in list(interior):
+            r = w.rect()
+            if w.top is not None and w.top <= hi[2] + 50 and r.intersection(fp).area / r.area >= 0.5:
+                interior.remove(w)
+                skipped.append({"source": p.source, "reason": "腰掛け・カウンターの部分（造作）なので壁にしない"})
+
+    # glb の例外の記録（検品の材料）
+    exceptions = []
+    for b in back_to_back:
+        merged_into = b if b in interior else max(interior, key=lambda w: w.rect().intersection(b.rect()).area)
+        exceptions.append({"kind": "back_to_back_exterior_faces", "start": b.start, "end": b.end, "wall": merged_into,
+                           "note": f"glb では背中合わせの外壁の面（間 {getattr(b, '_back_to_back_gap', 0):.0f}mm）。"
+                                   "内壁として扱った"})
+        if merged_into is not b:
+            merged_into.assumptions.append("back_to_back: glb で背中合わせの外壁の面として入っていた壁を、この内壁にまとめた")
+
     unresolved = wl.unresolved_regions(region, interior, t_int, door_fps)
+    # 上がり框の位置の隙間：壁はない（物件Aで 作者確認）。未解決にせず、例外として記録だけ残す
+    agari = [wl.bbox_polygon(np.vstack([pr.vertices[:, :2] for pr in p.primitives])).buffer(50, join_style="mitre")
+             for p in model.by_type("typeEAgar")]
+    for u in list(unresolved):
+        r = u.rect()
+        for p, fp in zip(model.by_type("typeEAgar"), agari):
+            if r.intersection(fp).area / r.area >= 0.5:
+                unresolved.remove(u)
+                exceptions.append({"kind": "agari_kamachi", "start": u.start, "end": u.end, "wall": None,
+                                   "source": p.source, "note": "上がり框の位置。壁は作らない（框・靴箱などの造作は模型に入れない）"})
+                break
 
     all_walls = outer + interior
     # 覆えていない所：壁は実際の隙間の幅で数え、ドアの位置（次の段階でくり抜く）は除く
@@ -261,7 +306,7 @@ def reconstruct(model: GlbModel, level: dict, rules: dict) -> dict:
             continue
         room_list.append({"source": src, "polygon": inner, "floor_mm": _min_floor_z(model, src, fl)})
     return {"walls": all_walls, "rooms": room_list, "skipped": skipped, "stats": stats,
-            "unresolved": unresolved, "region": region, "exterior_fp": exterior_fp}
+            "unresolved": unresolved, "exceptions": exceptions, "region": region, "exterior_fp": exterior_fp}
 
 
 def _min_floor_z(model: GlbModel, source: str, fl: float) -> int:
@@ -280,12 +325,14 @@ def _poly_coords(poly) -> list:
     return [_xy(c) for c in big.simplify(1.0).exterior.coords[:-1]]
 
 
-def walls_to_json(walls: list[wl.Wall], level: str) -> tuple[list[dict], list[dict]]:
+def walls_to_json(walls: list[wl.Wall], level: str) -> tuple[list[dict], list[dict], dict[int, str]]:
+    """壁を building.json の形にする。3つ目の戻り値は「壁の物 → 番号」の対応（例外の記録に使う）。"""
     order = {"exterior": 0, "standalone": 1, "interior": 2}
     walls = sorted(walls, key=lambda w: (order[w.kind], round(w.start[1]), round(w.start[0])))
-    out, assumptions = [], []
+    out, assumptions, ids = [], [], {}
     for i, w in enumerate(walls, 1):
         wid = f"W{i}"
+        ids[id(w)] = wid
         d = {"id": wid, "level": level, "kind": w.kind, "start": _xy(w.start), "end": _xy(w.end),
              "thickness_mm": round(w.thickness, 1), "bottom_mm": round(w.bottom),
              "height": "to_roof" if w.top is None else round(w.top)}
@@ -304,7 +351,7 @@ def walls_to_json(walls: list[wl.Wall], level: str) -> tuple[list[dict], list[di
             for a in w.assumptions:
                 assumptions.append({"field": f"walls[{wid}]", "note": a})
         out.append(d)
-    return out, assumptions
+    return out, assumptions, ids
 
 
 def build(alias: str, company: str = "jisha", return_debug: bool = False):
@@ -314,7 +361,15 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
     ground = detect_ground(model)
     levels = detect_levels(model)
     rec = reconstruct(model, levels[0], rules)
-    walls_json, assumptions = walls_to_json(rec["walls"], levels[0]["name"])
+    walls_json, assumptions, wall_ids = walls_to_json(rec["walls"], levels[0]["name"])
+    exceptions_json = []
+    for e in rec["exceptions"]:
+        d = {"kind": e["kind"], "level": levels[0]["name"], "start": _xy(e["start"]), "end": _xy(e["end"]), "note": e["note"]}
+        if e.get("wall") is not None:
+            d["wall"] = wall_ids.get(id(e["wall"]))
+        if e.get("source"):
+            d["source"] = e["source"]
+        exceptions_json.append(d)
     rooms_json = [{"id": f"R{i}", "level": levels[0]["name"], "polygon": _poly_coords(r["polygon"]),
                    "floor_mm": r["floor_mm"], "area_m2": round(r["polygon"].area / 1e6, 2), "source": r["source"]}
                   for i, r in enumerate(sorted(rec["rooms"], key=lambda r: r["source"]), 1)]
@@ -330,6 +385,7 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
         "unresolved": [{"id": f"U{i}", "level": levels[0]["name"], "kind": "interior_region_without_faces",
                         "start": _xy(u.start), "end": _xy(u.end), "width_mm": round(u.thickness),
                         "note": u.assumptions[0]} for i, u in enumerate(rec["unresolved"], 1)],
+        "glb_exceptions": exceptions_json,
         "inventory": inventory(model),
         "rule_checks": compare_with_rules(ground, levels, rules),
         "assumptions": assumptions,

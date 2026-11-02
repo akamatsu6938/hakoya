@@ -89,16 +89,51 @@ def test_interior_wall_centerline_and_ends(deg):
     assert abs(s[1] - 80) < 0.5 and abs(e[1] - 3920) < 0.5
 
 
-def test_back_to_back_faces_become_one_wall():
+def test_back_to_back_faces_become_one_interior_wall():
     a = _quad((0, 0), (2000, 0), 0, 2400, (0, -1))      # 南向きの面（y=0）
     b = _quad((0, 90), (2000, 90), 0, 2400, (0, 1))     # 北向きの面（y=90）。間は 90
     ext = wl.exterior_walls(wl.group_planes(wl.vertical_triangles(np.concatenate([a, b]), "glb:typeEGaih#1")),
                             162.0, 0.0, [])
-    merged = wl.merge_back_to_back(ext, 162.0)
+    merged = wl.merge_back_to_back(ext, 162.0, new_thickness=130.0, new_top=2400.0)
     assert len(merged) == 1
     w = merged[0]
-    assert abs(w.start[1] - 45) < 1e-6 and abs(w.thickness - 162) < 1e-6
+    assert w.kind == "interior" and w.top == 2400.0
+    assert abs(w.start[1] - 45) < 1e-6 and abs(w.thickness - 130) < 1e-6
     assert any(s.startswith("back_to_back") for s in w.assumptions)
+
+
+def test_window_reveals_are_not_back_to_back():
+    """窓と窓の間の柱型の脇の面（見込み 162mm、間 120mm）は背中合わせとみなさない。"""
+    a = _quad((0, 0), (0, 162), 0, 2400, (1, 0))
+    b = _quad((120, 0), (120, 162), 0, 2400, (-1, 0))
+    ext = wl.exterior_walls(wl.group_planes(wl.vertical_triangles(np.concatenate([a, b]), "glb:typeEGaih#1")),
+                            162.0, 0.0, [])
+    assert all(w.kind == "exterior" for w in wl.merge_back_to_back(ext, 162.0))
+
+
+def test_full_length_vertical_gap_splits_wall():
+    """向かい合う面に、全長にわたって縦の抜けがあれば（下がり壁と腰の部分）、壁を上下に分ける。"""
+    faces = np.concatenate([
+        _quad((0, 0), (3000, 0), 624, 1004, (0, -1)), _quad((0, 0), (3000, 0), 2824, 3024, (0, -1)),
+        _quad((0, 145), (3000, 145), 624, 1004, (0, 1)), _quad((0, 145), (3000, 145), 2824, 3024, (0, 1)),
+    ])
+    planes = wl.group_planes(wl.vertical_triangles(faces, "glb:typeEHeya#1"))
+    region = box(-10, 0, 3010, 145)
+    walls = wl.interior_walls(planes, region, 130.0)
+    assert sorted((round(w.bottom), round(w.top)) for w in walls) == [(624, 1004), (2824, 3024)]
+    # 高さが違うので、片方がもう片方に「覆われている」とはみなさない
+    assert len(wl.drop_covered(walls, keep_kinds=(), ratio=0.5)) == 2
+
+
+def test_door_gap_does_not_split_wall():
+    """ドアのように一部だけ抜けている所では、壁を上下に分けない。"""
+    def side(y, n):
+        return [_quad((0, y), (1000, y), 624, 3024, n), _quad((1000, y), (1800, y), 2994, 3024, n),
+                _quad((1800, y), (3000, y), 624, 3024, n)]
+    faces = np.concatenate(side(0, (0, -1)) + side(145, (0, 1)))
+    planes = wl.group_planes(wl.vertical_triangles(faces, "glb:typeEHeya#1"))
+    walls = wl.interior_walls(planes, box(-10, 0, 3010, 145), 130.0)
+    assert len(walls) == 1 and round(walls[0].bottom) == 624 and round(walls[0].top) == 3024
 
 
 def test_inside_corner_is_filled():

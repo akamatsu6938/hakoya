@@ -264,12 +264,18 @@ def _find_inside_corner(pc: Piece, e: np.ndarray, outers, w: Wall, tol: float, m
     return False
 
 
-def merge_back_to_back(walls: list[Wall], thickness: float, factor: float = 2.0, min_overlap: float = 100.0) -> list[Wall]:
+def merge_back_to_back(walls: list[Wall], thickness: float, factor: float = 2.0, min_overlap: float = 300.0,
+                       as_kind: str = "interior", new_thickness: float | None = None,
+                       new_top: float | None = None) -> list[Wall]:
     """背中合わせの外壁の面（SPEC §4-1 の既知の例外）を1枚の壁にまとめる。
 
-    2つの面が反対を向き、裏同士が向き合い、その間が外壁の厚みの factor 倍より近いとき、
-    重なっている区間を「面の真ん中を中心線、厚みは外壁の標準値」の1枚にする。
+    2つの面が反対を向き、裏同士が向き合い、その間が外壁の厚みの factor 倍より近く、
+    min_overlap 以上重なっているとき、重なっている区間を、面の真ん中を中心線にした1枚にする。
+    （★窓と窓の間の柱型の脇の面（見込み 162mm）も背中合わせに見えるので、短い重なりは除く）
+    ★物件Aでは実際は内壁だった（作者確認、2026-11-02）。そのため既定は内壁（as_kind）として、
+    厚み new_thickness（会社ルールの内壁の厚み）・上端 new_top（天井）で作る。
     """
+    new_thickness = thickness if new_thickness is None else new_thickness
     out = list(walls)
     i = 0
     while i < len(out):
@@ -296,10 +302,12 @@ def merge_back_to_back(walls: list[Wall], thickness: float, factor: float = 2.0,
             mid_off = float(np.dot(pa.p0, na)) - gap / 2
             p_lo = na * mid_off + tan * lo
             p_hi = na * mid_off + tan * hi
-            w = Wall(start=p_lo, end=p_hi, thickness=thickness, kind="exterior",
-                     bottom=min(a.bottom, b.bottom), top=None, sources=sorted(set(a.sources) | set(b.sources)),
+            w = Wall(start=p_lo, end=p_hi, thickness=new_thickness, kind=as_kind,
+                     bottom=min(a.bottom, b.bottom), top=new_top, sources=sorted(set(a.sources) | set(b.sources)),
                      top_glb=max(pa.top, pb.top),
-                     assumptions=[f"back_to_back: 背中合わせの外壁の面（間 {gap:.0f}mm）を1枚にまとめ、厚みは外壁の標準値にした"])
+                     assumptions=[f"back_to_back: glb では背中合わせの外壁の面（間 {gap:.0f}mm）として入っていた。"
+                                  f"1枚の{'内壁' if as_kind == 'interior' else '外壁'}として作り直した"])
+            w._back_to_back_gap = gap  # type: ignore[attr-defined]
             rest = []
             for wall, (s0, s1) in ((a, (a0, a1)), (b, (b0, b1))):
                 for r0, r1 in ((s0, lo), (hi, s1)):
@@ -324,13 +332,30 @@ def _cut_wall(w: Wall, tan: np.ndarray, t0: float, t1: float) -> Wall:
     return nw
 
 
+def z_range(w: Wall) -> tuple[float, float]:
+    """壁の高さの範囲。「屋根まで」の壁は上を無限とみなす。"""
+    return w.bottom, (w.top if w.top is not None else math.inf)
+
+
+def z_overlap_ratio(w: Wall, other: Wall) -> float:
+    """w の高さのうち、other と重なっている割合。"""
+    b0, t0 = z_range(w)
+    b1, t1 = z_range(other)
+    h = (t0 - b0) if math.isfinite(t0) else 1.0
+    ov = min(t0, t1) - max(b0, b1)
+    if not math.isfinite(ov):
+        return 1.0
+    return max(0.0, ov) / h if math.isfinite(t0) else (1.0 if ov > 0 else 0.0)
+
+
 def drop_covered(walls: list[Wall], keep_kinds: tuple[str, ...] = ("standalone",), ratio: float = 0.9) -> list[Wall]:
-    """ほかの壁にほぼ覆われている外壁（窓の脇の見込みの面、単独の壁と重なる面など）を除く。短いものから順に調べる。"""
+    """ほかの壁にほぼ覆われている壁（窓の脇の見込みの面、単独の壁と重なる面など）を除く。短いものから順に調べる。
+    高さが重ならない壁（下がり壁とその下の腰の部分など）は、覆っているとはみなさない。"""
     kept = list(walls)
     for w in sorted(walls, key=lambda x: x.length):
         if w.kind in keep_kinds or w not in kept:
             continue
-        others = unary_union([x.rect() for x in kept if x is not w])
+        others = unary_union([x.rect() for x in kept if x is not w and z_overlap_ratio(w, x) >= 0.5])
         r = w.rect()
         if r.area > 0 and r.intersection(others).area / r.area >= ratio:
             kept.remove(w)
@@ -389,8 +414,10 @@ def interior_region(room_floors: list[Polygon], finish_planes: list[Plane], door
 
 
 def interior_walls(finish_planes: list[Plane], region: Polygon, thickness: float,
-                   gap_min: float = 80.0, gap_max: float = 270.0, min_overlap: float = 50.0) -> list[Wall]:
-    """向かい合う仕上げ面の真ん中を中心線にして、内壁を作る（厚みは会社ルールの値で作り直す）。"""
+                   gap_min: float = 80.0, gap_max: float = 270.0, min_overlap: float = 50.0,
+                   min_open: float = 300.0) -> list[Wall]:
+    """向かい合う仕上げ面の真ん中を中心線にして、内壁を作る（厚みは会社ルールの値で作り直す）。
+    壁の全長にわたる縦の抜け（min_open 以上）があれば、壁を上下に分ける（★物件Aの下がり壁と腰掛け）。"""
     faces = [pc for pl in finish_planes for pc in plane_pieces(pl) if pc.length >= 20]
     zone = region.buffer(10)
     cands: list[Wall] = []
@@ -413,12 +440,52 @@ def interior_walls(finish_planes: list[Plane], region: Polygon, thickness: float
             p0, p1 = na * mid + tan * lo, na * mid + tan * hi
             if not zone.contains(Point((p0 + p1) / 2)):
                 continue
-            w = Wall(start=p0, end=p1, thickness=thickness, kind="interior", bottom=min(a.bottom, b.bottom),
-                     top=max(a.top, b.top), sources=sorted(a.plane.sources | b.plane.sources),
-                     assumptions=[f"interior_rebuilt: 仕上げ面の間 {gap:.0f}mm の中心線に、会社ルールの厚みで作り直した"])
-            w._gap = gap  # type: ignore[attr-defined]
-            cands.append(w)
+            bands = solid_bands(a, b, lo, hi, min_gap=min_open)
+            for z0, z1 in bands:
+                w = Wall(start=p0, end=p1, thickness=thickness, kind="interior", bottom=z0, top=z1,
+                         sources=sorted(a.plane.sources | b.plane.sources),
+                         assumptions=[f"interior_rebuilt: 仕上げ面の間 {gap:.0f}mm の中心線に、会社ルールの厚みで作り直した"])
+                if len(bands) > 1:
+                    w.assumptions.append(f"open_band: 壁の全長にわたって縦の抜けがあるため（開口）、"
+                                         f"{z0:.0f}〜{z1:.0f} の部分だけを壁にした")
+                w._gap = gap  # type: ignore[attr-defined]
+                cands.append(w)
     return merge_collinear(cands, region)
+
+
+def _intervals_at(plane: Plane, t: float, tol: float = 5.0) -> list[tuple[float, float]]:
+    """平面を位置 t で縦に切ったときに、面がある高さの範囲（つなげたもの）。"""
+    lo, hi = _cross_section(plane.tz, t)
+    out: list[list[float]] = []
+    for a, b in sorted(zip(lo.tolist(), hi.tolist())):
+        if out and a <= out[-1][1] + tol:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
+
+
+def solid_bands(a: Piece, b: Piece, lo: float, hi: float, min_gap: float = 300.0, samples: int = 7) -> list[tuple[float, float]]:
+    """向かい合う2枚の面（a・b）の、区間 lo〜hi（a の接線の位置）で「壁がある高さ」の範囲。
+
+    何か所かで縦に切り、どこかで面がある高さを合わせる。壁の全長にわたって面のない高さ（min_gap 以上）が
+    あれば、そこは開口（下がり壁と腰の部分の間など）なので、壁を上下に分ける。
+    ドアの所のように一部だけ抜けている所は、ほかの位置で面があるので分けない。
+    """
+    covered: list[tuple[float, float]] = []
+    for t in np.linspace(lo, hi, samples + 2)[1:-1]:
+        p = a.plane.point(float(t))
+        covered += _intervals_at(a.plane, float(t))
+        covered += _intervals_at(b.plane, float(np.dot(p, b.plane.tangent)))
+    if not covered:
+        return [(min(a.bottom, b.bottom), max(a.top, b.top))]
+    merged: list[list[float]] = []
+    for z0, z1 in sorted(covered):
+        if merged and z0 <= merged[-1][1] + min_gap:
+            merged[-1][1] = max(merged[-1][1], z1)
+        else:
+            merged.append([z0, z1])
+    return [(z0, z1) for z0, z1 in merged]
 
 
 def _line_key(w: Wall) -> tuple[np.ndarray, float, np.ndarray]:
@@ -429,14 +496,21 @@ def _line_key(w: Wall) -> tuple[np.ndarray, float, np.ndarray]:
     return d, float(np.dot(w.start, n)), n
 
 
+def _same_height(a: Wall, b: Wall, tol: float = 150.0) -> bool:
+    (b0, t0), (b1, t1) = z_range(a), z_range(b)
+    same_top = (t0 == t1) or (math.isfinite(t0) and math.isfinite(t1) and abs(t0 - t1) <= tol)
+    return abs(b0 - b1) <= tol and same_top
+
+
 def merge_collinear(walls: list[Wall], region: Polygon | None, max_gap: float = 1200.0, fill_ratio: float = 0.8) -> list[Wall]:
-    """同じ線の上にある壁をつなぐ。間が内壁の範囲で埋まっていれば（ドアの位置など）間もつなぐ。"""
+    """同じ線の上にある、高さのそろった壁をつなぐ。間が内壁の範囲で埋まっていれば（ドアの位置など）間もつなぐ。
+    高さの違う壁（下がり壁と腰の部分など）はつながない。"""
     groups: list[list[Wall]] = []
     for w in walls:
         d, off, _ = _line_key(w)
         for g in groups:
             gd, goff, _ = _line_key(g[0])
-            if abs(np.dot(d, gd)) > 0.9999 and abs(off - goff) < 5.0:
+            if abs(np.dot(d, gd)) > 0.9999 and abs(off - goff) < 5.0 and _same_height(w, g[0]):
                 g.append(w)
                 break
         else:
@@ -509,6 +583,10 @@ def extend_to_junctions(walls: list[Wall], targets: list[Wall], zone: Polygon | 
                     break
                 n = np.array([-d[1], d[0]]) * 20
                 strip = Polygon([p + n, q + n, q - n, p - n])
+                # 伸ばす先に平行な壁がすでにあるなら伸ばさない（少しずれた位置の壁を覆って消してしまうため）
+                parallel = [t.rect() for t in targets if t is not w and abs(np.dot(t.direction, d)) > 0.999]
+                if parallel and strip.intersection(unary_union(parallel)).area / strip.area > 0.3:
+                    break
                 if strip.intersection(zone).area / strip.area >= zone_ratio:
                     setattr(w, which, q)
                 break
