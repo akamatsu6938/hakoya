@@ -21,7 +21,7 @@ from adapters import exterior_parts as xp
 from adapters import openings as op
 from adapters import walls as wl
 from adapters.glb_reader import GlbModel, Part, read_glb
-from adapters.roof import detect_roof
+from adapters.roof import detect_roof, merge_roof_parts
 from adapters.walkinhome_types import part_type
 from core.paths import glb_working_copy, out_dir, property_files
 from core.ids import stabilize
@@ -515,8 +515,8 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
     t_ext = float(rule(rules, "walls.exterior_thickness_mm"))
 
     # 階ごとに作り直す。2階建ては、屋根の面と形を先に読み（軒の出は後で）、2階に「下の屋根（下屋）」を渡す
-    roof_parts = model.by_role("roof")
-    pre_roofs = [detect_roof(p, box(0, 0, 1, 1)) for p in roof_parts] if multi else []
+    roof_parts = merge_roof_parts(model.by_role("roof"))     # 面ごとに分かれた切妻・寄棟の部材を1つの屋根に
+    pre_roofs =[detect_roof(p, box(0, 0, 1, 1)) for p in roof_parts] if multi else []
     for r in pre_roofs:
         r["_li"] = _roof_level(r, levels)
     bands = _level_bands(levels)

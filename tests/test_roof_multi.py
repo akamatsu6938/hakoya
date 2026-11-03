@@ -238,3 +238,39 @@ def test_3d_pick_shapes_for_multi_plane_roofs(name):
     items = proxies(_house(make(), outline, name), load_rules("jisha"))["items"]
     ids = {it["id"] for it in items if it["group"] in ("roofs", "roof_edges")}
     assert "Y1" in ids and {"Y1:S", "Y1:N"} <= ids
+
+
+def _parts_per_plane(planes, first_node=10):
+    """★実物（物件C・D、11/3）：Walk in home は切妻・寄棟を、面ごとに別の部材で書き出す。"""
+    parts = [_part([pl]) for pl in planes]
+    for k, p in enumerate(parts):
+        p.node = first_node + k
+    return parts
+
+
+@pytest.mark.parametrize("name,expected_shape,count", [("gable", "gable", 2), ("hip", "hip", 4)])
+def test_one_part_per_plane_is_merged_into_one_roof(name, expected_shape, count):
+    from adapters.roof import merge_roof_parts
+    make, outline = CASES[name]
+    merged = merge_roof_parts(_parts_per_plane(make()))
+    assert len(merged) == 1
+    assert merged[0].source == "glb:typeEYane#" + "+".join(str(10 + k) for k in range(count))
+    roof = detect_roof(merged[0], Polygon(outline))
+    assert roof["shape"] == expected_shape and len(roof["planes"]) == count
+    assert roof["thickness_mm"] == pytest.approx(100.0, abs=0.5)
+
+
+def test_roofs_at_other_heights_or_apart_are_not_merged():
+    from adapters.roof import merge_roof_parts
+    upper = _part(gable())
+    lower = _part(gable())                       # 下屋のように高さの範囲が重ならない
+    for pr in lower.primitives:
+        pr.vertices[:, 2] -= 3000
+    lower.node = 98
+    apart = _part(gable())                       # 平面で離れている
+    for pr in apart.primitives:
+        pr.vertices[:, 0] += 20000
+    apart.node = 97
+    merged = merge_roof_parts([upper, lower, apart])
+    assert [p.source for p in merged] == ["glb:typeEYane#99", "glb:typeEYane#98", "glb:typeEYane#97"]
+    assert merge_roof_parts([upper]) == [upper]  # 片流れ（部材1つ）は今までどおり

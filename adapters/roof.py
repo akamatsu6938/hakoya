@@ -14,6 +14,7 @@ Walk in home の書き出し方は要検証（10件の glb で確かめる）。
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 
 import numpy as np
 from shapely.geometry import Polygon
@@ -27,6 +28,61 @@ OFFSET_TOL_MM = 20.0         # 同じ面とみなす高さの差（面に垂直�
 MIN_PLANE_MM2 = 100_000.0    # これより小さい面（0.1m²）は屋根の面とみなさない
 DEFAULT_THICKNESS_MM = 100.0  # 下の面が見つからないときの屋根板の厚み（面に垂直。★物件A は約100）
 SHAPE_JA = {"shed": "片流れ", "flat": "陸屋根", "gable": "切妻", "hip": "寄棟", "multi": "複数の面", "unknown": "不明"}
+
+
+ROOF_JOIN_MM = 50.0          # 屋根の部材どうしが、平面でこれ以内に接していれば同じ屋根
+
+
+@dataclass
+class MergedRoofPart(Part):
+    """面ごとに分かれて書き出された屋根の部材を、1つの屋根にまとめたもの。出どころは全部の番号。"""
+    nodes: list[int] = field(default_factory=list)
+
+    @property
+    def source(self) -> str:
+        return f"glb:{self.type_code or 'unknown'}#" + "+".join(str(n) for n in self.nodes)
+
+
+def _top_extent(p: Part) -> tuple[Polygon | None, tuple[float, float] | None]:
+    tris = p.faces(TOP)
+    if not len(tris):
+        return None, None
+    poly = unary_union([Polygon(t[:, :2]) for t in tris if Polygon(t[:, :2]).area > 1])
+    return poly, (float(tris[:, :, 2].min()), float(tris[:, :, 2].max()))
+
+
+def merge_roof_parts(parts: list[Part]) -> list[Part]:
+    """★Walk in home は切妻・寄棟の屋根を、面ごとに別の部材（typeEYane）で書き出す（物件C は4つ、物件D は2つ。11/3）。
+    平面で接していて、高さの範囲が重なる部材を1つの屋根にまとめる（面に分けるのは detect_roof）。
+    下屋と大屋根は高さの範囲が重ならないので、まとめない。片流れ（部材1つ）は今までどおり。"""
+    info = [_top_extent(p) for p in parts]
+    parent = list(range(len(parts)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(parts)):
+        for j in range(i + 1, len(parts)):
+            (pi, zi), (pj, zj) = info[i], info[j]
+            if pi is None or pj is None:
+                continue
+            if pi.distance(pj) <= ROOF_JOIN_MM and max(zi[0], zj[0]) <= min(zi[1], zj[1]) + ROOF_JOIN_MM:
+                parent[find(j)] = find(i)
+    groups: dict[int, list[int]] = {}
+    for i in range(len(parts)):
+        groups.setdefault(find(i), []).append(i)
+    out: list[Part] = []
+    for g in sorted(groups.values(), key=lambda g: g[0]):
+        if len(g) == 1:
+            out.append(parts[g[0]])
+            continue
+        first = parts[g[0]]
+        out.append(MergedRoofPart(node=first.node, name=first.name, type_code=first.type_code,
+                                  primitives=[pr for k in g for pr in parts[k].primitives], nodes=[parts[k].node for k in g]))
+    return out
 
 
 def _fit_plane(pts: np.ndarray) -> tuple[float, float, float, float]:
