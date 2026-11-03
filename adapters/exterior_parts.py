@@ -48,17 +48,29 @@ def _polys(g) -> list[Polygon]:
     return [x for x in getattr(g, "geoms", [g]) if not x.is_empty and x.area > 1]
 
 
-def foundation(kiso: list[Part], top_mm: float) -> dict:
-    """基礎の天端の外形と、袖壁などの下の基礎（底の形）。"""
+def foundation(kiso: list[Part], top_mm: float, bridges: list[Polygon] = (), clip: Polygon | None = None) -> dict:
+    """基礎の天端の外形と、袖壁などの下の基礎（底の形）。
+    天端の帯が途中で切れている（C字）ときは、bridges（玄関ドアの穴）で輪を閉じ、clip（1階の外壁の外形）で切る。
+    ★物件A は閉じた輪。物件B は玄関ドアの所で帯が切れていて、穴を埋めても帯のまま（0.64m²）だった。"""
     top = flat_union(kiso, ("KISO_ILOW",), top_mm)
     if top.is_empty:
         return {"top_mm": top_mm, "note": "基礎の天端の面（KISO_ILOW）が見つからない"}
-    outline = max(_polys(top), key=lambda g: g.area)
-    outline = Polygon(outline.exterior)  # 穴（内側）は埋めて、外形だけにする
+    band = max(_polys(top), key=lambda g: g.area)
+    outline = Polygon(band.exterior)  # 穴（内側）は埋めて、外形だけにする
+    method = None
+    if outline.area < 3 * band.area and bridges:   # 輪が閉じていない（埋めても帯のまま）
+        closed = unary_union([top] + [b.buffer(30, join_style="mitre") for b in bridges])
+        outline = Polygon(max(_polys(closed), key=lambda g: g.area).exterior)
+        if clip is not None and not clip.is_empty:
+            outline = max(_polys(outline.intersection(clip)), key=lambda g: g.area)
+        method = "kiso_ilow+door_bridge"
     footings = [g for g in _polys(flat_union(kiso, ("KISO_HONT",), 0.0)) if not outline.buffer(1).contains(g)]
-    return {"top_mm": top_mm, "outline": _coords(outline), "area_m2": round(outline.area / 1e6, 2),
-            "footings": [{"polygon": _coords(g), "note": "袖壁などの下の基礎（底の形）"} for g in footings],
-            "source": kiso[0].source}
+    out = {"top_mm": top_mm, "outline": _coords(outline), "area_m2": round(outline.area / 1e6, 2),
+           "footings": [{"polygon": _coords(g), "note": "袖壁などの下の基礎（底の形）"} for g in footings],
+           "source": kiso[0].source}
+    if method:
+        out["outline_method"] = method
+    return out
 
 
 def porches(parts: list[Part]) -> list[dict]:

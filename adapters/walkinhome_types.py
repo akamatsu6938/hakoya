@@ -48,6 +48,9 @@ PART_TYPES: dict[str, PartType] = {
     "typeEPark": PartType("駐車場の床", ROLE_EXCLUDE),
     "typeEInte": PartType("家具・設備", ROLE_EXCLUDE),
     "typeELight": PartType("照明", ROLE_EXCLUDE),        # 物件B で見つけた（子のノードを持つ）
+    "typeEBkab": PartType("玄関のへこみの外壁の面", ROLE_EXTERIOR_WALL, "(推定)"),   # 物件B：1階の外形を閉じるのに要る
+    "typeEKais": PartType("階段", ROLE_OMIT),             # 造作として省く（SPEC §1）。2階の床には穴を開ける
+    "typeENich": PartType("ニッチ", ROLE_OMIT, "(推定)"),
     "typeEExte": PartType("外構", ROLE_EXCLUDE),
     "typeETree": PartType("植栽", ROLE_EXCLUDE),
 }

@@ -625,6 +625,88 @@ def unresolved_regions(region: Polygon, walls: list[Wall], thickness: float, doo
     return out
 
 
+def merge_exterior_pieces(walls: list[Wall], tol: float = 1.0) -> list[Wall]:
+    """同じ外の面から作った外壁で、端どうしが接し、下端がそろったものを1枚にする（元の面のかけら _outer も合わせる）。
+    上の階で、下屋の上から始まる壁を床まで下ろした後に使う（★物件B の2階：南の壁が4枚に分かれ、
+    南西の角のかけらが捨てられて西の壁が角まで届かず、外形の輪が閉じなかった）。"""
+    ext = [w for w in walls if w.kind == "exterior" and getattr(w, "_outer", None) is not None]
+    others = [w for w in walls if w not in ext]
+    groups: list[list[Wall]] = []
+    for w in ext:
+        for g in groups:
+            if g[0]._outer.plane is w._outer.plane and abs(g[0].bottom - w.bottom) < 1.0:
+                g.append(w)
+                break
+        else:
+            groups.append([w])
+    out = []
+    for g in groups:
+        g.sort(key=lambda w: w._outer.t0)
+        run = [g[0]]
+        for w in g[1:]:
+            if w._outer.t0 <= max(x._outer.t1 for x in run) + tol:
+                run.append(w)
+            else:
+                out.append(_merge_run(run))
+                run = [w]
+        out.append(_merge_run(run))
+    return out + others
+
+
+def _merge_run(run: list[Wall]) -> Wall:
+    if len(run) == 1:
+        return run[0]
+    first = run[0]
+    plane = first._outer.plane
+    t0, t1 = min(w._outer.t0 for w in run), max(w._outer.t1 for w in run)
+    d = first.direction
+    s = float(np.dot(first.start, d))
+    lo = min(min(np.dot(w.start, d), np.dot(w.end, d)) for w in run)
+    hi = max(max(np.dot(w.start, d), np.dot(w.end, d)) for w in run)
+    w = Wall(start=first.start + d * (lo - s), end=first.start + d * (hi - s), thickness=first.thickness, kind="exterior",
+             bottom=min(x.bottom for x in run), top=None, sources=sorted({s_ for x in run for s_ in x.sources}),
+             top_glb=max((x.top_glb for x in run if x.top_glb is not None), default=None),
+             assumptions=list(dict.fromkeys(a for x in run for a in x.assumptions)))
+    w._outer = Piece(plane=plane, t0=t0, t1=t1, bottom=min(x._outer.bottom for x in run),  # type: ignore[attr-defined]
+                     top=max(x._outer.top for x in run))
+    return w
+
+
+def clip_faces_z(faces: np.ndarray, z0: float | None, z1: float | None, min_area: float = 1.0) -> np.ndarray:
+    """三角形（N,3,3）を高さ z0〜z1 の帯で切り、帯の中の部分を三角形に分け直して返す。
+    z0・z1 がどちらも None なら、入力をそのまま返す（平屋は何も変わらない）。
+    ★2階建て：外壁の部材が1つで、1階と2階の面が同じ平面につながっている（物件B）ため、階ごとに切って使う。"""
+    if z0 is None and z1 is None:
+        return faces
+    lo = -np.inf if z0 is None else float(z0)
+    hi = np.inf if z1 is None else float(z1)
+    if len(faces) == 0:
+        return faces
+    zmin, zmax = faces[:, :, 2].min(axis=1), faces[:, :, 2].max(axis=1)
+    inside = (zmin >= lo) & (zmax <= hi)
+    out = [faces[inside]]
+    for tri in faces[~inside & (zmax > lo) & (zmin < hi)]:
+        poly = [p for p in tri]
+        for bound, keep in ((lo, lambda z, b: z >= b), (hi, lambda z, b: z <= b)):
+            if not np.isfinite(bound) or not poly:
+                continue
+            nxt = []
+            for i, a in enumerate(poly):
+                b = poly[(i + 1) % len(poly)]
+                ina, inb = keep(a[2], bound), keep(b[2], bound)
+                if ina:
+                    nxt.append(a)
+                if ina != inb:
+                    t = (bound - a[2]) / (b[2] - a[2])
+                    nxt.append(a + (b - a) * t)
+            poly = nxt
+        for k in range(1, len(poly) - 1):
+            t = np.array([poly[0], poly[k], poly[k + 1]])
+            if 0.5 * np.linalg.norm(np.cross(t[1] - t[0], t[2] - t[0])) >= min_area:
+                out.append(t[None])
+    return np.concatenate(out) if out else faces[:0]
+
+
 def envelope_standalone(walls: list[Wall], inside: Polygon, thickness: float, gap: float = 150.0,
                         samples: int = 8) -> list[Wall]:
     """単独の壁のうち、片側が家の中・反対側が外のものを、外壁の一部とみなして外壁の厚みにする。

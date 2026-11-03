@@ -32,15 +32,65 @@ def wall_corners(w: dict) -> list[tuple[float, float]]:
     return [(x0 + nx, y0 + ny), (x1 + nx, y1 + ny), (x1 - nx, y1 - ny), (x0 - nx, y0 - ny)]
 
 
-def render_svg(b: dict, title: str) -> str:
+def _level_overlays(b: dict, level: str, names: list[str], P) -> list[str]:
+    """2階建ての重ね書き。1階の図：2階の外形（破線）・下屋の屋根の範囲（一点鎖線）・2階のはね出し。
+    2階の図：床の穴（階段、斜線）と1階の外形（点線）。"""
+    def poly(coords, style):
+        return f'<polygon points="{" ".join(P(*p) for p in coords)}" {style}/>'
+
+    def label(coords, text, color):
+        cx = sum(p[0] for p in coords) / len(coords)
+        cy = sum(p[1] for p in coords) / len(coords)
+        x, y = P(cx, cy).split(",")
+        return f'<text x="{x}" y="{y}" font-size="11" fill="{color}" text-anchor="middle">{html.escape(text)}</text>'
+    out = ['<defs><pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
+           '<line x1="0" y1="0" x2="0" y2="8" stroke="#888" stroke-width="1.5"/></pattern></defs>']
+    lv = {x["name"]: x for x in b["levels"]}
+    if level == names[0]:
+        for n in names[1:]:
+            if lv[n].get("outline"):
+                out.append(poly(lv[n]["outline"], 'fill="none" stroke="#555" stroke-width="1.5" stroke-dasharray="8,4"'))
+        for r in b.get("roofs", []):
+            if r.get("kind") == "lean_to" and r.get("footprint"):
+                out.append(poly(r["footprint"], 'fill="none" stroke="#e08a00" stroke-width="1.5" stroke-dasharray="10,3,2,3"'))
+                out.append(label(r["footprint"], "下屋の屋根の範囲（一点鎖線）", "#e08a00"))
+        for e in b.get("glb_exceptions", []):
+            if e["kind"] == "upper_floor_overhang" and e.get("polygon"):
+                out.append(poly(e["polygon"], 'fill="#ffb366" fill-opacity="0.35" stroke="#e08a00" stroke-width="1"'))
+                out.append(label(e["polygon"], "2階のはね出し", "#b35c00"))
+    else:
+        if b.get("foundation", {}).get("outline"):
+            out.append(poly(b["foundation"]["outline"], 'fill="none" stroke="#aaa" stroke-width="1" stroke-dasharray="2,3"'))
+        for h in lv[level].get("floor_openings", []):
+            out.append(poly(h["polygon"], 'fill="url(#hatch)" stroke="#666" stroke-width="1"'))
+            out.append(label(h["polygon"], "階段の穴" if h["kind"] == "stairwell" else "吹き抜け", "#333"))
+    return out
+
+
+def render_svg(b: dict, title: str, level: str | None = None) -> str:
+    """平面図。2階建てでは階ごとに描く（level を省くと1階）。描く範囲と縮尺は全部の階で同じにする
+    （重ねて見比べられ、囲んで直すときの座標も階によらずそろう）。"""
+    names = [lv["name"] for lv in b.get("levels", [])]
+    multi = len(names) > 1
+    if level is None and multi:
+        level = names[0]
+    fl_of = {lv["name"]: float(lv["fl_mm"]) for lv in b.get("levels", [])}
+    fl = fl_of.get(level, fl_of.get(names[0], 0.0) if names else 0.0)
     pts = [c for w in b["walls"] for c in wall_corners(w)]
     pts += [tuple(p) for r in b.get("rooms", []) for p in r["polygon"]]
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    walls = [w for w in b["walls"] if not multi or w.get("level") == level]
+    wall_ids = {w["id"] for w in walls}
+    openings = [o for o in b.get("openings", []) if o["wall"] in wall_ids]
+    rooms = [r for r in b.get("rooms", []) if not multi or r.get("level") == level]
+    unresolved = [u for u in b.get("unresolved", []) if not multi or u.get("level") == level]
     plan_w = (x1 - x0) * SCALE + MARGIN * 2
     W = plan_w + LIST_WIDTH
     n_lines = len(b["walls"]) + len(b.get("unresolved", [])) + len(b.get("openings", [])) + 10
     H = max((y1 - y0) * SCALE + MARGIN * 2 + 70, MARGIN + 60 + 16 * n_lines)
+    upper = lambda w: w["bottom_mm"] - fl > 1500 if multi else w["bottom_mm"] > 1500   # 途中の高さから始まる壁
+    level_label = f"{level[:-1]}階・" if multi and level and level.endswith("F") else ""
 
     def P(x, y):  # 平面図の向き（Y が上）で描く
         return f"{(x - x0) * SCALE + MARGIN:.1f},{(y1 - y) * SCALE + MARGIN:.1f}"
@@ -50,13 +100,15 @@ def render_svg(b: dict, title: str) -> str:
            f'viewBox="0 0 {W:.0f} {H:.0f}" font-family="sans-serif" '
            f'data-x0="{x0:.1f}" data-y1="{y1:.1f}" data-scale="{SCALE}" data-margin="{MARGIN}">',
            f'<rect width="100%" height="100%" fill="white"/>',
-           f'<text x="{MARGIN}" y="30" font-size="16">{html.escape(title)}（平面図・壁の作り直し）</text>']
-    for r in b.get("rooms", []):
+           f'<text x="{MARGIN}" y="30" font-size="16">{html.escape(title)}（{level_label}平面図・壁の作り直し）</text>']
+    for r in rooms:
         poly = " ".join(P(*p) for p in r["polygon"])
         out.append(f'<polygon points="{poly}" fill="#eef2fa" stroke="#b8c2d8" stroke-width="0.5"/>')
-    for w in b["walls"]:
+    if multi:  # 2階建て：1階の図に2階の外形と下屋の範囲、2階の図に床の穴（階段）を重ねる
+        out += _level_overlays(b, level, names, P)
+    for w in walls:
         poly = " ".join(P(*c) for c in wall_corners(w))
-        dash = ' stroke-dasharray="4,2"' if w["bottom_mm"] > 1500 else ""  # 途中の高さから始まる壁は破線
+        dash = ' stroke-dasharray="4,2"' if upper(w) else ""  # 途中の高さから始まる壁は破線
         c = COLORS[w["kind"]]
         out.append(f'<polygon data-id="{w["id"]}" points="{poly}" fill="{c}" fill-opacity="0.35" stroke="{c}" stroke-width="1"{dash}>'
                    f'<title>{w["id"]} {LABELS[w["kind"]]} 厚み{w["thickness_mm"]}mm 下端{w["bottom_mm"]} '
@@ -64,8 +116,8 @@ def render_svg(b: dict, title: str) -> str:
         mx, my = (w["start"][0] + w["end"][0]) / 2, (w["start"][1] + w["end"][1]) / 2
         out.append(f'<text x="{P(mx, my).split(",")[0]}" y="{P(mx, my).split(",")[1]}" font-size="10" '
                    f'fill="{c}" text-anchor="middle" dy="-3">{w["id"]} {w["thickness_mm"]:g}</text>')
-    walls_by_id = {w["id"]: w for w in b["walls"]}
-    for o in b.get("openings", []):
+    walls_by_id = {w["id"]: w for w in walls}
+    for o in openings:
         w = walls_by_id[o["wall"]]
         (x0w, y0w), (x1w, y1w) = w["start"], w["end"]
         L = math.hypot(x1w - x0w, y1w - y0w) or 1.0
@@ -79,7 +131,7 @@ def render_svg(b: dict, title: str) -> str:
         cx, cy = P(*o["center"]).split(",")
         out.append(f'<text x="{cx}" y="{cy}" font-size="9" fill="{col}" text-anchor="middle" dy="12">'
                    f'{o["id"]} FL+{o["head_fl_mm"]}</text>')
-    for u in b.get("unresolved", []):
+    for u in unresolved:
         a, e = P(*u["start"]), P(*u["end"])
         out.append(f'<line x1="{a.split(",")[0]}" y1="{a.split(",")[1]}" x2="{e.split(",")[0]}" y2="{e.split(",")[1]}" '
                    f'stroke="#ff8800" stroke-width="5" stroke-dasharray="6,3"><title>{u["id"]} 未解決（壁があるか要確認）</title></line>')
@@ -97,26 +149,29 @@ def render_svg(b: dict, title: str) -> str:
     # 右側：壁の一覧（マウスを使わなくても読めるように）
     tx, ty = plan_w + 10, MARGIN
     out.append(f'<text x="{tx}" y="{ty}" font-size="13" font-weight="bold">壁の一覧（番号・種類・厚み・下端）</text>')
-    for w in b["walls"]:
+    for w in walls:
         ty += 16
-        extra = "　途中から始まる壁" if w["bottom_mm"] > 1500 else ""
+        extra = "　途中から始まる壁" if upper(w) else ""
         out.append(f'<text x="{tx}" y="{ty}" font-size="12" fill="{COLORS[w["kind"]]}">'
                    f'{w["id"]}　{LABELS[w["kind"]]}　厚み {w["thickness_mm"]:g}mm　下端 {w["bottom_mm"]}{extra}</text>')
-    for u in b.get("unresolved", []):
+    for u in unresolved:
         ty += 16
         out.append(f'<text x="{tx}" y="{ty}" font-size="12" fill="#ff8800">{u["id"]}　未解決（壁があるか要確認）　幅 {u["width_mm"]}mm</text>')
-    if b.get("openings"):
+    if openings:
         ty += 26
         out.append(f'<text x="{tx}" y="{ty}" font-size="13" font-weight="bold">開口の一覧（番号・壁・幅・下端〜上端）</text>')
-        for o in b["openings"]:
+        for o in openings:
             ty += 16
             out.append(f'<text x="{tx}" y="{ty}" font-size="12" fill="{OPENING_COLORS[o["kind"]]}">'
                        f'{o["id"]}　{OPENING_LABELS[o["kind"]]}（{STYLE_LABELS.get(o["style"], o["style"])}）　{o["wall"]}　'
                        f'幅 {o["width_mm"]:g}　FL+{o["sill_fl_mm"]}〜FL+{o["head_fl_mm"]}</text>')
-    r = b.get("roof") or {}
-    if r.get("shape") == "shed":
+    roofs = b.get("roofs") if multi else None
+    for r in roofs or [b.get("roof") or {}]:
+        if r.get("shape") != "shed":
+            continue
         ty += 26
-        out.append(f'<text x="{tx}" y="{ty}" font-size="13" font-weight="bold">屋根</text>')
+        name = {"main": "大屋根", "lean_to": "下屋"}.get(r.get("kind"), "屋根") if roofs else "屋根"
+        out.append(f'<text x="{tx}" y="{ty}" font-size="13" font-weight="bold">{name}</text>')
         for line in (f"片流れ {r['pitch'][0]}/10　低い側 {r.get('low_side')}（+Y を北とした）　厚み {r.get('thickness_mm')}mm",
                      f"軒の出 西{r['eave_mm']['W']} 東{r['eave_mm']['E']} 南{r['eave_mm']['S']} 北{r['eave_mm']['N']}mm（樋は除く）"):
             ty += 16
@@ -137,11 +192,14 @@ def main(argv: list[str] | None = None) -> int:
     if not src.exists():
         print(f"先に python -m adapters.walkinhome {args.alias} を実行してください。")
         return 1
-    svg = render_svg(json.loads(src.read_text(encoding="utf-8")), args.alias)
-    assert_clean(svg, "plan.svg")
-    dst = out_dir(args.alias) / "plan.svg"
-    dst.write_text(svg, encoding="utf-8")
-    print(f"→ 書き出し: data/out/{args.alias}/plan.svg（ブラウザで開いてください）")
+    b = json.loads(src.read_text(encoding="utf-8"))
+    names = [lv["name"] for lv in b.get("levels", [])]
+    files = {"plan.svg": None} if len(names) <= 1 else {"plan.svg": names[0], **{f"plan_{n}.svg": n for n in names}}
+    for fname, level in files.items():
+        svg = render_svg(b, args.alias, level)
+        assert_clean(svg, fname)
+        (out_dir(args.alias) / fname).write_text(svg, encoding="utf-8")
+        print(f"→ 書き出し: data/out/{args.alias}/{fname}（ブラウザで開いてください）")
     return 0
 
 

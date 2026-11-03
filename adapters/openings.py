@@ -17,6 +17,8 @@ from adapters.walls import Wall, bbox_polygon
 HARDWARE = ("HTOT", "DTOT", "TOT1", "TOT2", "TOT3")   # 取っ手・握り
 RAIL = ("OSTN",)                                     # 吊り戸のレール
 SILL = "KURI"                                        # 敷居（くつずり）
+DOOR_CODES = ("SDOR", "DTOT", "OSTN", "SGDR")        # 戸・取っ手・吊り戸のレール
+GLASS_CODES = ("MADO", "MGLS", "GMAD")               # 窓の障子・ガラス
 
 
 def _suffix(code: str | None) -> str:
@@ -40,10 +42,17 @@ def hole(part: Part) -> tuple[Polygon, float, float]:
 
 def classify(part: Part, sill: float, fl: float) -> tuple[str, str]:
     """種類（window / door / entrance_door）と形（sliding / fixed / hinged / outset_sliding など）。"""
-    codes = [_suffix(pr.code) for pr in part.primitives]
+    return _classify([_suffix(pr.code) for pr in part.primitives], sill, fl)
+
+
+def _classify(codes: list[str], sill: float, fl: float) -> tuple[str, str]:
     if any(c.startswith("TOT") or c == "EHN1" for c in codes):
         return "entrance_door", "entrance"
-    if sill <= fl + 100:
+    is_door = any(c in DOOR_CODES for c in codes)
+    is_glass = any(c in GLASS_CODES for c in codes)
+    # ★床まで届く FIX 窓（物件B）：戸の部位がなく窓ガラスの部位があれば、床から始まっていても窓。
+    # ★FL+400 から始まる吊り戸（物件B）：戸の部位があれば、床から浮いていてもドア
+    if is_door or (sill <= fl + 100 and not is_glass):
         if "OSTN" in codes:
             return "door", "outset_sliding"    # 壁の外に吊る引き戸
         if "DTOT" in codes:
@@ -55,6 +64,44 @@ def classify(part: Part, sill: float, fl: float) -> tuple[str, str]:
     if mado >= 2:
         return "window", "sliding"             # 引き違い（模型では中央に縦桟1本。SPEC §8）
     return "window", "fixed"                   # FIX（枠だけ）。★障子1枚の窓も FIX（物件Aで 作者確認）
+
+
+def group_stacked(holes: list[tuple]) -> list[list[tuple]]:
+    """上下に重なる建具（下が FIX・上が引き違いの2段の窓など）を1組にする。holes は (建具, 平面の形, 下端, 上端)。
+    平面の重なりが小さい方の8割以上で、上下の端が 5mm 以内で接するものを同じ組にする（★物件B に4組）。"""
+    parent = list(range(len(holes)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    for i in range(len(holes)):
+        for j in range(i + 1, len(holes)):
+            (_, fi, si, hi), (_, fj, sj, hj) = holes[i], holes[j]
+            if fi.intersection(fj).area < 0.8 * min(fi.area, fj.area):
+                continue
+            if abs(hi - sj) <= 5 or abs(hj - si) <= 5:
+                parent[find(j)] = find(i)
+    groups: dict[int, list[tuple]] = {}
+    for i, h in enumerate(holes):
+        groups.setdefault(find(i), []).append(h)
+    return [sorted(g, key=lambda h: h[2]) for g in groups.values()]
+
+
+def snap_hanging_doors(items: list[dict], fl: float, low: float = 100.0, high: float = 600.0) -> list[dict]:
+    """FL+100〜600 から始まるドアは、床からのドアにする。glb の例外（普通の家ではありえない形）として返す。
+    ★物件B の吊り戸4つは FL+400 から始まり、下の 400mm が壁の面で埋まっていた（作者 11/3「床から」）。"""
+    exceptions = []
+    for o in items:
+        if o["kind"] != "door" or not (low < o["sill_fl_mm"] <= high):
+            continue
+        old = o["sill_fl_mm"]
+        o.setdefault("assumptions", []).append(f"door_from_floor: glb では FL+{old:.0f} から始まる戸。床からのドアにした")
+        o["sill_fl_mm"], o["sill_mm"] = 0.0, fl
+        exceptions.append({"kind": "door_above_floor", "opening": o, "source": o["source"],
+                           "note": f"glb では室内の戸が FL+{old:.0f} から始まっていた（下は壁の面）。床からのドアにした"})
+    return exceptions
 
 
 def snap_door_heads(items: list[dict], fl: float, door_top_fl: float, tol: float = 50.0) -> None:
@@ -90,18 +137,28 @@ def assign_wall(fp: Polygon, sill: float, head: float, walls: list[Wall]) -> Wal
 def openings(tate: list[Part], walls: list[Wall], fl: float) -> tuple[list[dict], list[dict]]:
     """開口の一覧と、壁が見つからなかった建具の一覧。壁は Wall の物で返す（番号は後で振る）。"""
     out, orphans = [], []
-    for p in tate:
-        fp, sill, head = hole(p)
-        kind, style = classify(p, sill, fl)
+    for g in group_stacked([(p, *hole(p)) for p in tate]):
+        parts = [h[0] for h in g]
+        sill, head = min(h[2] for h in g), max(h[3] for h in g)
+        if len(g) == 1:
+            fp = g[0][1]
+            kind, style = classify(parts[0], sill, fl)
+        else:   # 上下2段の窓などは1つの穴にまとめる
+            fp = bbox_polygon(np.vstack([np.array(h[1].exterior.coords) for h in g]))
+            kind, style = _classify([_suffix(pr.code) for p in parts for pr in p.primitives], sill, fl)
         w = assign_wall(fp, sill, head, walls)
         if w is None:
-            orphans.append({"source": p.source, "reason": "この建具が入る壁が見つからない"})
+            orphans += [{"source": p.source, "reason": "この建具が入る壁が見つからない"} for p in parts]
             continue
         d = w.direction
         pts = np.array(fp.exterior.coords)[:-1]
         proj = (pts - w.start) @ d
-        out.append({"wall": w, "kind": kind, "style": style,
-                    "offset_mm": float(proj.min()), "width_mm": float(proj.max() - proj.min()),
-                    "sill_mm": sill, "head_mm": head, "sill_fl_mm": sill - fl, "head_fl_mm": head - fl,
-                    "center": np.asarray(fp.centroid.coords[0]), "source": p.source, "footprint": fp})
+        rec = {"wall": w, "kind": kind, "style": style,
+               "offset_mm": float(proj.min()), "width_mm": float(proj.max() - proj.min()),
+               "sill_mm": sill, "head_mm": head, "sill_fl_mm": sill - fl, "head_fl_mm": head - fl,
+               "center": np.asarray(fp.centroid.coords[0]), "source": parts[0].source, "footprint": fp}
+        if len(g) > 1:
+            rec["sources"] = [p.source for p in parts]
+            rec["assumptions"] = [f"stacked: 上下に重なる建具 {len(g)} 個を1つの穴にまとめた"]
+        out.append(rec)
     return out, orphans
