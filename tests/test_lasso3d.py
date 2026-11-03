@@ -142,7 +142,7 @@ def test_3d_eave_proposal_uses_the_human_number(out):
     p = res["proposals"][0]
     assert (p["target"], p["field"], p["from"], p["to"], p["value_source"]) == ("Y1", "eave_mm.S", 1, 450.0, "human:number:450")
     prompt = client.calls[0]["messages"][0]["content"]
-    assert "南から見た 3D の画面" in prompt and "図面（jww）はまだ読めない" in prompt
+    assert "南から見た 3D の画面" in prompt and "jww:section:D番号" in prompt and "通り芯から" in prompt   # 断面図の寸法の使い方
     log = [json.loads(x) for x in (out / "lasso_log.jsonl").read_text(encoding="utf-8").splitlines()]
     assert log[0]["where"] == "3d:S" and log[0]["selection"] == ["Y1:S"]
 

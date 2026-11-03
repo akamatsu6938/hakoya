@@ -54,7 +54,7 @@ def test_number_only_from_human_words():
     ({"target": "W9", "field": "thickness_mm", "value_source": "majority:interior", "reason": "x"}, "ありません"),
     ({"target": "W1", "field": "color", "value_source": "glb", "reason": "x"}, "直せる項目"),
     ({"target": "W1", "field": "thickness_mm", "value_source": "majority:interior", "reason": "x"}, "すでに"),
-    ({"target": "O1", "field": "head_fl_mm", "value_source": "jww:elevation:dim#4", "reason": "x"}, "平面図だけ"),   # 立面の図面はまだ読めない
+    ({"target": "O1", "field": "head_fl_mm", "value_source": "jww:elevation:dim#4", "reason": "x"}, "見つかりません"),   # 図面にない番号
     ({"target": "O1", "field": "head_fl_mm", "value_source": "2300", "reason": "x"}, "使えません"),
 ])
 def test_bad_proposals_are_refused_in_japanese(args, msg):

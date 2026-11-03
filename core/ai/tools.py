@@ -184,11 +184,18 @@ def render_view(ctx: ToolContext, view: str, highlight: list[str] | None = None,
     return res
 
 
-def get_drawing_region(ctx: ToolContext, view: str, bbox_px: list[int] | None = None) -> dict:
-    """図面（jww）の同じ面の画像と寸法・注記（平面図だけ。表題欄は除く）。模型の図と同じ縮尺・位置で描く。
-    bbox_px（模型の図の上の範囲）を渡すと、その範囲の寸法・注記だけを一覧にする。"""
+def get_drawing_region(ctx: ToolContext, view: str, bbox_px: list[int] | None = None, drawing: str | None = None) -> dict:
+    """図面（jww）の画像と寸法・注記（表題欄は除く）。
+    平面（plan・plan2）は模型の図と同じ縮尺・位置で描く。bbox_px（模型の図の上の範囲）を渡すと、その範囲の寸法・注記だけ。
+    立面（S・N・E・W）や drawing="section" などは、模型と位置を合わせない図面1枚の画像と寸法の一覧。"""
     _check_view(ctx, view)
-    from core.drawing_check import drawing_view
+    from core.drawing_check import drawing_view, sheet_view
+    if drawing or view not in ("plan", "plan2"):
+        kind = drawing or "elevation"
+        try:
+            return sheet_view(ctx.alias, kind, ctx.inspect_dir / f"sheet_{kind}.png")
+        except Exception as e:  # noqa: BLE001
+            return {"available": False, "note": f"図面を読めませんでした（{type(e).__name__}）"}
     info_p = ctx.inspect_dir / f"{view}.json"
     if not info_p.exists() or "uv_lo" not in json.loads(info_p.read_text(encoding="utf-8")):
         from core.render import render_all
@@ -247,7 +254,8 @@ def _value_from_source(ctx: ToolContext, coll: str, obj: dict, fld: str, value_s
             raise ToolError('図面の数値は value_source="jww:<図面>:<番号>"（例 jww:plan:D3）で指定してください')
         v = item_value(ctx.alias, ctx.building, parts[1], parts[2])
         if v is None:
-            raise ToolError(f"{value_source} の数値が図面に見つかりません（get_drawing_region が返した番号を使ってください。平面図だけ）")
+            raise ToolError(f"{value_source} の数値が図面に見つかりません（get_drawing_region が返した番号を使ってください。"
+                            "平面図は寸法 D・注記 T、立面図・断面図は寸法 D だけ）")
         return v
     raise ToolError(f"value_source「{value_source}」は使えません（majority:種類 / rule:項目 / glb / number / jww:図面:番号）")
 
@@ -307,9 +315,12 @@ TOOL_SPECS = {
                     "schema": {"type": "object", "properties": {
                         "view": {"type": "string", "enum": list(VIEWS), "description": "plan2 は2階建ての2階の平面"}, "source": {"type": "string", "enum": ["model", "glb"]},
                         "highlight": {"type": "array", "items": {"type": "string"}}}, "required": ["view"], "additionalProperties": False}},
-    "get_drawing_region": {"fn": get_drawing_region, "description": "図面（jww）の同じ面の画像と、寸法（D番号）・窓の注記（T番号、品番と上端 FL+）の一覧を返す。平面（plan・plan2）だけ。模型の図と同じ縮尺・位置で描く（表題欄は除く）。",
+    "get_drawing_region": {"fn": get_drawing_region, "description": "図面（jww）の画像と、寸法（D番号）・窓の注記（T番号、品番と上端 FL+）の一覧を返す（表題欄は除く）。平面（plan・plan2）は模型の図と同じ縮尺・位置。立面（S/N/E/W）や drawing=section（断面図）は、模型と位置を合わせない図面1枚の画像。",
                            "schema": {"type": "object", "properties": {"view": {"type": "string", "enum": list(VIEWS)},
-                                      "bbox_px": {"type": "array", "items": {"type": "integer"}}}, "required": ["view"], "additionalProperties": False}},
+                                      "bbox_px": {"type": "array", "items": {"type": "integer"}},
+                                      "drawing": {"type": "string", "enum": ["plan", "plan_2f", "elevation", "section"],
+                                                  "description": "見たい図面の種類（省くと面に合わせる）"}},
+                                      "required": ["view"], "additionalProperties": False}},
     "run_checks": {"fn": run_checks, "description": "コードの検査の結果（閉じた立体・離れた塊・造形範囲・glb との数の差）を返す。",
                    "schema": {"type": "object", "properties": {}, "additionalProperties": False}},
     "propose_override": {"fn": propose_override, "description": "直す案を1件つくる。数値は書かず、数値の出どころ value_source（majority:種類 / rule:項目 / glb / number）を指定する。数値はコードが計算する。number は人が書いた数値のときだけ。図面の寸法・注記は jww:plan:D3 のように番号で（get_drawing_region が返す）。屋根の軒の出は target=Y1・field=eave_mm.S のように辺を付ける（外壁の外の面から屋根の先まで、板金・樋を除く）。",

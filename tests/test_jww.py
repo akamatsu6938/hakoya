@@ -207,4 +207,10 @@ def test_real_a_drawing_region_and_jww_value_source():
     assert "error" in p and "すでに" in p["error"]                                    # O6 はもう FL+2000（同じ値なので案にならない）
     q = call_tool(ctx, "propose_override", {"target": "O6", "field": "sill_fl_mm", "value_source": "jww:plan:T99999", "reason": "x"})
     assert "見つかりません" in q["error"]
-    assert call_tool(ctx, "get_drawing_region", {"view": "S"})["available"] is False   # 立面はまだ
+    el = call_tool(ctx, "get_drawing_region", {"view": "S"})                       # 立面：図面1枚の画像（位置は合わせない）
+    assert el["available"] and el["kind"] == "elevation"
+    sec = call_tool(ctx, "get_drawing_region", {"view": "plan", "drawing": "section"})
+    assert sec["available"] and len(sec["dims"]) > 10
+    d = next(x for x in sec["dims"] if x["value_mm"] == 624)                        # 断面図の 1FL の寸法
+    from core.drawing_check import item_value
+    assert item_value("物件A", ctx.building, "section", d["id"]) == 624.0

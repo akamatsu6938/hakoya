@@ -10,6 +10,8 @@ from __future__ import annotations
 import math
 import re
 
+import numpy as np
+
 NOTE_RE = re.compile(r"[〇●○◯]+\s*(\d{5})[^()（）]*?(?:[\(（][LR][\)）])?\s*[\(（]FL\s*[+＋]\s*(\d+)\s*[\)）]")
 MATCH_MAX_MM = 1800.0       # 注記と開口の真ん中の距離の上限（注記は壁の外側、窓の近くに書かれる）
 SAME_MM = 25.0              # これ以内の差は同じとみなす（模型で 0.5mm）
@@ -129,9 +131,19 @@ def _aligned(alias: str, b: dict, kind: str):
 
 def item_value(alias: str, b: dict, kind: str, item_id: str) -> float | None:
     """図面の寸法（D番号）か注記（T番号）の数値。注記は FL+ の値（窓の上端）、なければ文字の中の数値1つ。"""
-    if kind not in VIEW_KIND.values():
+    if kind in VIEW_KIND.values():
+        d, _ = _aligned(alias, b, kind)
+    elif kind in ("elevation", "section"):
+        from core.jww import read_property
+        try:
+            d = read_property(alias, kind)                  # 立面図・断面図は寸法（D番号）だけ使う
+        except (KeyError, FileNotFoundError):
+            return None
+        if d is not None:
+            return next((float(x["value"]) for x in d.dims if x["id"] == item_id), None)
         return None
-    d, _ = _aligned(alias, b, kind)
+    else:
+        return None
     if d is None:
         return None
     for x in d.dims:
@@ -212,3 +224,55 @@ def drawing_view(alias: str, b: dict, view: str, canvas: dict, dst, bbox_px: lis
             "dims": dims, "notes": notes,
             "note": "寸法は D番号、窓・テラスドアの注記は T番号（品番と上端 FL+）。直す案の数値に使うときは "
                     f"value_source=\"jww:{kind}:<番号>\"（数値はコードが図面から読む）。図面の線は位置合わせした結果で、数 cm ずれることがある"}
+
+
+# ---------------------------------------------------------------- 立面図・断面図の画像（位置合わせなし。図面1枚をそのまま）
+
+SHEET_KINDS = ("elevation", "section", "plan", "plan_2f")
+SHEET_WIDTH_PX = 1400
+
+
+def sheet_view(alias: str, kind: str, dst) -> dict:
+    """図面1枚の画像（表題欄なし）と寸法の一覧。立面図（4面が1枚）・断面図は模型と位置を合わせないので、Claude が画像で見比べる。
+    描くのは本体の線と、寸法（D番号）・窓の注記（T番号）だけ。"""
+    from PIL import Image, ImageDraw
+
+    from core.jww import read_property
+    from core.render import _font
+    if kind not in SHEET_KINDS:
+        return {"available": False, "note": f"図面の種類は {'・'.join(SHEET_KINDS)} のどれかです"}
+    d = read_property(alias, kind)
+    if d is None:
+        return {"available": False, "note": f"この物件の {kind} の図面（jww）が登録されていません"}
+    if not len(d.lines):
+        return {"available": False, "note": "図面に線がありません"}
+    pts = np.vstack([d.lines[:, :2], d.lines[:, 2:]])
+    lo, hi = np.percentile(pts, 0.5, axis=0), np.percentile(pts, 99.5, axis=0)      # 枠の外の飛び離れた線は外す
+    k = (SHEET_WIDTH_PX - 40) / max(hi[0] - lo[0], 1.0)
+    w, h = SHEET_WIDTH_PX, int((hi[1] - lo[1]) * k) + 60
+
+    def px(x: float, y: float) -> tuple[float, float]:
+        return ((x - lo[0]) * k + 20, (hi[1] - y) * k + 40)
+
+    img = Image.new("RGB", (w, h), "white")
+    dr = ImageDraw.Draw(img)
+    for x0, y0, x1, y1 in d.lines:
+        dr.line([px(x0, y0), px(x1, y1)], fill=(60, 60, 60), width=1)
+    font = _font(11)
+    title = f"{alias}　図面（jww の{ {'elevation': '立面図', 'section': '断面図', 'plan': '平面図', 'plan_2f': '2階の平面図'}[kind] }。表題欄は除く）"
+    dr.text((10, 8), title, fill=(0, 0, 0), font=_font(14))
+    dims = []
+    for x in d.dims:
+        a, c = px(x["x0"], x["y0"]), px(x["x1"], x["y1"])
+        mid = ((a[0] + c[0]) / 2, (a[1] + c[1]) / 2)
+        dr.line([a, c], fill=(0, 90, 200), width=1)
+        dr.text((mid[0] + 2, mid[1] + 1), f"{x['id']} {x['text']}", fill=(0, 90, 200), font=font)
+        dims.append({"id": x["id"], "value_mm": x["value"], "text": x["text"], "at_px": [round(mid[0]), round(mid[1])]})
+    for n in window_notes(d):
+        p = px(n["x"], n["y"])
+        dr.text((p[0] + 2, p[1] - 12), f"{n['note_id']} {n['code']} FL+{n['head_fl_mm']}", fill=(200, 0, 0), font=font)
+    img.save(dst)
+    return {"available": True, "image_path": str(dst), "kind": kind, "scale": f"1/{d.scale:g}", "dims": dims,
+            "note": ("模型とは位置を合わせていない図面1枚の画像（立面図は4つの面が1枚に入っていることが多い）。"
+                     f"寸法の数値で直すときは value_source=\"jww:{kind}:D番号\"（数値はコードが図面から読む）。"
+                     "寸法がどこからどこまでか（通り芯からか、外壁の外の面からか）が分からないときは、使わずに人に聞く")}
