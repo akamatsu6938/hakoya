@@ -214,3 +214,37 @@ def test_real_a_drawing_region_and_jww_value_source():
     d = next(x for x in sec["dims"] if x["value_mm"] == 624)                        # 断面図の 1FL の寸法
     from core.drawing_check import item_value
     assert item_value("物件A", ctx.building, "section", d["id"]) == 624.0
+
+
+# ---------------------------------------------------------------- 立面図（1枚に4面）
+
+def test_elevation_groups_split_views_and_keep_isolated_window():
+    """地面の長い線でつながった2つの面を分け、壁の真ん中に離れてある窓（線が少ない）は、その面のまとまりに入れる。"""
+    from core.drawing_check import _elevation_groups
+
+    def rect(x0, y0, x1, y1):
+        return [[x0, y0, x1, y0], [x1, y0, x1, y1], [x1, y1, x0, y1], [x0, y1, x0, y0]]
+    lines = [[-20000, 0, 20000, 0]]                                         # 2つの面をつなぐ地面の線（長い）
+    for k in range(6):                                                      # 面1：外形と縦の線（線を 20 本以上に）
+        lines += rect(-15000 + k * 10, 0, -5000 - k * 10, 6000 - k * 10)
+    for k in range(6):                                                      # 面2
+        lines += rect(5000 + k * 10, 0, 15000 - k * 10, 6000 - k * 10)
+    lines += rect(-11000, 3000, -9000, 3400)                                # 面1 の真ん中の窓（ほかの線から 1m 以上離れている）
+    d = jww.Drawing(kind="elevation", paper_mm=(420, 297), title_band_top=-127, main_group=0, scale=100.0,
+                    lines=np.array(lines, float))
+    groups = _elevation_groups(d)
+    assert len(groups) == 2
+    sizes = sorted(len(g) for g in groups)
+    assert sizes == [24, 28]                                                # 窓の4本は面1に入る（地面の線は使わない）
+
+
+@pytest.mark.realdata
+@pytest.mark.parametrize("alias", ["物件A", "物件B"])
+def test_real_elevations_align_each_face(alias):
+    from PIL import Image
+    from core.ai.tools import ToolContext, call_tool
+    ctx = ToolContext.load(alias)
+    for v in ("S", "N", "E", "W"):
+        r = call_tool(ctx, "get_drawing_region", {"view": v})
+        assert r["available"] and r.get("aligned") and r["align_score"] >= 0.4, (alias, v, r.get("note"))
+        assert Image.open(r["image_path"]).size == Image.open(ctx.inspect_dir / f"{v}_model.png").size

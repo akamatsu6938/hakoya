@@ -189,7 +189,19 @@ def get_drawing_region(ctx: ToolContext, view: str, bbox_px: list[int] | None = 
     平面（plan・plan2）は模型の図と同じ縮尺・位置で描く。bbox_px（模型の図の上の範囲）を渡すと、その範囲の寸法・注記だけ。
     立面（S・N・E・W）や drawing="section" などは、模型と位置を合わせない図面1枚の画像と寸法の一覧。"""
     _check_view(ctx, view)
-    from core.drawing_check import drawing_view, sheet_view
+    from core.drawing_check import drawing_view, elevation_view, sheet_view
+    if not drawing and view in ("S", "N", "E", "W"):   # 立面：その面を模型の図に合わせた図面（合わなければ図面1枚）
+        info_p = ctx.inspect_dir / f"{view}.json"
+        if not info_p.exists() or "uv_lo" not in json.loads(info_p.read_text(encoding="utf-8")):
+            from core.render import render_all
+            render_all(ctx.alias)
+        try:
+            res = elevation_view(ctx.alias, ctx.building, view, json.loads(info_p.read_text(encoding="utf-8")),
+                                 ctx.inspect_dir / f"{view}_drawing.png")
+        except Exception:  # noqa: BLE001  合わせられないときは図面1枚にする
+            res = None
+        if res:
+            return res
     if drawing or view not in ("plan", "plan2"):
         kind = drawing or "elevation"
         try:
