@@ -45,8 +45,22 @@ def save(data: dict) -> None:
     os.replace(tmp, p)
 
 
+EDITION_FILE = "EDITION"        # 社外用の exe に同梱する印（中身は "external"）。packaging/hakoya_external.spec
+
+
 def edition() -> str:
+    """版：self（自分用。AI の接続3つ）／external（社外用。API キーと AI なしだけ）。
+    exe の中に印のファイルがあれば、それを使う（環境変数で自分用に戻せないように）。開発中は HAKOYA_EDITION。"""
+    mark = paths.REPO_ROOT / EDITION_FILE
+    if mark.exists():
+        return mark.read_text(encoding="utf-8").strip() or "external"
     return os.environ.get("HAKOYA_EDITION", "self")
+
+
+def check_connection(connection: str) -> None:
+    """この版で使えない接続なら、日本語の ValueError（社外用では Claude のプランの接続は使えない。SPEC §7-4）。"""
+    if connection == "claude_code" and "claude_code" not in available_connections():
+        raise ValueError("この版では Claude（自分のプラン）の接続は使えません。API キーか、AI なしを選んでください")
 
 
 def available_connections() -> list[str]:

@@ -220,6 +220,15 @@ def undo_override(alias: str, override_id: str):
 
 # ---------------------------------------------------------------- 検品（SPEC §9-2・§10）
 
+def _check_edition(connection: str) -> None:
+    """社外用の版では、Claude のプランの接続（claude_code）を断る（SPEC §7-4。画面で隠すだけにしない）。"""
+    from core import settings_store
+    try:
+        settings_store.check_connection(connection)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 RUNS: dict[str, dict] = {}           # 物件ごとの検品の実行状態
 RUNS_LOCK = threading.Lock()
 
@@ -253,6 +262,7 @@ def start_inspection(alias: str, connection: str = "claude_code"):
     _check_alias(alias)
     if connection not in ("claude_code", "api_key", "off"):
         raise HTTPException(400, "connection は claude_code・api_key・off のどれかです")
+    _check_edition(connection)
     if connection == "api_key" and not secret_store.has_api_key():
         raise HTTPException(409, "API キーが設定されていません。「設定」タブで API キーを入れてください")
     with RUNS_LOCK:
@@ -365,6 +375,7 @@ def lasso_ask(alias: str, body: LassoIn):
     _effective(alias)                                   # 組み立て前なら 409
     if body.connection not in ("claude_code", "api_key", "off"):
         raise HTTPException(400, "connection は claude_code・api_key・off のどれかです")
+    _check_edition(body.connection)
     if body.connection == "api_key" and not secret_store.has_api_key():
         raise HTTPException(409, "API キーが設定されていません。「設定」タブで API キーを入れてください")
     if RUNS.get(alias, {}).get("running"):
@@ -441,6 +452,7 @@ def rule_draft(company: str, body: RuleDraftIn):
     _check_company(company)
     if body.connection not in ("claude_code", "api_key", "off"):
         raise HTTPException(400, "connection は claude_code・api_key・off のどれかです")
+    _check_edition(body.connection)
     if body.connection == "api_key" and not secret_store.has_api_key():
         raise HTTPException(409, "API キーが設定されていません。「設定」タブで API キーを入れてください")
     if not RULE_DRAFTING.acquire(blocking=False):

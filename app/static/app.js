@@ -820,7 +820,17 @@ for (const id of (location.hash || '').slice(1).split(',').filter(Boolean)) {
   if (btn) btn.click();
 }
 
+// 版に合わせて、使えない接続（社外用ではプランの接続）の選択肢とボタンを隠す
+async function applyEdition() {
+  let st;
+  try { st = await call('GET', '/api/settings'); } catch (e) { return; }
+  if ((st.connections || []).includes('claude_code')) return;
+  document.querySelectorAll('#lasso-conn option[value="claude_code"], #rules-conn option[value="claude_code"]').forEach((o) => o.remove());
+  $('#inspect-ai').hidden = true;
+}
+
 (async () => {
+  applyEdition();
   const props = await call('GET', '/api/properties');
   const sel = $('#alias');
   sel.innerHTML = props.map((p) => `<option value="${p.alias}" data-built="${p.built}">${p.alias}${p.has_glb ? '' : '（glb なし）'}</option>`).join('');
