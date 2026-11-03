@@ -117,8 +117,11 @@ def get_building(ctx: ToolContext) -> dict:
 
 
 def get_elements(ctx: ToolContext, view: str | None = None, kind: str | None = None, ids: list[str] | None = None) -> dict:
-    """部材の一覧。view（S/N/E/W/plan/plan2）を渡すと、その面の図に写っている部材だけ。kind・ids でも絞れる。"""
+    """部材の一覧。view（S/N/E/W/plan/plan2）を渡すと、その面の図に写っている部材だけ。kind・ids でも絞れる。
+    軒の番号（Y1:S など）は、その屋根（Y1）として返す。"""
     b = ctx.building
+    if ids:
+        ids = [i.split(":")[0] for i in ids]
     in_view = None
     if view:
         _check_view(ctx, view)

@@ -127,3 +127,4 @@ def test_roof_eave_proposals_use_only_human_numbers():
                                                              "reason": "x"})["error"]
     items = call_tool(ctx, "get_elements", {"ids": ["Y1"]})["elements"]
     assert items[0]["eave_mm"]["S"] == 300 and "footprint" not in items[0]
+    assert call_tool(ctx, "get_elements", {"ids": ["Y1:S"]})["elements"][0]["id"] == "Y1"   # 軒の番号でも屋根が返る
