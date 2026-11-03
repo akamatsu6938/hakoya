@@ -355,13 +355,15 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
         interior = wl.merge_collinear(interior, region)
     kept = wl.drop_covered(outer + interior, keep_kinds=("exterior", "standalone"), ratio=0.5)
     interior = [w for w in kept if w.kind == "interior"]
-    # 背中合わせから作った壁は後回し：向かい合う仕上げ面から作った内壁で覆われていれば、そちらを使う
-    if interior:
-        inner_fp = unary_union([w.rect() for w in interior])
-        for b in back_to_back:
-            r = b.rect()
-            if r.intersection(inner_fp).area / r.area < 0.5:
-                interior.append(b)
+    # 背中合わせから作った壁は後回し：向かい合う仕上げ面から作った内壁で覆われていれば、そちらを使う。
+    # ★単独の壁（袖壁）で覆われていれば、単独の壁だけを作る（物件E：ポーチの袖壁が、単独の壁と
+    #   「背中合わせの外壁の面」の両方で入っていて、同じ所に壁が2枚でき、部品どうしが重なった。11/3）
+    inner_fp = unary_union([w.rect() for w in interior]) if interior else Polygon()
+    std_fp = unary_union([w.rect() for w in standalone]) if standalone else Polygon()
+    for b in back_to_back:
+        r = b.rect()
+        if r.intersection(inner_fp).area / r.area < 0.5 and r.intersection(std_fp).area / r.area < 0.5:
+            interior.append(b)
     for w in interior:  # 巾木の上から始まっている内壁は、床（FL）から立てる
         if w.bottom <= fl + LOW_FACE_MM:
             w.bottom = fl
@@ -379,10 +381,10 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
     # glb の例外の記録（検品の材料）
     exceptions = []
     for b in back_to_back:
-        merged_into = b if b in interior else max(interior, key=lambda w: w.rect().intersection(b.rect()).area)
+        merged_into = b if b in interior else max(interior + standalone, key=lambda w: w.rect().intersection(b.rect()).area)
+        how = "単独の壁（袖壁）と同じ所なので、単独の壁だけを作った" if merged_into.kind == "standalone" else "内壁として扱った"
         exceptions.append({"kind": "back_to_back_exterior_faces", "start": b.start, "end": b.end, "wall": merged_into,
-                           "note": f"glb では背中合わせの外壁の面（間 {getattr(b, '_back_to_back_gap', 0):.0f}mm）。"
-                                   "内壁として扱った"})
+                           "note": f"glb では背中合わせの外壁の面（間 {getattr(b, '_back_to_back_gap', 0):.0f}mm）。{how}"})
         if merged_into is not b:
             merged_into.assumptions.append("back_to_back: glb で背中合わせの外壁の面として入っていた壁を、この内壁にまとめた")
 

@@ -18,8 +18,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from manifold3d import CrossSection, FillRule, Manifold, OpType
 from shapely.affinity import translate
-from shapely.geometry import Polygon, box
-from shapely.ops import unary_union
+from shapely.geometry import LineString, Polygon, box
+from shapely.ops import nearest_points, unary_union
 
 from core.roof_geom import MultiPlane, surfaces as roof_surfaces
 
@@ -122,6 +122,60 @@ def wall_rect(w: dict, extra: float = 0.0, t0: float | None = None, t1: float | 
 
 def _wall_top(w: dict) -> float | None:
     return None if w["height"] == "to_roof" else float(w["height"])
+
+
+LOOSE_RATIO = 0.01   # いちばん大きい塊の 1% より小さく、離れているかけらは作らない
+
+
+def drop_loose_bits(parts: list[Manifold]) -> tuple[list[Manifold], int]:
+    """同じオブジェクトの部品を合わせて、いちばん大きい塊から離れた小さなかけらを、各部品から除く。（部品, 除いた数）
+    ★物件D：土間の穴の間に、床の板の切れ端（実寸 573×144mm）が離れて残った（11/3）。"""
+    bodies = sorted(union_all(parts).decompose(), key=lambda s: -s.volume())
+    small = [x for x in bodies[1:] if x.volume() < LOOSE_RATIO * bodies[0].volume()] if len(bodies) > 1 else []
+    if not small:
+        return parts, 0
+    cut = union_all(small)
+    return [drop_specks(p - cut) for p in parts], len(small)
+
+
+def footprint_of(solid: Manifold) -> Polygon:
+    """立体を上から見た形（shapely）。穴（向きが逆の輪）は抜く。"""
+    outer, holes = [], []
+    for ring in solid.project().to_polygons():
+        if len(ring) < 3:
+            continue
+        x, y = ring[:, 0], ring[:, 1]
+        signed = 0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+        (outer if signed > 0 else holes).append(Polygon(ring))
+    shape = unary_union(outer) if outer else Polygon()
+    return shape.difference(unary_union(holes)) if holes else shape
+
+
+def bridge_islands(found: Manifold, width: float, z_top: float, allowed: Polygon) -> tuple[Manifold, int]:
+    """基礎の帯が島になった所を、床下の見えない帯でいちばん近い所につなぐ。（つないだ基礎, つないだ数）
+    ★物件C・D・E・F（11/3）：ほかの壁とつながらない内壁のまとまり（収納・台所の壁など）の下の帯が、外周の帯から離れていた。
+    つなぐ帯は allowed（家の中から、低い床（土間）を除いた所）の中だけを通し、高さは基礎の天端まで（床の板の下に隠れる）。"""
+    bodies = sorted(found.decompose(), key=lambda s: -s.volume())
+    if len(bodies) < 2:
+        return found, 0
+    main = footprint_of(bodies[0])
+    bridges = []
+    for island in bodies[1:]:
+        if island.volume() < 1e3:                       # 1cm³（実寸）未満のかけらはつながない
+            continue
+        fp = footprint_of(island)
+        p, q = nearest_points(fp, main)
+        if p.distance(q) < 1e-6:
+            continue
+        br = LineString([p, q]).buffer(width / 2, cap_style=3).intersection(allowed)
+        br = next((g for g in getattr(br, "geoms", [br]) if g.intersects(fp) and g.intersects(main)), None)
+        if br is None or br.is_empty:                   # 土間などで途切れて、1本でつなげない
+            continue
+        top = min(z_top, island.bounding_box()[5])
+        bridges.append(prism(br, 0.0, top))
+        main = main.union(fp).union(br)                 # 次の島は、つないだ島にもつなげる
+    return (union_all([found] + bridges), len(bridges)) if bridges else (found, 0)
+
 
 
 # ---------------------------------------------------------------- 屋根板（軒の出を辺ごとに直す）
@@ -403,6 +457,11 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         if w["kind"] in ("standalone", "exterior") and not is_upper(w) and outside_house(w):
             pieces.append(prism(wall_rect(w), 0.0, float(w["bottom_mm"])))
     foundation = union_all(pieces)
+    low_floors = unary_union(doma_holes) if doma_holes else Polygon()
+    foundation, bridged = bridge_islands(foundation, band, ftop, outline.difference(low_floors))
+    if bridged:
+        notes["foundation"].append(f"ほかの帯から離れていた基礎の帯 {bridged} か所を、床下の見えない帯（幅 {band:.0f}）で"
+                                   "いちばん近い帯につないだ（ほかの壁とつながらない内壁の下。印刷で部品がばらばらにならないように）")
 
     # 基礎 → 1階の位置合わせ：基礎の帯の内側の角に上向きの三角、1階の床裏に受けのくぼみ（SPEC §8）
     inner_outline = outline.buffer(-band, join_style="mitre")
@@ -460,11 +519,17 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         sp = unary_union([Polygon(s["polygon"]) for s in soffits] + [wall_rect(w) for w in roof_walls if is_upper(w)])
         # 垂れ壁の実際の厚み（180）と外壁のルール（162）の差でできる細いすき間を埋める
         sp = sp.buffer(GAP_FILL_MM / 2, join_style="mitre").buffer(-GAP_FILL_MM / 2, join_style="mitre")
+        # ポーチの天井につながらない板（垂れ壁の真下だけの分）は作らない。★物件E：外壁の垂れ壁の下の板が、天井の板と
+        # 角だけで接し、辺だけでつながった閉じない立体になった（11/3）。その垂れ壁は自分の下端から作る
+        under = unary_union([Polygon(s["polygon"]) for s in soffits])
+        sp = unary_union([g for g in getattr(sp, "geoms", [sp]) if g.intersection(under).area > 1.0])
         roof_parts.append(prism(sp, soffit_top, soffit_top + plate_t))
         notes["roof"].append("ポーチの天井は屋根と一緒に印刷する（作者指定）")
     roof_ext_parts = ext_up + std_up
     for w in roof_walls:
-        bottom = soffit_top + plate_t if soffit_top is not None and is_upper(w) else None   # ポーチの天井の板の上に乗る
+        on_plate = (soffit_top is not None and is_upper(w)
+                    and wall_rect(w).intersection(sp).area >= 0.5 * wall_rect(w).area)
+        bottom = soffit_top + plate_t if on_plate else None   # ポーチの天井の板の上に乗る
         roof_ext_parts.append(wall_solid(w, bottom=bottom))
     if roof_walls:
         notes["roof"].append("ポーチの上の垂れ壁と屋根まで届く袖壁（" + "・".join(w["id"] for w in roof_walls) + "）は屋根と一緒に印刷する")
@@ -535,6 +600,14 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
             notes["roof"].append(f"屋根の外壁も、窓・ドアのまわり {margin_mm}mm はざらざらにしない（天井の高さに上端がある窓・ドアの上の帯）")
 
     # 面がちょうど重なる所に残る、厚みゼロのかけらを取り除く
+    # 基礎と1階が重なる所は基礎から削る。★物件C：ポーチの天端（500）が基礎の天端（480）より高く、外壁の下端が 20mm めり込んだ（11/3）
+    first_floor = union_all([floor1, exterior])
+    if (foundation ^ first_floor).volume() > 1.0:
+        foundation = foundation - first_floor
+        notes["foundation"].append("1階の壁と重なる所（基礎の天端より高いポーチなど）は、基礎の方を削った（組むときにぶつからないように）")
+    (floor1, exterior), loose = drop_loose_bits([floor1, exterior])
+    if loose:
+        notes["floor1"].append(f"1階の床・壁から離れた小さなかけら {loose} 個は作らない（上がり框のまわりの床の切れ端など。印刷するとばらばらになるため）")
     foundation, floor1, exterior, roof_solid, roof_ext = (
         drop_specks(x) for x in (foundation, floor1, exterior, roof_solid, roof_ext))
 
