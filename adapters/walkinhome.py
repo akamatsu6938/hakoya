@@ -450,10 +450,11 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
     return (building, rec) if return_debug else building
 
 
-def write_building(alias: str, building: dict) -> Path:
-    """building.json を書き出す。前回のものがあれば番号を引き継ぎ（core/ids.py）、前回の分は .prev に残す。"""
+def write_building(alias: str, building: dict, fresh: bool = False) -> Path:
+    """building.json を書き出す。前回のものがあれば番号を引き継ぎ（core/ids.py）、前回の分は .prev に残す。
+    fresh=True なら前回を使わず、番号を振り直す（物件B：平屋として作った前回の番号と混ざらないように）。"""
     path = out_dir(alias) / "building.json"
-    previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() and not fresh else None
     stabilize(building, previous)
     text = json.dumps(building, ensure_ascii=False, indent=2)
     assert_clean(text, "building.json")
@@ -505,9 +506,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Walk in home の glb から building.json を作る")
     ap.add_argument("alias", help="物件の仮名（data/local_paths.yaml の名前。例：物件A）")
     ap.add_argument("--company", default="jisha", help="会社ルール（rules/<名前>.yaml）")
+    ap.add_argument("--fresh-ids", action="store_true", help="前回の番号を引き継がず、振り直す")
     args = ap.parse_args(argv)
     building = build(args.alias, args.company)
-    path = write_building(args.alias, building)
+    path = write_building(args.alias, building, fresh=args.fresh_ids)
     _print_summary(args.alias, building)
     ch = building.get("id_changes", {})
     if "new" in ch:
