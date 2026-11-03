@@ -575,11 +575,14 @@ def _pick_corners(poly: Polygon, count: int = 4, leg: float | None = None,
             if Polygon([p1, p1 + e1 * leg, p1 + e2 * leg]).intersection(avoid).area > 1.0:
                 continue
         cands.append((p1, e1, e2))
+    # 三角は直角の隅に置く形（SPEC §8）。直角に近い角（75〜105°）を先に選び、足りなければほかの角も使う
+    # ★斜めの壁の 135° の角に置くと、受けのくぼみの面が壁の面と線で接し、閉じた立体にならなかった（試験用の家 2026-11-03）
+    square = [c for c in cands if abs(float(c[1] @ c[2])) <= math.cos(math.radians(75))]
     x0, y0, x1, y1 = poly.bounds
     chosen = []
     for target in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))[:count]:
-        best = min((c for c in cands if not any(c is d for d in chosen)),
-                   key=lambda c: math.dist(c[0], target), default=None)
+        pool = [c for c in square if not any(c is d for d in chosen)] or [c for c in cands if not any(c is d for d in chosen)]
+        best = min(pool, key=lambda c: math.dist(c[0], target), default=None)
         if best is not None:
             chosen.append(best)
     return chosen
