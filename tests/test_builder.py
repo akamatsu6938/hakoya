@@ -258,3 +258,12 @@ def test_real_eave_override_moves_only_that_side():
     assert np.allclose(np.delete(lo1, [1, 2, 5]), np.delete(lo0, [1, 2, 5]), atol=0.5)
     for k in ("foundation", "floor1", "exterior1", "roof_ext"):
         assert parts[k].solid.volume() == pytest.approx(base[k].solid.volume(), rel=1e-9)
+
+
+def test_strip_above_ceiling_high_window_is_not_fuzzy(parts):
+    """上端が天井の高さ（3024）の窓 O1 のすぐ上の帯は、屋根の外壁（ざらざら）ではなく屋根の部品に入る（11/3 作者）。"""
+    from shapely.geometry import box
+    from core.builder import prism
+    strip = prism(box(1100, 0, 2600, 160), 3030, 3090)            # O1（x 1000〜2700）の上、外壁 W1 の中
+    assert (parts["roof_ext"].solid ^ strip).volume() < 1
+    assert (parts["roof"].solid ^ strip).volume() > 0.9 * strip.volume()

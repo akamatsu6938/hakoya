@@ -20,7 +20,8 @@ from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
 
 from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
-                          drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note, slab_outline, slab_solid)
+                          drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note, slab_outline, slab_solid,
+                          opening_keep_out, smooth_near_openings)
 
 Z_LO, Z_HI = -10000.0, 100000.0       # 「下・上の限りなし」の代わりの高さ（実寸 mm）
 BIG = box(-1e6, -1e6, 1e6, 1e6)
@@ -338,6 +339,15 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
         floor1 = union_all([floor1, core1])
         exterior2, core2 = skin_split(exterior2, zone_a, zf2, ceil2, [w for w in walls2 if w["kind"] == "exterior"])
         floor2 = union_all([floor2, core2])
+        # 下屋の外壁・大屋根の外壁も、窓・ドアのまわりはざらざらにしない（天井の高さに上端がある窓・ドアの上の帯）
+        for name, ws in (("roof_lower", walls1), ("roof", walls2)):
+            keep = opening_keep_out([w for w in ws if w["kind"] in ("exterior", "standalone")], ops_by, margin)
+            if name == "roof_lower":
+                roof_lower_ext, roof_lower, moved = smooth_near_openings(roof_lower_ext, roof_lower, keep)
+            else:
+                roof_ext, roof_solid, moved = smooth_near_openings(roof_ext, roof_solid, keep)
+            if moved:
+                notes[name].append(f"外壁の窓・ドアのまわり {m.get('fuzzy_skin_opening_margin_mm')}mm はざらざらにしない（天井の高さに上端がある窓・ドアの上の帯）")
         notes["floor1"].append(f"ファジースキンは外壁の外の面から {band_mm}mm（模型）の層だけ。窓・ドアのまわり {m.get('fuzzy_skin_opening_margin_mm')}mm は外す")
 
     # 小さなかけら（模型で 0.5mm³ 未満。区域の境目や斜めの壁の角の床板の切れ端）は捨てる

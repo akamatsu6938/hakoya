@@ -177,6 +177,26 @@ def eave_note(roof: dict, name: str = "屋根") -> str | None:
     return f"{name}の軒の出を人の修正どおりにした（glb から {parts}）"
 
 
+def opening_keep_out(walls: list[dict], ops_by: dict[str, list[dict]], margin: float) -> list[Manifold]:
+    """窓・ドアのまわり（margin、実寸）の箱。ファジースキンをかけない所。"""
+    return [prism(wall_rect(w, extra=40, t0=o["offset_mm"] - margin, t1=o["offset_mm"] + o["width_mm"] + margin),
+                  float(o["sill_mm"]) - margin, float(o["head_mm"]) + margin)
+            for w in walls for o in ops_by.get(w["id"], [])]
+
+
+def smooth_near_openings(fuzzy: Manifold, plain: Manifold, keep_out: list[Manifold]) -> tuple[Manifold, Manifold, bool]:
+    """ざらざらの部品のうち窓・ドアのまわりの箱に入る所を、同じオブジェクトのざらざらにしない部品へ移す。
+    ★天井の高さに上端がある窓・ドアのすぐ上の帯が、屋根の外壁の部品（まるごとざらざら）に入り、
+      サッシの上の枠がざらざらに見えた（2026-11-03 作者）。"""
+    if not keep_out or fuzzy.is_empty():
+        return fuzzy, plain, False
+    ko = union_all(keep_out)
+    near = fuzzy ^ ko
+    if near.is_empty():
+        return fuzzy, plain, False
+    return fuzzy - ko, union_all([plain, near]), True
+
+
 def slab_solid(poly, rb: dict, rt: dict, zmax: float) -> Manifold:
     """屋根板の立体：外形の柱を、屋根の上の面と下の面の間で切る。
     柱の高さは屋根の面から決める（軒を伸ばしても上の面が平らに切られない）。外形が glb のままなら今までと同じ立体。"""
@@ -490,6 +510,13 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     notes["roof"].append(f"ずれ止めの三角を {len(r_corners)} か所（外壁の内側の角" + ("、天井の高さで1階にはまる）" if z_cut else "）"))
     roof_ext = union_all(roof_ext_parts)
     roof_solid = union_all(roof_parts) - roof_ext          # 同じオブジェクトの部品どうしは重ねない
+    if band_mm:   # 屋根の外壁も、窓・ドアのまわりはざらざらにしない（1階の外壁と同じ幅）
+        fuzzy_walls = [w for w in walls if w["kind"] in ("exterior", "standalone")]
+        margin_mm = m.get("fuzzy_skin_opening_margin_mm", 0.0)
+        roof_ext, roof_solid, moved = smooth_near_openings(
+            roof_ext, roof_solid, opening_keep_out(fuzzy_walls, openings_by_wall, float(margin_mm) * scale))
+        if moved:
+            notes["roof"].append(f"屋根の外壁も、窓・ドアのまわり {margin_mm}mm はざらざらにしない（天井の高さに上端がある窓・ドアの上の帯）")
 
     # 面がちょうど重なる所に残る、厚みゼロのかけらを取り除く
     foundation, floor1, exterior, roof_solid, roof_ext = (
