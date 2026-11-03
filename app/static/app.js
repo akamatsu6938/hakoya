@@ -762,10 +762,16 @@ function renderLassoResult(res) {
 }
 
 // ---------------------------------------------------------------- 全体
-async function loadPlan() {   // 平面図（2階建ては選んだ階）
-  const q = state.multi ? `?level=${encodeURIComponent($('#plan-level').value)}` : '';
-  $('#plan').innerHTML = await call('GET', '/api/plan/{a}' + q);
+async function loadPlan() {   // 平面図（2階建ては選んだ階）。「図面を重ねる」なら図面（jww）の線も
+  const params = [];
+  if (state.multi) params.push(`level=${encodeURIComponent($('#plan-level').value)}`);
+  if ($('#plan-drawing').checked) params.push('drawing=1');
+  $('#plan').innerHTML = await call('GET', '/api/plan/{a}' + (params.length ? '?' + params.join('&') : ''));
 }
+$('#plan-drawing').addEventListener('change', async () => {
+  try { setStatus($('#plan-drawing').checked ? '図面を重ねています（初回は数秒かかります）…' : '図面を外しています…', 'busy'); await loadPlan(); setStatus('', ''); }
+  catch (e) { setStatus('平面図を読めませんでした：' + e.message, 'err'); }
+});
 $('#plan-level').addEventListener('change', async () => {
   clearLasso();
   try { await loadPlan(); } catch (e) { setStatus('平面図を読めませんでした：' + e.message, 'err'); }

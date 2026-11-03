@@ -276,3 +276,22 @@ def sheet_view(alias: str, kind: str, dst) -> dict:
             "note": ("模型とは位置を合わせていない図面1枚の画像（立面図は4つの面が1枚に入っていることが多い）。"
                      f"寸法の数値で直すときは value_source=\"jww:{kind}:D番号\"（数値はコードが図面から読む）。"
                      "寸法がどこからどこまでか（通り芯からか、外壁の外の面からか）が分からないときは、使わずに人に聞く")}
+
+
+def overlay_lines(alias: str, b: dict, level: str | None = None) -> tuple[list | None, str]:
+    """平面図に重ねる図面の線（模型の座標）と、ひとこと。図面がない・合わないときは (None, 理由)。"""
+    from core.jww import _rot
+    names = [lv["name"] for lv in b.get("levels") or []]
+    kind = "plan" if level in (None, names[0] if names else None) else "plan_2f"
+    try:
+        d, al = _aligned(alias, b, kind)
+    except Exception as e:  # noqa: BLE001
+        return None, f"図面を読めませんでした（{type(e).__name__}）"
+    if d is None:
+        return None, "この階の平面図（jww）が登録されていません"
+    if al is None:
+        return None, "平面図を模型に位置合わせできなかったので、重ねていません"
+    a = _rot(al["rot"], d.lines[:, :2]) + [al["tx"], al["ty"]]
+    c = _rot(al["rot"], d.lines[:, 2:]) + [al["tx"], al["ty"]]
+    segs = [(float(p[0]), float(p[1]), float(q[0]), float(q[1])) for p, q in zip(a, c)]
+    return segs, f"緑の線＝図面（jww の平面図。位置合わせの点数 {al['score']:.2f}）。表題欄と文字は重ねていません"

@@ -68,9 +68,11 @@ def _level_overlays(b: dict, level: str, names: list[str], P) -> list[str]:
     return out
 
 
-def render_svg(b: dict, title: str, level: str | None = None) -> str:
+def render_svg(b: dict, title: str, level: str | None = None, overlay: list | None = None, overlay_note: str | None = None) -> str:
     """平面図。2階建てでは階ごとに描く（level を省くと1階）。描く範囲と縮尺は全部の階で同じにする
-    （重ねて見比べられ、囲んで直すときの座標も階によらずそろう）。"""
+    （重ねて見比べられ、囲んで直すときの座標も階によらずそろう）。
+    overlay：模型の座標にした図面（jww）の線（x0, y0, x1, y1）。いちばん上に細い緑の線で重ねる（SPEC §10「元の図面を重ねる」）。
+    overlay_note：重ねられなかった理由など（図の上に書く）。"""
     names = [lv["name"] for lv in b.get("levels", [])]
     multi = len(names) > 1
     if level is None and multi:
@@ -132,6 +134,12 @@ def render_svg(b: dict, title: str, level: str | None = None) -> str:
         cx, cy = P(*o["center"]).split(",")
         out.append(f'<text x="{cx}" y="{cy}" font-size="9" fill="{col}" text-anchor="middle" dy="12">'
                    f'{o["id"]} FL+{o["head_fl_mm"]}</text>')
+    if overlay:   # 図面の線（文字・表題欄は描かない）。囲む操作に反応しないように pointer-events="none"
+        segs = "".join(f'<line x1="{P(x0_, y0_).split(",")[0]}" y1="{P(x0_, y0_).split(",")[1]}" '
+                       f'x2="{P(x1_, y1_).split(",")[0]}" y2="{P(x1_, y1_).split(",")[1]}"/>' for x0_, y0_, x1_, y1_ in overlay)
+        out.append(f'<g id="jww-overlay" stroke="#0a8f3c" stroke-width="0.7" stroke-opacity="0.75" pointer-events="none">{segs}</g>')
+    if overlay_note:
+        out.append(f'<text x="{MARGIN}" y="48" font-size="12" fill="#0a8f3c">{html.escape(overlay_note)}</text>')
     for u in unresolved:
         a, e = P(*u["start"]), P(*u["end"])
         out.append(f'<line x1="{a.split(",")[0]}" y1="{a.split(",")[1]}" x2="{e.split(",")[0]}" y2="{e.split(",")[1]}" '
@@ -168,12 +176,14 @@ def render_svg(b: dict, title: str, level: str | None = None) -> str:
                        f'幅 {o["width_mm"]:g}　FL+{o["sill_fl_mm"]}〜FL+{o["head_fl_mm"]}</text>')
     roofs = b.get("roofs") if multi else None
     for r in roofs or [b.get("roof") or {}]:
-        if r.get("shape") != "shed":
+        if r.get("shape") not in ("shed", "gable", "hip", "multi"):
             continue
         ty += 26
         name = {"main": "大屋根", "lean_to": "下屋"}.get(r.get("kind"), "屋根") if roofs else "屋根"
         out.append(f'<text x="{tx}" y="{ty}" font-size="13" font-weight="bold">{name}</text>')
-        for line in (f"片流れ {r['pitch'][0]}/10　低い側 {r.get('low_side')}（+Y を北とした）　厚み {r.get('thickness_mm')}mm",
+        shape = (f"片流れ {r['pitch'][0]}/10　低い側 {r.get('low_side')}（+Y を北とした）" if r.get("shape") == "shed" else
+                 f"{ {'gable': '切妻', 'hip': '寄棟', 'multi': '複数の面'}[r['shape']] }（面 {len(r.get('planes') or [])} 枚）　勾配 {r['pitch'][0]}/10")
+        for line in (f"{shape}　厚み {r.get('thickness_mm')}mm",
                      f"軒の出 西{r['eave_mm']['W']} 東{r['eave_mm']['E']} 南{r['eave_mm']['S']} 北{r['eave_mm']['N']}mm（樋は除く）"):
             ty += 16
             out.append(f'<text x="{tx}" y="{ty}" font-size="12">{html.escape(line)}</text>')

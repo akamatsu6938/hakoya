@@ -148,13 +148,17 @@ def drawing_check(alias: str):
 
 
 @app.get("/api/plan/{alias}")
-def plan(alias: str, level: str | None = None):
-    """平面図。2階建ては level（1F・2F）で階を選ぶ（省くと1階）。"""
+def plan(alias: str, level: str | None = None, drawing: bool = False):
+    """平面図。2階建ては level（1F・2F）で階を選ぶ（省くと1階）。drawing=1 で図面（jww）の線を重ねる。"""
     _check_alias(alias)
     b, _ = _effective(alias)
     if level is not None and level not in [lv["name"] for lv in b.get("levels", [])]:
         raise HTTPException(400, "その階はありません")
-    svg = render_svg(b, alias, level)
+    overlay, note = None, None
+    if drawing:
+        from core.drawing_check import overlay_lines
+        overlay, note = overlay_lines(alias, b, level)
+    svg = render_svg(b, alias, level, overlay=overlay, overlay_note=note)
     assert_clean(svg, "平面図")
     return Response(svg, media_type="image/svg+xml; charset=utf-8")
 
