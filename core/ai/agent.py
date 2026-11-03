@@ -75,24 +75,25 @@ def load_ai_models() -> dict:
     return yaml.safe_load((REPO_ROOT / "rules" / "ai_models.yaml").read_text(encoding="utf-8"))
 
 
-def tool_names() -> list[str]:
-    return [f"mcp__{SERVER}__{n}" for n in TOOL_SPECS]
+def tool_names(specs: dict | None = None) -> list[str]:
+    return [f"mcp__{SERVER}__{n}" for n in (specs or TOOL_SPECS)]
 
 
-def build_server(ctx: ToolContext):
-    """HAKOYA の道具を、Agent SDK のアプリ内 MCP サーバーにする。"""
+def build_server(ctx, specs: dict | None = None, call=None):
+    """HAKOYA の道具を、Agent SDK のアプリ内 MCP サーバーにする。specs・call を渡すと別の道具の一覧（会社ルールなど）。"""
     from claude_agent_sdk import create_sdk_mcp_server
-    return create_sdk_mcp_server(name=SERVER, version="1.0.0", tools=make_tools(ctx))
+    return create_sdk_mcp_server(name=SERVER, version="1.0.0", tools=make_tools(ctx, specs, call))
 
 
-def make_tools(ctx: ToolContext) -> list:
+def make_tools(ctx, specs: dict | None = None, call=None) -> list:
     """道具ごとの Agent SDK の道具（@tool）。画像は Claude に見せ、パスは渡さない。"""
     from claude_agent_sdk import tool
+    specs = specs or TOOL_SPECS
 
     def make(name: str, spec: dict):
         @tool(name, spec["description"], spec["schema"])
         async def handler(args: dict[str, Any]) -> dict[str, Any]:
-            res = call_tool(ctx, name, dict(args or {}))
+            res = (call or call_tool)(ctx, name, dict(args or {}))
             content: list[dict] = [{"type": "text", "text": json.dumps(
                 {k: v for k, v in res.items() if k != "image_path"}, ensure_ascii=False)}]
             if "image_path" in res:  # 画像は Claude に見せる（パスは渡さない）
@@ -101,19 +102,25 @@ def make_tools(ctx: ToolContext) -> list:
             return {"content": content, "is_error": "error" in res}
         return handler
 
-    return [make(n, s) for n, s in TOOL_SPECS.items()]
+    return [make(n, s) for n, s in specs.items()]
 
 
-def prepare_workdir(alias: str, company: str) -> Path:
-    """Skill を置いた作業フォルダ（リポジトリの外）。"""
+def prepare_workdir(alias: str, company: str, skills_used: tuple[str, ...] = ("inspection", "model-rules")) -> Path:
+    """Skill を置いた作業フォルダ（リポジトリの外）。会社の Skill の写しには、承認した「学んだルール」の文章を足す
+    （skills/ そのものは書き換えない）。"""
+    from core.rules import learned_skill_section
     work = Path(tempfile.gettempdir()) / "hakoya_agent" / f"w{abs(hash(alias)) % 10**8}"
     skills = work / ".claude" / "skills"
     if skills.exists():
         shutil.rmtree(skills)
-    for name in ("inspection", "model-rules", f"company-{company}"):
+    for name in (*skills_used, f"company-{company}"):
         src = SKILLS_DIR / name
         if src.exists():
             shutil.copytree(src, skills / name)
+    extra = learned_skill_section(company)
+    md = skills / f"company-{company}" / "SKILL.md"
+    if extra and md.exists():
+        md.write_text(md.read_text(encoding="utf-8").rstrip("\n") + "\n\n" + extra + "\n", encoding="utf-8")
     return work
 
 

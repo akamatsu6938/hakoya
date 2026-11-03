@@ -45,6 +45,11 @@ def load_local_paths(path: Path = LOCAL_PATHS) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def aliases(path: Path = LOCAL_PATHS) -> list[str]:
+    """登録してある物件の仮名（ng_words などの設定は除く）。"""
+    return [k for k, v in load_local_paths(path).items() if isinstance(v, dict)]
+
+
 def property_files(alias: str, path: Path = LOCAL_PATHS) -> PropertyFiles:
     conf = load_local_paths(path).get(alias)
     if not isinstance(conf, dict):

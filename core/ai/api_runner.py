@@ -105,10 +105,12 @@ def make_client():
     return anthropic.AsyncAnthropic(api_key=key)
 
 
-def skill_text(company: str) -> str:
-    """Skill の文章（SKILL.md の本文）をつなげる。Agent SDK の Skill の代わりに、指示（system）として渡す。"""
+def skill_text(company: str, names: tuple[str, ...] | None = None) -> str:
+    """Skill の文章（SKILL.md の本文）をつなげる。Agent SDK の Skill の代わりに、指示（system）として渡す。
+    会社の Skill には、承認した「学んだルール」の文章を足す。"""
+    from core.rules import learned_skill_section
     parts = []
-    for name in (*SKILL_NAMES, f"company-{company}"):
+    for name in (*(SKILL_NAMES if names is None else names), f"company-{company}"):
         p = SKILLS_DIR / name / "SKILL.md"
         if not p.exists():
             continue
@@ -117,6 +119,8 @@ def skill_text(company: str) -> str:
             end = body.find("\n---", 3)
             if end != -1:
                 body = body[end + 4:]
+        if name == f"company-{company}" and learned_skill_section(company):
+            body = body.rstrip() + "\n\n" + learned_skill_section(company)
         parts.append(f'<skill name="{name}">\n{body.strip()}\n</skill>')
     return "\n\n".join(parts)
 
@@ -143,9 +147,9 @@ def api_schema(schema):
     return out
 
 
-def api_tools() -> list[dict]:
+def api_tools(specs: dict | None = None) -> list[dict]:
     """HAKOYA の道具を、Messages API の道具の形にする（ほかの道具は渡さない）。"""
-    return [{"name": n, "description": s["description"], "input_schema": s["schema"]} for n, s in TOOL_SPECS.items()]
+    return [{"name": n, "description": s["description"], "input_schema": s["schema"]} for n, s in (specs or TOOL_SPECS).items()]
 
 
 def face_prompt(face: str, multi: bool = False) -> str:
@@ -163,9 +167,10 @@ def face_prompt(face: str, multi: bool = False) -> str:
             "直す案は propose_override で試し、数値は自分で書かないでください。見つからなければ「指摘なし」と返してください。")
 
 
-def tool_result(ctx: ToolContext, block) -> dict:
-    """道具を1回動かし、結果を tool_result にする。画像は Claude に見せ、パスは渡さない。"""
-    res = call_tool(ctx, block.name, dict(block.input or {}))
+def tool_result(ctx, block, call=None) -> dict:
+    """道具を1回動かし、結果を tool_result にする。画像は Claude に見せ、パスは渡さない。
+    call を渡すと、その呼び方で道具を動かす（会社ルールの道具など。省くと検品・囲んで直すの道具）。"""
+    res = (call or call_tool)(ctx, block.name, dict(block.input or {}))
     text = json.dumps({k: v for k, v in res.items() if k != "image_path"}, ensure_ascii=False)
     assert_clean(text, "Claude に送るデータ")
     content: list[dict] = [{"type": "text", "text": text}]
@@ -188,8 +193,8 @@ def _blocks(content) -> list[dict]:
     return out
 
 
-async def tool_loop(client, ctx: ToolContext, prompt: str, *, model: str, effort: str, system, tools: list[dict],
-                    meter: Meter, max_turns: int, on_turn=None, on_tool=None) -> tuple[str, str, int]:
+async def tool_loop(client, ctx, prompt: str, *, model: str, effort: str, system, tools: list[dict],
+                    meter: Meter, max_turns: int, on_turn=None, on_tool=None, call=None) -> tuple[str, str, int]:
     """道具を使うやりとりを、終わるまで（または上限まで）回す。返り値：(最後の文章, 止まった理由, 回数)。
     検品の面ごとの担当と、囲んで直すの両方で使う。"""
     messages: list[dict] = [{"role": "user", "content": prompt}]
@@ -210,7 +215,7 @@ async def tool_loop(client, ctx: ToolContext, prompt: str, *, model: str, effort
         for b in uses:
             if on_tool:
                 on_tool(b.name)
-            results.append(tool_result(ctx, b))
+            results.append(tool_result(ctx, b, call))
         if turn == max_turns - 1:
             results.append({"type": "text", "text": NUDGE})
         messages.append({"role": "user", "content": results})

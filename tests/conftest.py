@@ -1,10 +1,14 @@
 """テスト共通の設定。実データ（data/local_paths.yaml とその先の glb）がなければ realdata のテストを飛ばす。"""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# 人が承認した「学んだルール」はテストでは使わない（結果が承認で変わらないように）。読み込みより先に決める
+os.environ.setdefault("HAKOYA_LEARNED_RULES", "off")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:

@@ -297,9 +297,10 @@ TOOL_SPECS = {
 }
 
 
-def call_tool(ctx: ToolContext, name: str, args: dict) -> dict:
-    """道具を名前で呼ぶ。誤りは {"error": 日本語} で返す（Claude が読んで直せるように）。"""
-    spec = TOOL_SPECS.get(name)
+def call_tool(ctx, name: str, args: dict, specs: dict | None = None) -> dict:
+    """道具を名前で呼ぶ。誤りは {"error": 日本語} で返す（Claude が読んで直せるように）。
+    specs を渡すと、その道具の一覧から呼ぶ（会社ルールの言語化など）。"""
+    spec = (specs or TOOL_SPECS).get(name)
     if spec is None:
         return {"error": f"{name} という道具はありません"}
     try:

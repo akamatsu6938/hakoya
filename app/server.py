@@ -25,7 +25,7 @@ from core import findings as fd
 from core import overrides as ov
 from core import secret_store
 from core.export import write_outputs
-from core.paths import load_local_paths, out_dir, property_files
+from core.paths import out_dir, property_files
 from core.privacy import assert_clean
 from tools.plan_preview import render_svg
 
@@ -53,7 +53,8 @@ async def same_origin_only(request: Request, call_next):
 
 
 def _aliases() -> list[str]:
-    return [k for k, v in load_local_paths().items() if isinstance(v, dict)]
+    from core.paths import aliases
+    return aliases()
 
 
 def _check_alias(alias: str) -> None:
