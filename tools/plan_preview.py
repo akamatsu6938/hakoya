@@ -52,8 +52,9 @@ def _level_overlays(b: dict, level: str, names: list[str], P) -> list[str]:
                 out.append(poly(lv[n]["outline"], 'fill="none" stroke="#555" stroke-width="1.5" stroke-dasharray="8,4"'))
         for r in b.get("roofs", []):
             if r.get("kind") == "lean_to" and r.get("footprint"):
-                out.append(poly(r["footprint"], 'fill="none" stroke="#e08a00" stroke-width="1.5" stroke-dasharray="10,3,2,3"'))
-                out.append(label(r["footprint"], "下屋の屋根の範囲（一点鎖線）", "#e08a00"))
+                # 「未解決の所」（橙の破線）と見分けられるよう、紫にする（作者 11/3）
+                out.append(poly(r["footprint"], 'fill="none" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="10,3,2,3"'))
+                out.append(label(r["footprint"], "下屋の屋根の範囲（一点鎖線）", "#8e44ad"))
         for e in b.get("glb_exceptions", []):
             if e["kind"] == "upper_floor_overhang" and e.get("polygon"):
                 out.append(poly(e["polygon"], 'fill="#ffb366" fill-opacity="0.35" stroke="#e08a00" stroke-width="1"'))
