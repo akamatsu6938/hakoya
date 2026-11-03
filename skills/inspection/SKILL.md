@@ -33,8 +33,8 @@ glb にはサッシ・ガラス・巾木などがそのまま入っている。�
 - `view`：S / N / E / W / plan（2階建てでは2階の平面 plan2 もある。plan は1階）
 - `kind`：shape / opening / roof / outline / rule / print
 - `severity`：高（印刷できない・形が大きく違う）／中（見た目に分かる違い）／低（念のため）
-- `message`：日本語で1文。「どの部材が・何と比べて・どう違うか」（例：「南の窓 O4 の上端が、ほかの南の窓より 200mm 低い」）
-- `targets`：部材の番号（W3、O4 など）
+- `message`：日本語で1文。「どの部材が・何と比べて・どう違うか」（例：「南の窓 O○ の上端が、ほかの南の窓より低い」）
+- `targets`：部材の番号（W○、O○ など）
 - `evidence`：根拠（どの面の図・どの部材の番号・どの会社ルールの項目か）
 - `region`：画像上の範囲（get_elements の bbox_px）
 - `proposal`：直す案（`propose_override` の結果）か、なければ null
