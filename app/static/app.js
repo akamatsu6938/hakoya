@@ -154,7 +154,9 @@ function renderTables(b) {
   }
   // 屋根：番号・種類・勾配・低い側は表示だけ。軒の出（西・東・南・北）を直せる
   const rt = $('#roofs');
-  rt.innerHTML = `<tr><th>番号</th>${lvHead}<th>種類</th><th>勾配</th><th>低い側</th>${[...'WESN'].map((s) => `<th>軒の出 ${SIDE[s]}</th>`).join('')}</tr>`;
+  const r2 = (h) => h.replace(/<th>/g, '<th rowspan="2">');   // 見出しは2段（軒の出の下に西・東・南・北）
+  rt.innerHTML = `<tr>${r2(`<th>番号</th>${lvHead}<th>種類</th><th>勾配</th><th>低い側</th>`)}<th colspan="4">軒の出（mm）</th></tr>`
+    + `<tr>${[...'WESN'].map((s) => `<th>${SIDE[s]}</th>`).join('')}</tr>`;
   for (const r of b.roofs || []) {
     const eaves = [...'WESN'].map((s) => (r.eave_mm && s in r.eave_mm ? { field: `eave_mm.${s}`, value: r.eave_mm[s] } : { text: '' }));
     const rows = editableRow([{ text: r.id }, ...lvCell(r), { text: roofKind(r) }, { text: (r.pitch || []).join('/') },
