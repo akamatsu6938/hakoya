@@ -542,6 +542,64 @@ def rule_answer(company: str, body: RuleAnswerIn):
 
 # ---------------------------------------------------------------- 設定（SPEC §10 の 8）
 
+# ---------------------------------------------------------------- 物件の登録（core/registry.py）
+PICKS: dict[str, str] = {}   # 画面の「選ぶ」で選んだ場所。サーバーの中だけで持ち、画面には番号だけ渡す（場所に施主名が入ることがある）
+
+
+class PickIn(BaseModel):
+    what: str
+
+
+class RegisterIn(BaseModel):
+    alias: str
+    glb_token: str | None = None
+    glb_path: str | None = None
+    drawings_token: str | None = None
+    drawings_path: str | None = None
+    ng_words: list[str] = []
+
+
+@app.get("/api/registry")
+def registry_list():
+    """登録してある物件（仮名・glb があるか・図面の種類・出してはいけない言葉の数）と、次の仮名。場所は返さない。"""
+    from core import registry as rg
+    return _safe_json(rg.list_properties())
+
+
+@app.post("/api/registry/pick")
+def registry_pick(body: PickIn):
+    """Windows の「選ぶ」窓を出す（glb＝ファイル、folder＝図面のフォルダ）。返すのは番号と、見つかったものの種類だけ。"""
+    import secrets as _secrets
+    from core import registry as rg
+    if body.what not in rg.PICK_DIALOGS:
+        raise HTTPException(400, "選ぶものが分かりません")
+    try:
+        chosen = rg.pick(body.what)
+    except Exception as e:  # noqa: BLE001  PowerShell が使えない PC など
+        raise HTTPException(500, f"選ぶ窓を出せませんでした（{type(e).__name__}）。場所を貼り付けてください")
+    if not chosen:
+        return _safe_json({"cancelled": True})
+    token = _secrets.token_hex(8)
+    PICKS[token] = chosen
+    ok, text = (rg.describe_glb if body.what == "glb" else rg.describe_drawings)(Path(chosen))
+    return _safe_json({"token": token, "ok": ok, "text": text})
+
+
+@app.post("/api/registry")
+def registry_add(body: RegisterIn):
+    """物件を登録する（local_paths.yaml の最後に書き足す。元のファイルは読むだけ）。"""
+    from core import registry as rg
+    glb = PICKS.get(body.glb_token or "") or (body.glb_path or "")
+    drawings = PICKS.get(body.drawings_token or "") or (body.drawings_path or None)
+    if not glb.strip():
+        raise HTTPException(400, "glb を選んでください")
+    try:
+        alias = rg.register(body.alias, glb, drawings, body.ng_words)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _safe_json({"alias": alias, **rg.list_properties()})
+
+
 @app.get("/api/settings")
 def settings():
     """設定の状態。API キーは「入っているかどうか」だけを返す（キーそのものは返さない）。

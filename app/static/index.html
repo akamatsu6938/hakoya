@@ -117,6 +117,20 @@
       <ul id="downloads" class="list"></ul>
     </div>
     <div id="sset" class="pane">
+      <h3>物件の登録</h3>
+      <p class="hint">Walk in home の glb（と図面のフォルダ）を選び、仮名を付けて登録します。元のファイルは読むだけで、書き換えもコピーもしません。ファイル名や場所（施主名が入ることがあります）は画面に出しません。</p>
+      <table id="registry-list" class="registry"></table>
+      <div class="registry-form">
+        <label>仮名 <input id="reg-alias" type="text" maxlength="20"></label>
+        <div><button id="reg-pick-glb">glb を選ぶ</button> <span id="reg-glb-status" class="hint">まだ選んでいません</span></div>
+        <div><button id="reg-pick-dwg">図面のフォルダを選ぶ</button> <span id="reg-dwg-status" class="hint">なくても登録できます（jww。名前の「平面」「立面」「断面」「2階」で種類を分けます）</span></div>
+        <details><summary>選ぶ窓が出ないとき（場所を貼り付ける）</summary>
+          <input id="reg-glb-path" type="text" placeholder="glb の場所（ファイルか、glb が1つだけ入ったフォルダ）" spellcheck="false">
+          <input id="reg-dwg-path" type="text" placeholder="図面（jww）のフォルダの場所（なくてもよい）" spellcheck="false">
+        </details>
+        <label>出してはいけない言葉（施主名・住所など。1行に1つ）<textarea id="reg-ng" rows="2" spellcheck="false"></textarea></label>
+        <div><button id="reg-submit" class="primary">登録する</button> <span id="reg-msg"></span></div>
+      </div>
       <h3>組み立てたあとの検品</h3>
       <select id="auto-inspect"></select>
       <p class="hint">「読み込んで組み立てる」のあと、自動で検品を始めます。Claude（自分のプラン）はプランの利用枠を、Claude（API キー）はキーの持ち主の料金を使います。</p>

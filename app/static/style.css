@@ -105,3 +105,12 @@ tr.approve .approve-box input[type=text] { flex: 1; min-width: 0; width: auto; }
 .st { font-size: 12px; padding: 0 6px; border-radius: 3px; background: var(--bg); }
 .st.承認 { background: #eef8f1; color: var(--ok); } .st.却下 { background: #fdeeee; color: var(--bad); } .st.あとで { background: #fff8e6; color: var(--warn); }
 @media (max-width: 1000px) { main { grid-template-columns: 1fr; height: auto; } #canvas { height: 420px; } }
+/* 物件の登録（設定タブ） */
+.registry { border-collapse: collapse; width: 100%; margin: 4px 0 8px; font-size: 12px; }
+.registry th, .registry td { border-bottom: 1px solid var(--line); padding: 3px 5px; text-align: left; }
+.registry .warn { color: var(--bad); }
+.registry-form { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.registry-form input[type="text"], .registry-form textarea { width: 100%; box-sizing: border-box; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; }
+.registry-form details input { margin-top: 4px; }
+.registry-form .ok { color: var(--ok); } .registry-form .err { color: var(--bad); }
+#reg-msg.ok { color: var(--ok); } #reg-msg.err { color: var(--bad); }

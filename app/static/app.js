@@ -843,12 +843,55 @@ async function applyEdition() {
   $('#inspect-ai').hidden = true;
 }
 
-(async () => {
-  applyEdition();
+// ---------------------------------------------------------------- 物件の登録（設定タブ。core/registry.py）
+const reg = { glb: null, dwg: null };
+async function renderRegistry() {
+  let r;
+  try { r = await call('GET', '/api/registry'); } catch (e) { $('#reg-msg').textContent = '登録の一覧を読めませんでした：' + e.message; return; }
+  if (!$('#reg-alias').value) $('#reg-alias').value = r.next_alias;
+  $('#registry-list').innerHTML = '<tr><th>仮名</th><th>glb</th><th>図面</th><th>出してはいけない言葉</th></tr>' + r.properties.map((p) =>
+    `<tr><td>${esc(p.alias)}</td><td>${esc(p.glb)}</td><td>${esc(p.drawings.join('・') || 'なし')}</td>` +
+    `<td>${p.ng_words ? `${p.ng_words} 件` : `<span class="warn">この物件の言葉なし</span>${r.global_ng_words ? `（全体の ${r.global_ng_words} 件だけ）` : ''}`}</td></tr>`).join('');
+}
+async function pickFor(what, key, el) {
+  el.textContent = '選ぶ窓を開いています…（ブラウザの後ろに出ることがあります）'; el.className = 'hint';
+  try {
+    const r = await call('POST', '/api/registry/pick', { what });
+    if (r.cancelled) { el.textContent = '選ぶのをやめました'; return; }
+    reg[key] = r.token; el.textContent = r.text; el.className = r.ok ? 'ok' : 'err';
+  } catch (e) { el.textContent = e.message; el.className = 'err'; }
+}
+$('#reg-pick-glb').addEventListener('click', () => pickFor('glb', 'glb', $('#reg-glb-status')));
+$('#reg-pick-dwg').addEventListener('click', () => pickFor('folder', 'dwg', $('#reg-dwg-status')));
+$('#reg-submit').addEventListener('click', async () => {
+  const body = { alias: $('#reg-alias').value.trim(), glb_token: reg.glb, glb_path: $('#reg-glb-path').value.trim() || null,
+    drawings_token: reg.dwg, drawings_path: $('#reg-dwg-path').value.trim() || null, ng_words: $('#reg-ng').value.split('\n') };
+  if (!body.ng_words.some((w) => w.trim()) && !confirm('出してはいけない言葉（施主名・住所など）が空です。このまま登録しますか？')) return;
+  try {
+    const r = await call('POST', '/api/registry', body);
+    reg.glb = reg.dwg = null;
+    for (const id of ['#reg-alias', '#reg-glb-path', '#reg-dwg-path', '#reg-ng']) $(id).value = '';
+    $('#reg-glb-status').textContent = 'まだ選んでいません'; $('#reg-glb-status').className = 'hint';
+    $('#reg-dwg-status').textContent = 'なくても登録できます'; $('#reg-dwg-status').className = 'hint';
+    $('#reg-msg').textContent = `${r.alias} を登録しました。上の物件の一覧から選んで「読み込んで組み立てる」を押してください`; $('#reg-msg').className = 'ok';
+    await fillAliases(r.alias);
+    renderRegistry();
+  } catch (e) { $('#reg-msg').textContent = '登録できませんでした：' + e.message; $('#reg-msg').className = 'err'; }
+});
+
+async function fillAliases(choose) {
   const props = await call('GET', '/api/properties');
   const sel = $('#alias');
   sel.innerHTML = props.map((p) => `<option value="${p.alias}" data-built="${p.built}">${p.alias}${p.has_glb ? '' : '（glb なし）'}</option>`).join('');
-  sel.addEventListener('change', () => selectAlias(sel.value, sel.selectedOptions[0].dataset.built === 'true'));
-  if (props.length) selectAlias(props[0].alias, props[0].built);
-  else setStatus('物件が登録されていません。HAKOYA の隣の data フォルダの local_paths.yaml に、物件の仮名と glb の場所を書いてください（README の手順5）', 'err');
+  const pick = props.find((p) => p.alias === choose) || props[0];
+  if (pick) { sel.value = pick.alias; selectAlias(pick.alias, pick.built); }
+  return props;
+}
+
+(async () => {
+  applyEdition();
+  $('#alias').addEventListener('change', (e) => selectAlias(e.target.value, e.target.selectedOptions[0].dataset.built === 'true'));
+  const props = await fillAliases();
+  renderRegistry();
+  if (!props.length) setStatus('物件が登録されていません。「設定」タブの「物件の登録」で glb を選んで登録してください（README の手順5のように local_paths.yaml に書いても登録できます）', 'err');
 })();
