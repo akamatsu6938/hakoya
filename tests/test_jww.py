@@ -149,6 +149,20 @@ def test_notes_match_one_to_one_and_far_note_stays_unmatched():
     assert sorted(n["note_id"] for n in unmatched) == ["T3", "T4"]
 
 
+def test_stacked_windows_get_the_note_with_the_closer_head():
+    """★物件F の O4・O5（11/3）：上下に並ぶ窓（地窓と高窓）は平面の位置がほぼ同じなので、上端の近い注記に結ぶ。"""
+    b = _box_house()
+    b["openings"] = [{"id": "O4", "wall": "W1", "kind": "window", "level": "1F", "center": [2000, 80], "head_fl_mm": 2780},
+                     {"id": "O5", "wall": "W1", "kind": "window", "level": "1F", "center": [2010, 80], "head_fl_mm": 1090},
+                     {"id": "O6", "wall": "W1", "kind": "window", "level": "1F", "center": [6500, 80], "head_fl_mm": 2400}]
+    notes = [{"note_id": "T1", "code": "06711", "head_fl_mm": 1098, "x": 2000, "y": -600},    # 下の窓の注記が上の窓に近い
+             {"note_id": "T2", "code": "06715", "head_fl_mm": 2778, "x": 2010, "y": -700},
+             {"note_id": "T3", "code": "16503", "head_fl_mm": 2000, "x": 6500, "y": -600}]   # 離れた窓は上端が違っても入れ替えない
+    matched, _ = match_notes(notes, b, {"rot": 0, "tx": 0.0, "ty": 0.0}, "1F")
+    got = {m["opening"]: (m["note_id"], m["head_fl_mm"]) for m in matched}
+    assert got == {"O4": ("T2", 2778), "O5": ("T1", 1098), "O6": ("T3", 2000)}
+
+
 # ---------------------------------------------------------------- 本物の図面
 
 def _applied(alias):
@@ -272,3 +286,18 @@ def test_real_drawing_checks_catch_seeded_errors_without_ai():
     targets = {t for f in fs for t in f["targets"]}
     assert {"O3", "O5", "O6", "O9", "O11"} <= targets                                  # E01〜E05
     assert any("06011" in f["message"] and not f["targets"] for f in fs)               # E06：消した窓 O7 の注記が余る
+
+
+def test_one_code_can_describe_a_row_or_a_stack_of_openings():
+    """★物件F（11/3）：品番 34023 が glb では横に3つ（840＋1790＋840）、07424 が上下に2つ（FL+20〜920 と 1030〜2400）。"""
+    from core.drawing_check import opening_units
+
+    def op(i, off, w, sill, head):
+        return {"id": f"O{i}", "wall": "W1", "offset_mm": off, "width_mm": w, "sill_fl_mm": sill, "head_fl_mm": head}
+    row = [op(1, 0, 840, 0, 2400), op(2, 815, 1790, 0, 2400), op(3, 2580, 840, 0, 2400), op(4, 5000, 840, 0, 2400)]
+    units = opening_units(row[1], row)
+    assert units[0] == (1790, 0, 2400) and (3420, 0, 2400) in units          # 遠い O4 は入らない
+    stack = [op(8, 0, 795, 20, 920), op(9, 0, 795, 1030, 2400)]
+    assert (795, 20, 2400) in opening_units(stack[0], stack)
+    alone = [op(5, 0, 790, 900, 2000)]
+    assert opening_units(alone[0], alone) == [(790, 900, 2000)]
