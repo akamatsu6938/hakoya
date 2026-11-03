@@ -21,7 +21,10 @@ from core.bambu import to_bambu_3mf
 from core.threemf import write_3mf
 
 COLORS = {"foundation": (150, 150, 150, 255), "floor1": (235, 220, 190, 255), "exterior1": (230, 120, 100, 255),
-          "roof": (90, 110, 140, 255), "roof_ext": (200, 115, 95, 255)}
+          "roof": (90, 110, 140, 255), "roof_ext": (200, 115, 95, 255),
+          # 2階建て（core/builder_multi.py）
+          "roof_lower": (110, 130, 160, 255), "roof_lower_ext": (210, 125, 105, 255),
+          "floor2": (240, 228, 205, 255), "exterior2": (225, 130, 110, 255)}
 
 
 def to_trimesh(part: ModelPart, scale: float, for_print: bool = False) -> trimesh.Trimesh:
@@ -37,7 +40,10 @@ def to_trimesh(part: ModelPart, scale: float, for_print: bool = False) -> trimes
     return mesh
 
 
-ORDER_3MF = ("foundation", "floor1", "roof")   # 3MF のオブジェクトの並び（外壁は 1階に、屋根の外壁は屋根に入る）
+def _object_keys(parts: dict[str, ModelPart]) -> list[str]:
+    """3MF のオブジェクトの並び：ほかの部品にまとめられない部品（基礎・1階・屋根…）を、組み立ての順に。
+    外壁の部品は object_key のオブジェクトに入る。★前は「基礎・1階・屋根」の決め打ちで、2階建てで足した部品が落ちた。"""
+    return [k for k, p in parts.items() if p.object_key is None]
 
 
 def _print_mesh(part: ModelPart, scale: float) -> dict:
@@ -105,9 +111,7 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
     # 3MF：同じオブジェクトの部品（1階の床・内壁と外壁）は、同じ向き・同じ位置のまま入れる
     m = rules["model"]
     objects = []
-    for key in ORDER_3MF:
-        if key not in parts:
-            continue
+    for key in _object_keys(parts):
         members = [p for p in parts.values() if (p.object_key or p.key) == key]
         objects.append({"name": parts[key].label.split("（")[0],
                         "parts": [{"name": p.label, "fuzzy_skin": p.fuzzy_skin and m.get("exterior_finish") == "plaster",

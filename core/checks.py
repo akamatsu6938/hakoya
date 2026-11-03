@@ -38,9 +38,11 @@ def building_checks(b: dict) -> list[dict]:
     """glb との数の差など、building.json の段階で分かること。"""
     out = []
     tate = next((r["count"] for r in b.get("inventory", []) if r["type"] == "typeETate"), None)
-    if tate is not None and tate != len(b.get("openings", [])):
+    # 上下2段の窓などは、建具 2 個で開口 1 つ（sources に全部の建具がある）。建具の数で比べる
+    used = sum(len(o.get("sources") or [o]) for o in b.get("openings", []))
+    if tate is not None and tate != used:
         out.append({"part": "building", "level": "中", "item": "opening_count",
-                    "message": f"建具 {tate} 個のうち、開口になったのは {len(b.get('openings', []))} 個"})
+                    "message": f"建具 {tate} 個のうち、開口になったのは {used} 個"})
     for u in b.get("unresolved", []):
         out.append({"part": "building", "level": "中", "item": "unresolved", "message": f"未解決の所 {u['id']}：{u['note']}"})
     return out

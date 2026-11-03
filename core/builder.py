@@ -118,6 +118,9 @@ def _wall_top(w: dict) -> float | None:
 # ---------------------------------------------------------------- 組み立て
 
 def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
+    if len(b.get("levels", [])) > 1:   # 2階建て（＋下屋）は別の道（core/builder_multi.py）。平屋はこの下のまま
+        from core.builder_multi import build_multi
+        return build_multi(b, rules)
     m = rules["model"]
     scale = float(m["scale"])
     min_feat = float(m["min_feature_mm"]) * scale                 # 実寸での最小の太さ
