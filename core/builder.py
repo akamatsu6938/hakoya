@@ -23,6 +23,7 @@ from shapely.ops import unary_union
 UPPER_WALL_ABOVE_FL = 1500.0   # 下端がこれより上の壁は「途中から始まる壁」（ポーチの上の垂れ壁など）
 DOMA_UNDER_WALL_MM = 100.0     # 土間を壁の下まで広げる幅（実寸）
 GAP_FILL_MM = 40.0             # ポーチの天井の板で埋める細いすき間の幅（実寸）
+LOWERED_JOIN_MM = 60.0         # 下がり天井の板に足す壁を探す範囲（天井の形からの距離、実寸）
 
 
 @dataclass
@@ -365,6 +366,28 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
             roof_parts.append(s)
         notes["roof"].append("下がり壁（" + "・".join(w["id"] for w in hanging) + "）は屋根と一緒に印刷する。"
                              "屋根の裏まで立ち上げ、天井より上の部分は組むと屋根裏に隠れる")
+    lowered = b.get("lowered_ceilings", []) if z_cut is not None else []
+    if lowered:
+        # 部屋の中の下がり天井も、屋根の部品に板として入れる（作者 2026-11-03）。
+        # ★物件A：窓際の腰掛けのくぼみ（FL+2200）。天井がないと、窓の間の柱の上に何もなく浮いて見えた。
+        # 板の範囲＝天井の形＋その高さで止まっている壁の上＋その高さから下がっている下がり壁（板が屋根につながる）。
+        # 天井より上まで立つ1階の壁の所は、はめあいの隙間の分だけ広く抜く（屋根を載せるときにぶつからない）
+        standing_walls = [w for w in walls if float(w["bottom_mm"]) <= fl + 1]
+        for c in lowered:
+            z = float(c["z_mm"])
+            poly = Polygon(c["polygon"])
+            near = poly.buffer(LOWERED_JOIN_MM)
+            stop_here = [wall_rect(w) for w in standing_walls
+                         if _wall_top(w) is not None and abs(_wall_top(w) - z) <= 1 and wall_rect(w).intersects(near)]
+            hang_here = [wall_rect(w) for w in hanging if abs(float(w["bottom_mm"]) - z) <= 1 and wall_rect(w).intersects(near)]
+            plate = unary_union([poly] + stop_here + hang_here)
+            plate = plate.buffer(GAP_FILL_MM / 2, join_style="mitre").buffer(-GAP_FILL_MM / 2, join_style="mitre")
+            taller = [wall_rect(w) for w in standing_walls if _wall_top(w) is None or _wall_top(w) > z + 1]
+            if taller:
+                plate = plate.difference(unary_union(taller).buffer(clearance, join_style="mitre"))
+            roof_parts.append(prism(plate, z, z + plate_t))
+        notes["roof"].append("部屋の中の下がり天井（" + "・".join(c["id"] for c in lowered) + "）は屋根と一緒に印刷する。"
+                             "その高さで止まっている壁の上を覆う")
     if z_cut is not None:  # 天井の高さで上下に分けた壁（★検品が「W13 は屋根に入っていない」と誤解した。F3）
         split_ids = [w["id"] for w in ext_walls + std_in if (_wall_top(w) is None or _wall_top(w) > z_cut + 1)]
         if split_ids:

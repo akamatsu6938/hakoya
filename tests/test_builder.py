@@ -66,6 +66,35 @@ def test_hanging_wall_goes_to_roof_part():
     assert any("下がり壁（W6）" in n for n in parts["roof"].notes)
 
 
+def test_lowered_ceiling_goes_to_roof_and_covers_wall_top():
+    """部屋の中の下がり天井（その階の天井より低い天井）は、屋根の部品に板として入る（作者 2026-11-03）。
+    その高さで止まっている壁（物件A の W12）の上を覆い、下がり壁を通して屋根につながる。1階とは重ならない。"""
+    from shapely.geometry import Point, Polygon
+    rules = load_rules("jisha")
+    b = _tiny_house()
+    b["walls"].append({"id": "W6", "level": "1F", "kind": "interior", "start": [80, 2000], "end": [2920, 2000],
+                       "thickness_mm": 130, "bottom_mm": 2824, "height": 3024})             # 下がり壁
+    b["walls"].append({"id": "W7", "level": "1F", "kind": "standalone", "start": [160, 2600], "end": [2935, 2600],
+                       "thickness_mm": 162, "bottom_mm": 480, "height": 2824})              # 2824 で止まる壁
+    base = build_model(b, rules)
+    b["lowered_ceilings"] = [{"id": "C1", "z_mm": 2824, "source": "glb:typeESten#99",
+                              "polygon": [[160, 2065], [2935, 2065], [2935, 2519], [160, 2519]]}]
+    parts = build_model(b, rules)
+    z = 2874.0                                                                  # 板（2824〜2924）の中
+    clearance = rules["model"]["fit_clearance_mm"] * rules["model"]["scale"]
+    x0, x1 = 80 + 80 + clearance, 3000 - 65 - clearance                         # 西の外壁・内壁 W5 の所は隙間の分だけ抜く
+    plate = (x1 - x0) * (2600 + 81 - (2000 - 65))                               # 下がり壁の面〜W7 の外の面
+    band = (2920 - x0) * 130                                                    # 下がり壁の帯（前からある）
+    added = parts["roof"].solid.slice(z).area() - base["roof"].solid.slice(z).area()
+    assert added == pytest.approx(plate - band, rel=0.002)
+    polys = [Polygon(p) for p in parts["roof"].solid.slice(z).to_polygons()]
+    assert any(p.contains(Point(1500, 2600)) for p in polys)                    # W7 の上を覆う
+    for other in ("floor1", "exterior1"):
+        assert (parts["roof"].solid ^ parts[other].solid).volume() < 0.5
+    assert len(parts["roof"].solid.decompose()) == len(base["roof"].solid.decompose())   # 板は屋根につながっている
+    assert any("下がり天井（C1）" in n for n in parts["roof"].notes)
+
+
 def test_all_parts_are_closed_solids(parts):
     assert set(parts) == {"foundation", "floor1", "exterior1", "roof", "roof_ext"}
     for p in parts.values():

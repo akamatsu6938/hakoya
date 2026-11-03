@@ -73,16 +73,22 @@ def porches(parts: list[Part]) -> list[dict]:
     return [{"id": f"P{i}", **d} for i, d in enumerate(out, 1)]
 
 
-def soffits(parts: list[Part], indoor: Polygon) -> tuple[list[dict], list[dict]]:
-    """ポーチの天井。部屋の中（indoor）にあるものは除き、別に返す。"""
-    out, skipped = [], []
+def soffits(parts: list[Part], indoor: Polygon, ceiling_z: float | None = None) -> tuple[list[dict], list[dict], list[dict]]:
+    """ポーチの天井。部屋の中（indoor）にあるものは除き、別に返す。
+    部屋の中でも、その階の天井（ceiling_z）より低い天井は「下がり天井」として3つ目に返す
+    （★物件A の窓際の腰掛けのくぼみの天井 FL+2200。省くと、窓の間の柱の上に何もなく浮いて見えた。作者 11/3）。"""
+    out, skipped, lowered = [], [], []
     for p in parts:
         z = float(p.bounds()[1][2])
         for g in _polys(flat_union([p])):
             if g.intersection(indoor).area / g.area > 0.5:
-                skipped.append({"source": p.source, "reason": f"部屋の中にある天井（高さ {z:.0f}）。ポーチの天井ではない（下がり天井など）"})
+                if ceiling_z is not None and z < ceiling_z - 1 and g.area >= MIN_SOFFIT_MM2:
+                    lowered.append({"polygon": _coords(g), "z_mm": round(z), "area_m2": round(g.area / 1e6, 2), "source": p.source})
+                else:
+                    skipped.append({"source": p.source, "reason": f"部屋の中にある天井（高さ {z:.0f}）。ポーチの天井ではない（下がり天井など）"})
                 continue
             if g.area < MIN_SOFFIT_MM2:  # 壁の角にできる小さなかけら
                 continue
             out.append({"polygon": _coords(g), "z_mm": round(z), "area_m2": round(g.area / 1e6, 2), "source": p.source})
-    return [{"id": f"S{i}", **d} for i, d in enumerate(out, 1)], skipped
+    return ([{"id": f"S{i}", **d} for i, d in enumerate(out, 1)], skipped,
+            [{"id": f"C{i}", **d} for i, d in enumerate(lowered, 1)])

@@ -397,7 +397,8 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
         wl.envelope_standalone(rec["walls"], inside, float(rule(rules, "walls.exterior_thickness_mm")))
     # 「家の中」は部屋の床の範囲で判断する（基礎の外形はポーチ北のへこみも含むため）
     indoor = unary_union([r["polygon"] for r in rec["rooms"]])
-    soffit_list, soffit_skipped = xp.soffits(model.by_role("porch_soffit"), indoor)
+    ceiling_z = float(levels[0]["fl_mm"]) + float(levels[0].get("ceiling_mm", rule(rules, "levels.ceiling_height_mm")))
+    soffit_list, soffit_skipped, lowered_list = xp.soffits(model.by_role("porch_soffit"), indoor, ceiling_z)
     rec["skipped"] += soffit_skipped
     walls_json, assumptions, wall_ids = walls_to_json(rec["walls"], levels[0]["name"])
     exceptions_json = []
@@ -434,6 +435,7 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
         "foundation": found,
         "porches": porch_list,
         "porch_soffits": soffit_list,
+        "lowered_ceilings": lowered_list,      # 部屋の中の下がり天井（その階の天井より低い天井）
         "rooms": rooms_json,
         "wall_stats": rec["stats"],
         "skipped": rec["skipped"],
