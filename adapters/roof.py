@@ -30,7 +30,8 @@ DEFAULT_THICKNESS_MM = 100.0  # 下の面が見つからないときの屋根板
 SHAPE_JA = {"shed": "片流れ", "flat": "陸屋根", "gable": "切妻", "hip": "寄棟", "multi": "複数の面", "unknown": "不明"}
 
 
-ROOF_JOIN_MM = 50.0          # 屋根の部材どうしが、平面でこれ以内に接していれば同じ屋根
+ROOF_JOIN_MM = 5.0           # 屋根の部材どうしが、この誤差で同じ頂点（棟・隅棟・谷の両端）を共有していれば同じ屋根
+SHARED_EDGE_MM = 100.0       # 共有する頂点の間がこれより長いこと（点で接するだけの屋根はまとめない）
 
 
 @dataclass
@@ -51,11 +52,26 @@ def _top_extent(p: Part) -> tuple[Polygon | None, tuple[float, float] | None]:
     return poly, (float(tris[:, :, 2].min()), float(tris[:, :, 2].max()))
 
 
+def _top_vertices(p: Part) -> np.ndarray:
+    tris = p.faces(TOP)
+    return np.unique(tris.reshape(-1, 3).round(0), axis=0) if len(tris) else np.zeros((0, 3))
+
+
+def _share_edge(vi: np.ndarray, vj: np.ndarray) -> bool:
+    """2つの部材の上の面が、同じ高さの頂点を2つ以上（棟・隅棟・谷の両端）共有しているか。"""
+    if not len(vi) or not len(vj):
+        return False
+    shared = vi[(np.abs(vi[:, None, :] - vj[None, :, :]) <= ROOF_JOIN_MM).all(axis=2).any(axis=1)]
+    return len(shared) >= 2 and float(np.hypot(*np.ptp(shared[:, :2], axis=0))) >= SHARED_EDGE_MM
+
+
 def merge_roof_parts(parts: list[Part]) -> list[Part]:
     """★Walk in home は切妻・寄棟の屋根を、面ごとに別の部材（typeEYane）で書き出す（物件C は4つ、物件D は2つ。11/3）。
-    平面で接していて、高さの範囲が重なる部材を1つの屋根にまとめる（面に分けるのは detect_roof）。
-    下屋と大屋根は高さの範囲が重ならないので、まとめない。片流れ（部材1つ）は今までどおり。"""
-    info = [_top_extent(p) for p in parts]
+    棟・隅棟・谷を共有する（上の面が同じ高さの頂点を2つ以上共有する）部材を1つの屋根にまとめる（面に分けるのは detect_roof）。
+    ★11/4 の見直し：前は「平面で 50mm 以内・高さの範囲が重なる」でまとめていて、並んだ別々の下屋や、大屋根の下に付く庇まで
+    まとめ、片方が消える・面に分けられないおそれがあった（物件C・D の面は頂点を共有していることを確かめた）。
+    下屋と大屋根は頂点を共有しないので、まとめない。片流れ（部材1つ）は今までどおり。"""
+    verts = [_top_vertices(p) for p in parts]
     parent = list(range(len(parts)))
 
     def find(i: int) -> int:
@@ -66,10 +82,7 @@ def merge_roof_parts(parts: list[Part]) -> list[Part]:
 
     for i in range(len(parts)):
         for j in range(i + 1, len(parts)):
-            (pi, zi), (pj, zj) = info[i], info[j]
-            if pi is None or pj is None:
-                continue
-            if pi.distance(pj) <= ROOF_JOIN_MM and max(zi[0], zj[0]) <= min(zi[1], zj[1]) + ROOF_JOIN_MM:
+            if _share_edge(verts[i], verts[j]):
                 parent[find(j)] = find(i)
     groups: dict[int, list[int]] = {}
     for i in range(len(parts)):

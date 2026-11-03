@@ -22,8 +22,8 @@ from shapely.ops import unary_union
 from core.roof_geom import surfaces as roof_surfaces
 
 from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
-                          drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note, slab_outline, slab_solid,
-                          opening_keep_out, openings_by_wall_of, smooth_near_openings)
+                          drop_loose_bits, drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note,
+                          slab_outline, slab_solid, opening_keep_out, openings_by_wall_of, smooth_near_openings)
 
 Z_LO, Z_HI = -10000.0, 100000.0       # 「下・上の限りなし」の代わりの高さ（実寸 mm）
 BIG = box(-1e6, -1e6, 1e6, 1e6)
@@ -351,6 +351,16 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
             if moved:
                 notes[name].append(f"外壁の窓・ドアのまわり {m.get('fuzzy_skin_opening_margin_mm')}mm はざらざらにしない（天井の高さに上端がある窓・ドアの上の帯）")
         notes["floor1"].append(f"ファジースキンは外壁の外の面から {band_mm}mm（模型）の層だけ。窓・ドアのまわり {m.get('fuzzy_skin_opening_margin_mm')}mm は外す")
+
+    # 平屋と同じ後始末（★11/4 の見直し：昨夜の直しが2階建ての道に入っていなかった）
+    # 基礎とほかの部品が重なる所は基礎から削る（基礎の天端より高いポーチ）。1階から離れた床の板の切れ端は作らない
+    others = union_all([s for s in (floor1, exterior, roof_lower, roof_lower_ext) if not s.is_empty()])
+    if (foundation ^ others).volume() > 1.0:
+        foundation = foundation - others
+        notes["foundation"].append("1階・下屋の部品と重なる所（基礎の天端より高いポーチなど）は、基礎の方を削った（組むときにぶつからないように）")
+    (floor1, exterior), loose = drop_loose_bits([floor1, exterior], max_height=fl1 - ftop + 1.0)
+    if loose:
+        notes["floor1"].append(f"1階の床から離れた小さな床の切れ端 {loose} 個は作らない（印刷するとばらばらになるため）")
 
     # 小さなかけら（模型で 0.5mm³ 未満。区域の境目や斜めの壁の角の床板の切れ端）は捨てる
     crumb = CRUMB_MODEL_MM3 * scale ** 3

@@ -34,7 +34,8 @@ def code_findings(alias: str) -> list[dict]:
     """コードの検査から作る指摘（Claude を使わない）。"""
     b = json.loads((out_dir(alias) / "building.json").read_text(encoding="utf-8"))
     out = []
-    labels = {"back_to_back_exterior_faces": "背中合わせの外壁の面", "agari_kamachi": "上がり框の位置"}
+    labels = {"back_to_back_exterior_faces": "背中合わせの外壁の面", "agari_kamachi": "上がり框の位置",
+              "extra_roofs": "模型にしなかった屋根の部材", "upper_floor_overhang": "2階のはね出し"}
     for e in b.get("glb_exceptions", []):
         out.append({"view": "plan", "kind": "shape", "severity": "低",
                     "message": f"glb の例外（{labels.get(e['kind'], e['kind'])}）：{e['note']}",

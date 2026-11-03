@@ -57,3 +57,18 @@ def test_opening_running_into_the_next_collinear_wall_is_cut_there_too():
     (v,) = by["W2"]
     assert v["_from"] == "W1" and abs(v["offset_mm"] - 3970.0) < 1e-6 and abs(v["width_mm"] - 30.0) < 1e-6
     assert "W3" not in by and "W4" not in by                                   # 直交する壁・別の階は抜かない
+
+
+def test_loose_bits_keep_tall_parts_and_drop_floor_scraps():
+    """★11/4 の見直し：離れた小さなかけらのうち、床の板の切れ端（高さが床の板以下）だけを除く。離れて立つ柱は残す（検査で知らせる）。"""
+    from shapely.geometry import box as sbox
+
+    from core.builder import drop_loose_bits, prism
+    big = prism(sbox(0, 0, 10000, 10000), 480, 624)                 # 床の板（高さ 144）
+    post = prism(sbox(12000, 0, 12120, 120), 480, 2880)             # 離れて立つ柱
+    scrap = prism(sbox(0, 11000, 500, 11140), 480, 624)             # 床の板の切れ端
+    (kept,), n = drop_loose_bits([big + post + scrap], max_height=624 - 480 + 1)
+    assert n == 1 and len(kept.decompose()) == 2
+    assert any(abs(p.bounding_box()[0] - 12000) < 1 for p in kept.decompose())  # 柱は残る
+    (kept,), n = drop_loose_bits([big + post + scrap])                # 高さを見ないと、柱も消える（前の動き）
+    assert n == 2

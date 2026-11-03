@@ -274,3 +274,35 @@ def test_roofs_at_other_heights_or_apart_are_not_merged():
     merged = merge_roof_parts([upper, lower, apart])
     assert [p.source for p in merged] == ["glb:typeEYane#99", "glb:typeEYane#98", "glb:typeEYane#97"]
     assert merge_roof_parts([upper]) == [upper]  # 片流れ（部材1つ）は今までどおり
+
+
+def _shed(fp, z0, slope, node):
+    """y の向きに上がる片流れの部材（上の面 z = z0 + slope*y）。"""
+    p = _part([_plane(fp, 0.0, slope, z0)])
+    p.node = node
+    return p
+
+
+def test_merge_needs_a_shared_ridge_not_just_closeness():
+    """★11/4 の見直し：棟・隅棟・谷を共有する部材だけをまとめる。すき間 30mm で並ぶ別々の下屋・点で接するだけの屋根・
+    大屋根の軒の下に付く庇（高さの範囲は重なる）はまとめない（前は 50mm 以内で高さの範囲が重なればまとめ、片方が消えた）。"""
+    from adapters.roof import merge_roof_parts
+    a = _shed([(0, 0), (3000, 0), (3000, 2000), (0, 2000)], 3000, 0.2, 1)
+    b = _shed([(3030, 0), (6000, 0), (6000, 2000), (3030, 2000)], 3000, 0.2, 2)
+    assert len(merge_roof_parts([a, b])) == 2
+    c = _shed([(3000, 2000), (5000, 2000), (5000, 4000), (3000, 4000)], 2600, 0.2, 3)   # (3000,2000) の1点だけで a と接する
+    assert len(merge_roof_parts([a, c])) == 2
+    main = _part(gable())                                                               # 軒先 3300〜棟 4200
+    main.node = 4
+    porch = _shed([(3000, -1500), (5000, -1500), (5000, 0), (3000, 0)], 3400 - 0, 0.0, 5)
+    for pr in porch.primitives:                                                         # 軒先の辺で接するが 100mm 高い
+        pr.vertices[:, 2] = np.where(pr.vertices[:, 1] < -1, 3000.0, 3400.0) - (0 if pr.code == "YANE_MAIN" else T_V)
+    assert [p.source for p in merge_roof_parts([main, porch])] == ["glb:typeEYane#4", "glb:typeEYane#5"]
+
+
+def test_house_roof_is_the_largest_part_not_the_first():
+    """★11/4 の見直し：平屋で屋根の部材が2つ以上あるとき、1つ目（玄関の庇かもしれない）ではなく、いちばん広い屋根を使う。"""
+    from adapters.walkinhome import main_roof_part
+    canopy = _shed([(3000, -1200), (5000, -1200), (5000, 0), (3000, 0)], 2900, 0.1, 7)
+    house = _part(gable())
+    assert main_roof_part([canopy, house]) is house

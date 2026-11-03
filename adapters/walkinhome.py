@@ -610,9 +610,12 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
     if not roof_parts:
         roof, roofs = {"shape": "unknown", "note": "屋根（typeEYane）がない"}, []
     elif not multi:
-        roof = detect_roof(roof_parts[0], rec["exterior_fp"])
+        main_part = main_roof_part(roof_parts)
+        roof = detect_roof(main_part, rec["exterior_fp"])
         if len(roof_parts) > 1:
-            roof["note"] = f"屋根の部材が {len(roof_parts)} 個ある。1つ目だけ読んだ"
+            roof["note"] = f"屋根の部材が {len(roof_parts)} 個ある。いちばん大きい屋根だけを模型にした"
+            exceptions_json.append({"kind": "extra_roofs", "source": main_part.source,
+                                    "note": f"屋根の部材がほかに {len(roof_parts) - 1} 個あるが、模型には入れていない（庇・離れた屋根など (推定)）"})
         roofs = [{"id": "Y1", "level": names[0], "kind": "main", **roof}]
     else:
         roof, roofs = _multi_roofs(roof_parts, pre_roofs, recs, levels)
@@ -699,15 +702,26 @@ def _level_parts(model: GlbModel, levels: list[dict], i: int) -> dict:
     }
 
 
+def main_roof_part(roof_parts: list[Part]) -> Part:
+    """平屋の家の屋根：上の面がいちばん広い部材（★11/4 の見直し：前は1つ目を使い、玄関の庇が先に並ぶ glb だと
+    庇を家の屋根にするおそれがあった）。"""
+    from adapters.roof import _top_extent
+    return max(roof_parts, key=lambda p: (_top_extent(p)[0].area if _top_extent(p)[0] is not None else 0.0))
+
+
 def _roof_level(roof: dict, levels: list[dict]) -> int:
-    """屋根が載る階：屋根の下の面のいちばん低い所の、すぐ下に天井がある階（下屋は 1F、大屋根は 2F）。"""
-    from core.roof_geom import bottom_min
-    zmin = bottom_min(roof)                   # 面が複数の屋根は面ごとに測る
-    if zmin is None:
+    """屋根が載る階：屋根の平面の中ほどでの下の面の高さの、すぐ下に天井がある階（下屋は 1F、大屋根は 2F）。
+    ★11/4 の見直し：前は軒先を含む「いちばん低い所」で測っていた。軒の出が深い・勾配が急な2階建ての大屋根は、軒先が
+    2階の天井より下に来るので1階の屋根と取り違え、2階の外壁を「1階の妻のかけら」として消すおそれがあった。"""
+    from core.builder import plane_z
+    from core.roof_geom import bottom_surface
+    if not roof.get("footprint") or not (roof.get("bottom_plane") or roof.get("planes")):
         return len(levels) - 1
+    p = Polygon(roof["footprint"]).representative_point()      # 平面の中の点（L字でも外に出ない）
+    z = plane_z(bottom_surface(roof), p.x, p.y)                # 面が複数の屋根は、その点を受け持つ面で測る
     idx = 0
     for i, lv in enumerate(levels):
-        if float(lv["fl_mm"]) + float(lv.get("ceiling_mm", 2400)) <= zmin + 1:
+        if float(lv["fl_mm"]) + float(lv.get("ceiling_mm", 2400)) <= z + 1:
             idx = i
     return idx
 

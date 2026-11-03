@@ -265,3 +265,19 @@ def test_per_plane_glb_parts_merge_into_main_roof_and_lean_to(name):
     assert main["shape"] == c["main_shape"] and len(main["planes"]) == len(main_planes)
     lean = detect_roof(merged[1], Polygon(FOOT).difference(Polygon(c["upper"])))
     assert lean["shape"] == c["lean_shape"] and len(lean.get("planes") or [0]) == len(lean_planes)
+
+
+def test_deep_eaves_main_roof_still_sits_on_the_upper_floor():
+    """★11/4 の見直し：軒の出が深い大屋根（軒先の下の面が2階の天井より下）を、1階の屋根（下屋）と取り違えない。
+    取り違えると、2階の外壁が「1階の妻のかけら」として消える。"""
+    from adapters.walkinhome import _roof_level
+    from core.roof_geom import bottom_min
+    deep, h = 1000.0, CEIL2 + 250                                    # 2階の外壁の外の面で、天井の 250mm 上
+    planes = [_plane([(X0 - 550, 3000 - deep), (X1 + 550, 3000 - deep), (X1 + 550, 6000), (X0 - 550, 6000)], 0.0, S, h - 3000 * S, S),
+              _plane([(X0 - 550, 6000), (X1 + 550, 6000), (X1 + 550, 9000 + deep), (X0 - 550, 9000 + deep)], 0.0, -S, h + 9000 * S, S)]
+    main = _roof("Y2", "2F", "main", "gable", planes, S)
+    levels = [{"name": "1F", "fl_mm": FL1, "ceiling_mm": 2400}, {"name": "2F", "fl_mm": FL2, "ceiling_mm": 2400}]
+    assert bottom_min(main) < CEIL2                                  # 前の測り方（いちばん低い所）なら1階の屋根になっていた
+    assert _roof_level(main, levels) == 1
+    assert _roof_level(_roof("Y1", "1F", "lean_to", "shed", lean_shed(), S_LEAN), levels) == 0
+    assert _roof_level(_roof("Y1", "1F", "lean_to", "multi", lean_l(), S_LEAN), levels) == 0

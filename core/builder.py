@@ -161,11 +161,15 @@ def openings_by_wall_of(walls: list[dict], openings: list[dict]) -> dict[str, li
 LOOSE_RATIO = 0.01   # いちばん大きい塊の 1% より小さく、離れているかけらは作らない
 
 
-def drop_loose_bits(parts: list[Manifold]) -> tuple[list[Manifold], int]:
+def drop_loose_bits(parts: list[Manifold], max_height: float | None = None) -> tuple[list[Manifold], int]:
     """同じオブジェクトの部品を合わせて、いちばん大きい塊から離れた小さなかけらを、各部品から除く。（部品, 除いた数）
-    ★物件D：土間の穴の間に、床の板の切れ端（実寸 573×144mm）が離れて残った（11/3）。"""
+    ★物件D：土間の穴の間に、床の板の切れ端（実寸 573×144mm）が離れて残った（11/3）。
+    max_height を渡すと、高さがそれ以下のかけら（床の板の切れ端）だけを除く（★11/4 の見直し：離れて立つポーチの柱・
+    低い塀など、本物の小さな部材まで消さないように。それらは「離れた塊」の検査で知らせる）。"""
     bodies = sorted(union_all(parts).decompose(), key=lambda s: -s.volume())
     small = [x for x in bodies[1:] if x.volume() < LOOSE_RATIO * bodies[0].volume()] if len(bodies) > 1 else []
+    if max_height is not None:
+        small = [x for x in small if x.bounding_box()[5] - x.bounding_box()[2] <= max_height]
     if not small:
         return parts, 0
     cut = union_all(small)
@@ -637,7 +641,11 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     if (foundation ^ first_floor).volume() > 1.0:
         foundation = foundation - first_floor
         notes["foundation"].append("1階の壁と重なる所（基礎の天端より高いポーチなど）は、基礎の方を削った（組むときにぶつからないように）")
-    (floor1, exterior), loose = drop_loose_bits([floor1, exterior])
+    roof_walls = union_all([roof_solid, roof_ext])        # 屋根の部品に入る袖壁が、高いポーチにめり込む所も（★11/4 の見直し）
+    if (foundation ^ roof_walls).volume() > 1.0:
+        foundation = foundation - roof_walls
+        notes["foundation"].append("屋根の部品の壁（袖壁など）と重なる所も、基礎の方を削った")
+    (floor1, exterior), loose = drop_loose_bits([floor1, exterior], max_height=fl - ftop + 1.0)   # 床の板の切れ端だけ
     if loose:
         notes["floor1"].append(f"1階の床・壁から離れた小さなかけら {loose} 個は作らない（上がり框のまわりの床の切れ端など。印刷するとばらばらになるため）")
     foundation, floor1, exterior, roof_solid, roof_ext = (

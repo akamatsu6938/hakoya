@@ -147,6 +147,14 @@ class MultiPlane:
         return [d for d, _ in self.items]
 
 
+def bottom_surface(roof: dict):
+    """下の面だけ（上の面の式がなくてもよい）。片流れは平面の式（dict）、面が複数なら MultiPlane。"""
+    planes = roof_planes(roof)
+    if not planes:
+        return roof["bottom_plane"]
+    return MultiPlane(plane_domains([Polygon(p["footprint"]) for p in planes]), [p["bottom_plane"] for p in planes])
+
+
 def surfaces(roof: dict) -> tuple[object, object]:
     """（下の面, 上の面）。片流れは building.json の平面の式（dict）のまま、面が複数なら MultiPlane。"""
     planes = roof_planes(roof)
