@@ -1,13 +1,22 @@
 """出力に「出してはいけない言葉」（data/local_paths.yaml の ng_words）が混ざっていないかの検査（SPEC §2-2）。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 from core.paths import LOCAL_PATHS, load_local_paths
 
 
-def ng_words() -> list[str]:
-    if not LOCAL_PATHS.exists():
+def ng_words(path: Path | None = None) -> list[str]:
+    """全体の ng_words と、物件ごとの ng_words（画面の「物件の登録」で書く）を合わせたもの。"""
+    p = path or LOCAL_PATHS
+    if not p.exists():
         return []
-    return [str(w) for w in (load_local_paths().get("ng_words") or []) if str(w).strip()]
+    conf = load_local_paths(p)
+    words = list(conf.get("ng_words") or [])
+    for v in conf.values():
+        if isinstance(v, dict):
+            words += list(v.get("ng_words") or [])
+    return [str(w) for w in words if str(w).strip()]
 
 
 class PrivacyError(RuntimeError):

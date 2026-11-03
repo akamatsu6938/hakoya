@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -32,11 +33,60 @@ class PropertyFiles:
     glb: Path | None
     jww_folder: Path | None
     jww: dict[str, Path] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)   # 場所を読んで分かったこと（元のファイル名は書かない）
 
     @property
     def glb_label(self) -> str:
         """出力に書いてよい glb の名前（元のファイル名は使わない）。"""
         return f"{self.alias}.glb"
+
+
+# 図面の種類を、ファイル名の言葉から推定する（local_paths.yaml に jww: の指定がないとき）
+JWW_KIND_WORDS = {"section": ("断面",), "elevation": ("立面",), "plan": ("平面",)}
+JWW_KIND_JA = {"plan": "平面図（1階）", "plan_2f": "平面図（2階）", "elevation": "立面図", "section": "断面図"}
+UPPER_FLOOR_WORDS = ("2階", "２階", "2F", "２F", "2Ｆ", "２Ｆ")
+LOWER_FLOOR_WORDS = ("1階", "１階", "1F", "１F", "1Ｆ", "１Ｆ")
+BOTH_FLOORS = re.compile(r"[1１]\s*[・,、，\-－~〜～]\s*[2２]\s*[階FＦ]")   # 「1・2階」「1,2F」など
+
+
+def _resolve_glb(p: Path) -> tuple[Path | None, str | None]:
+    """glb の場所。フォルダが書いてあれば、すぐ下の glb が1つのときだけそれを使う（取り違えないように）。"""
+    if not p.is_dir():
+        return p, None
+    found = sorted(x for x in p.iterdir() if x.is_file() and x.suffix.lower() == ".glb")
+    if len(found) == 1:
+        return found[0], None
+    if not found:
+        return None, "glb のフォルダに、glb がまだありません"
+    return None, f"glb のフォルダに glb が {len(found)} つあります（1つにしてください）"
+
+
+def jww_kind(stem: str) -> str | None:
+    """ファイル名（拡張子なし）から図面の種類。種類の言葉がない・2つ以上あるときは None。"""
+    hits = [k for k, words in JWW_KIND_WORDS.items() if any(w in stem for w in words)]
+    if len(hits) != 1:
+        return None
+    both = any(w in stem for w in LOWER_FLOOR_WORDS) or BOTH_FLOORS.search(stem)
+    if hits[0] == "plan" and any(w in stem for w in UPPER_FLOOR_WORDS) and not both:
+        return "plan_2f"          # 「1・2階平面図」のように両方の階が書いてあるものは、1階の平面図として使う
+    return hits[0]
+
+
+def detect_jww(folder: Path) -> tuple[dict[str, Path], list[str]]:
+    """図面のフォルダのすぐ下の .jww を、ファイル名から種類に分ける。同じ種類が2つ以上あれば使わない（取り違えないように）。"""
+    if not folder.is_dir():
+        return {}, ["図面のフォルダが見つかりません"]
+    found: dict[str, list[Path]] = {}
+    for p in sorted(folder.iterdir()):
+        if p.is_file() and p.suffix.lower() == ".jww" and (kind := jww_kind(p.stem)):
+            found.setdefault(kind, []).append(p)
+    out, notes = {}, []
+    for kind, ps in found.items():
+        if len(ps) == 1:
+            out[kind] = ps[0]
+        else:
+            notes.append(f"{JWW_KIND_JA[kind]}らしい図面が {len(ps)} つあるので使いません（local_paths.yaml の jww: で指定してください）")
+    return out, notes
 
 
 def load_local_paths(path: Path = LOCAL_PATHS) -> dict:
@@ -51,13 +101,25 @@ def aliases(path: Path = LOCAL_PATHS) -> list[str]:
 
 
 def property_files(alias: str, path: Path = LOCAL_PATHS) -> PropertyFiles:
+    """物件のファイルの場所。glb にはファイルかフォルダを書ける。図面は jww: の指定がなければ、フォルダの中から名前で探す。"""
     conf = load_local_paths(path).get(alias)
     if not isinstance(conf, dict):
         raise KeyError(f"data/local_paths.yaml に「{alias}」がありません。")
-    glb = Path(conf["glb"]) if conf.get("glb") else None
+    notes: list[str] = []
+    glb = None
+    if conf.get("glb"):
+        glb, why = _resolve_glb(Path(conf["glb"]))
+        if why:
+            notes.append(why)
     folder = Path(conf["jww_folder"]) if conf.get("jww_folder") else None
-    jww = {k: folder / v for k, v in (conf.get("jww") or {}).items()} if folder else {}
-    return PropertyFiles(alias=alias, glb=glb, jww_folder=folder, jww=jww)
+    if folder and conf.get("jww"):
+        jww = {k: folder / v for k, v in conf["jww"].items()}
+    elif folder:
+        jww, more = detect_jww(folder)
+        notes += more
+    else:
+        jww = {}
+    return PropertyFiles(alias=alias, glb=glb, jww_folder=folder, jww=jww, notes=notes)
 
 
 def cache_dir(alias: str) -> Path:
@@ -72,7 +134,8 @@ def glb_working_copy(files: PropertyFiles) -> Path:
     """元の glb を data/cache/<物件>/source.glb にコピーして、そのパスを返す。
     元が変わっていなければ（大きさと更新日時が同じなら）コピーし直さない。"""
     if files.glb is None or not files.glb.exists():
-        raise FileNotFoundError(f"{files.alias} の glb が、local_paths.yaml に書かれた場所にありません。")
+        why = files.notes[0] if files.glb is None and files.notes else "local_paths.yaml に書かれた場所にありません"
+        raise FileNotFoundError(f"{files.alias} の glb：{why}。")
     dst = cache_dir(files.alias) / "source.glb"
     src_stat = files.glb.stat()
     if dst.exists():
