@@ -25,6 +25,7 @@ document.querySelectorAll('.tabs').forEach((nav) => nav.addEventListener('click'
   nav.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.target));
   nav.parentElement.querySelectorAll(':scope > .pane').forEach((p) => p.classList.toggle('on', p.id === tab));
   if (nav.dataset.group === 'view') { clearLasso(); setLassoMode(false); setLasso3dMode(false); }   // 囲みは表示している図だけのもの
+  if (tab === 'srules') renderRules();
   if (tab === 'v3d') resize();
 }));
 
@@ -339,6 +340,97 @@ $('#inspect-api').addEventListener('click', () => startInspection('api_key'));
 $('#inspect-off').addEventListener('click', () => startInspection('off'));
 
 // ---------------------------------------------------------------- 設定（API キー）
+// ---------------------------------------------------------------- 会社ルールの言語化（SPEC §5-4②）
+// 家ごとに変わる値は物件ごとに glb から作る。会社で変わらない値と細かい決まりを会社ルールとして残し、予防に使う（作者 11/3）
+const STATUS_JA = { same: '会社で同じ', varies: '物件ごとに違う', few: '件数が足りない', info: '参考' };
+const RKIND_JA = { value: '値を直す', glb: '物件ごとに glb の値', skill: '細かい決まり' };
+const companyOf = () => state.building?.source?.company_rules || 'jisha';
+const rulesApi = (p = '') => `/api/rules/${encodeURIComponent(companyOf())}${p}`;
+let rulesDone = new Set();       // 承認・却下した案の印（最後の案を開き直しても出さない）
+
+async function renderRules() {
+  let d;
+  try { d = await call('GET', rulesApi()); } catch (e) { $('#rules-stats').innerHTML = `<tr><td>${esc(e.message)}</td></tr>`; return; }
+  $('#rules-title').textContent = `集計（コードが計算。物件 ${d.properties.length} 件：${d.properties.join('・')}）`;
+  $('#rules-stats').innerHTML = '<tr><th>項目</th><th>物件ごとの値</th><th>判定</th></tr>' + d.stats.map((s) =>
+    `<tr><td>${esc(s.label)}</td><td>${esc(s.agreement)}</td><td><span class="st st-${s.status}">${STATUS_JA[s.status] || s.status}</span></td></tr>`).join('');
+  const values = Object.entries(d.learned.values).map(([k, v]) => ({ ...v, key: k }));
+  rulesDone = new Set([...values, ...d.learned.notes].map((x) => x.signature).concat(d.rejected || []));
+  renderRuleProposals(d.last_draft);
+  const ul = $('#rules-learned'); ul.innerHTML = '';
+  const items = [...values, ...d.learned.notes];
+  if (!items.length) ul.innerHTML = '<li>まだありません</li>';
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="tag">${esc(it.id)}</span>${esc(RKIND_JA[it.kind] || it.kind)}：${esc(it.text)}`
+      + (it.key ? `（${esc(it.key)}：${esc(it.previous)} → ${esc(it.value)}）` : '') + `<br><span class="hint">根拠：${esc(it.evidence)}</span> `;
+    const b = document.createElement('button'); b.textContent = '取り消す';
+    b.addEventListener('click', async () => {
+      try { await call('DELETE', rulesApi(`/learned/${encodeURIComponent(it.id)}`)); setStatus(`${it.id} を取り消しました`, 'ok'); renderRules(); }
+      catch (e) { setStatus('取り消せませんでした：' + e.message, 'err'); }
+    });
+    li.appendChild(b); ul.appendChild(li);
+  }
+  for (const s of d.learned_skipped || []) ul.insertAdjacentHTML('beforeend', `<li class="lv-中">重ねられなかった学んだ値：${esc(s.rule_key)}（${esc(s.reason)}）</li>`);
+}
+
+function renderRuleProposals(draft) {
+  const box = $('#rules-proposals'); box.innerHTML = '';
+  if (!draft) { box.innerHTML = '<p class="hint">まだ案はありません。「案を書いてもらう」を押してください。</p>'; return; }
+  const conn = { claude_code: 'Claude（自分のプラン）', api_key: 'Claude（API キー）', off: 'AI なし' }[draft.connection] || draft.connection;
+  box.insertAdjacentHTML('beforeend', `<p class="hint">最後の案：${esc((draft.at || '').slice(0, 16).replace('T', ' '))}・${esc(conn)}`
+    + `${draft.cost_usd ? `・費用の目安 $${Number(draft.cost_usd).toFixed(2)}` : ''}</p>`);
+  if (draft.message) box.insertAdjacentHTML('beforeend', `<p class="msg">${esc(draft.message)}</p>`);
+  for (const p of (draft.proposals || []).filter((x) => !rulesDone.has(x.signature))) {
+    const div = document.createElement('div'); div.className = 'prop';
+    div.innerHTML = `<span class="tag">${esc(RKIND_JA[p.kind] || p.kind)}</span>${esc(p.wording)}`
+      + (p.kind === 'value' ? `<div class="meta">${esc(p.rule_key)}：${esc(p.from)} → ${esc(p.to)}（新しい物件との比べ・予備の値に使われます）</div>` : '')
+      + `<div class="meta">根拠：${esc(p.evidence)}</div>`;
+    const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = '承認';
+    ok.addEventListener('click', async () => {
+      try {
+        await call('POST', rulesApi('/approve'), { kind: p.kind, wording: p.wording, stat_ids: p.stat_ids, answer_ids: p.answer_ids,
+          rule_key: p.rule_key, value_source: p.value_source, origin: p.origin });
+        setStatus('会社ルールに入れました（予防に使われます。取り消せます）', 'ok'); renderRules();
+      } catch (e) { setStatus('入れられませんでした：' + e.message, 'err'); }
+    });
+    const ng = document.createElement('button'); ng.textContent = '却下';
+    ng.addEventListener('click', async () => {
+      try { await call('POST', rulesApi('/reject'), { signature: p.signature }); setStatus('却下しました（同じ案は二度出しません）', 'ok'); renderRules(); }
+      catch (e) { setStatus('却下できませんでした：' + e.message, 'err'); }
+    });
+    div.append(ok, ng); box.appendChild(div);
+  }
+  for (const q of draft.questions || []) {   // 答えは記録され、次の案出しで根拠に使われる
+    const div = document.createElement('div'); div.className = 'question';
+    div.innerHTML = `<b>質問</b>　${esc(q.question)}${q.evidence ? `<div class="meta">根拠：${esc(q.evidence)}</div>` : ''}`;
+    const answer = async (a) => {
+      try { await call('POST', rulesApi('/answers'), { question: q.question, answer: a }); div.remove();
+        setStatus('答えを記録しました。もう一度「案を書いてもらう」を押すと、答えを根拠に使います', 'ok'); }
+      catch (e) { setStatus('記録できませんでした：' + e.message, 'err'); }
+    };
+    for (const opt of q.options || []) { const b = document.createElement('button'); b.textContent = opt; b.addEventListener('click', () => answer(opt)); div.appendChild(b); }
+    const row = document.createElement('div'); row.className = 'answer';
+    const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = '答えを書く';
+    const send = document.createElement('button'); send.textContent = '答える';
+    send.addEventListener('click', () => { if (inp.value.trim()) answer(inp.value.trim()); });
+    row.append(inp, send); div.appendChild(row); box.appendChild(div);
+  }
+}
+
+$('#rules-draft').addEventListener('click', async () => {
+  const connection = $('#rules-conn').value;
+  if (connection === 'api_key' && !confirm('API キーで Claude に頼みます。キーの持ち主に API の料金がかかります（1回の上限 $1.00）。よろしいですか？')) return;
+  $('#rules-draft').disabled = true;
+  setStatus(connection === 'off' ? '候補を作っています…' : 'Claude が会社ルールの案を書いています（1〜数分）…', 'busy');
+  try {
+    const d = await call('POST', rulesApi('/draft'), { connection, text: $('#rules-text').value });
+    renderRuleProposals(d);
+    setStatus(`案 ${d.proposals.length} 件・質問 ${d.questions.length} 件${d.cost_usd ? `（費用の目安 $${Number(d.cost_usd).toFixed(2)}）` : ''}`, 'ok');
+  } catch (e) { setStatus('案を作れませんでした：' + e.message, 'err'); }
+  $('#rules-draft').disabled = false;
+});
+
 async function renderSettings() {
   try {
     const st = await call('GET', '/api/settings');

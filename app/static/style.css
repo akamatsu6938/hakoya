@@ -65,6 +65,21 @@ tr.approve input[type=text] { width: 100%; }
 #lasso-result .answer { display: flex; gap: 6px; margin-top: 4px; }
 #lasso-result .answer input { flex: 1; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
 #sedit input.picked-input { outline: 2px solid #e0008c; outline-offset: 1px; }
+/* 会社ルール：集計の表と判定の印 */
+.rules-stats { font-size: 12px; table-layout: fixed; }
+.rules-stats th, .rules-stats td { white-space: normal; vertical-align: top; padding: 4px 6px; }
+.rules-stats th:nth-child(1) { width: 32%; } .rules-stats th:nth-child(3) { width: 84px; }
+.side .tabs { overflow-x: auto; }
+.side .tabs button { padding: 9px 8px; white-space: nowrap; }   /* タブが7つになったので詰める（1行に収める） */
+.st { display: inline-block; padding: 1px 6px; border-radius: 9px; font-size: 11px; white-space: nowrap; }
+.st-same { background: #dff3e4; color: #1f7a3a; } .st-varies { background: #e3ecfb; color: #2a5bb5; }
+.st-few { background: #eee; color: #666; } .st-info { background: #f6f3ea; color: #8a7a4a; }
+#srules #rules-text { box-sizing: border-box; width: 100%; margin-top: 6px; }
+#rules-proposals .prop, #rules-proposals .question { padding: 6px 0; border-top: 1px dashed var(--line); }
+#rules-proposals button { margin: 4px 6px 0 0; }
+#rules-proposals .meta { color: var(--muted); font-size: 12px; }
+#rules-proposals .answer { display: flex; gap: 6px; margin-top: 4px; }
+#rules-proposals .answer input { flex: 1; }
 .plan [data-id].picked { stroke: #e0008c; stroke-width: 4; }
 #sedit tr.picked td { background: #ffe3f3; }
 .apikey { display: flex; gap: 6px; margin: 4px 0 8px; }

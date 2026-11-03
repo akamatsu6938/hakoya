@@ -363,6 +363,126 @@ def lasso_approve(alias: str, body: LassoApproveIn):
     return _safe_json({"override": item, "checks": summary["checks"]})
 
 
+# ---------------------------------------------------------------- 会社ルールの言語化（SPEC §5-4②・§9-1）
+# 家ごとに変わる値は物件ごとに glb から作る。会社で変わらない値と細かい決まりを会社ルールとして残し、予防に使う（作者 11/3）
+
+RULE_DRAFTING = threading.Lock()      # 案出しは同時に1つだけ
+
+
+def _check_company(company: str) -> None:
+    from core.rules import RULES_DIR
+    if not company.isascii() or not company.replace("_", "").replace("-", "").isalnum() or \
+            not (RULES_DIR / f"{company}.yaml").exists():
+        raise HTTPException(404, "その会社ルールはありません")
+
+
+@app.get("/api/rules/{company}")
+def company_rules(company: str):
+    """集計（コード）・学んだルール・最後の案・AI なしの候補。"""
+    _check_company(company)
+    from core.ai.rule_draft import last_draft
+    from core.rule_stats import code_candidates, collect, entries
+    from core.rules import apply_learned, load_learned, load_rules
+    stats = collect(company)
+    learned = load_learned(company)
+    _, skipped = apply_learned(load_rules(company, learned=False), learned)
+    return _safe_json({"company": company, "properties": [a for a, _ in entries(company)], "stats": stats,
+                       "learned": {"values": learned["values"], "notes": learned["notes"]}, "learned_skipped": skipped,
+                       "rejected": [r.get("signature") for r in learned["rejected"]],
+                       "last_draft": last_draft(company), "candidates": code_candidates(stats, company)})
+
+
+class RuleDraftIn(BaseModel):
+    connection: str = "off"
+    text: str = ""
+
+
+@app.post("/api/rules/{company}/draft")
+def rule_draft(company: str, body: RuleDraftIn):
+    """会社ルールの案を出す（保存はしない）。Claude のときは1〜数分かかる。"""
+    import asyncio
+    _check_company(company)
+    if body.connection not in ("claude_code", "api_key", "off"):
+        raise HTTPException(400, "connection は claude_code・api_key・off のどれかです")
+    if body.connection == "api_key" and not secret_store.has_api_key():
+        raise HTTPException(409, "API キーが設定されていません。「設定」タブで API キーを入れてください")
+    if not RULE_DRAFTING.acquire(blocking=False):
+        raise HTTPException(409, "いま会社ルールの案を作っています。終わってからもう一度押してください")
+    try:
+        from core.ai.rule_draft import run_draft
+        return _safe_json(asyncio.run(run_draft(company, body.connection, body.text)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    finally:
+        RULE_DRAFTING.release()
+
+
+class RuleProposalIn(BaseModel):
+    kind: str
+    wording: str
+    stat_ids: list[str] = []
+    answer_ids: list[str] = []
+    rule_key: str | None = None
+    value_source: str | None = None
+    origin: str = "claude"
+
+
+@app.post("/api/rules/{company}/approve")
+def rule_approve(company: str, body: RuleProposalIn):
+    """案を承認して学んだルールに入れる。数値と根拠の文は、いまの集計からサーバーが計算し直す。"""
+    _check_company(company)
+    from core.ai.rule_draft import approve
+    try:
+        return _safe_json({"learned": approve(company, body.model_dump())})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class RuleRejectIn(BaseModel):
+    signature: str
+
+
+@app.post("/api/rules/{company}/reject")
+def rule_reject(company: str, body: RuleRejectIn):
+    """案を却下する（同じ案は二度出さない）。"""
+    _check_company(company)
+    from core.ai.rule_draft import reject
+    return _safe_json({"rejected": reject(company, body.signature)})
+
+
+@app.delete("/api/rules/{company}/learned/{learned_id}")
+def rule_undo(company: str, learned_id: str):
+    """学んだルールを1件取り消す。"""
+    _check_company(company)
+    from core.ai.rule_draft import undo
+    try:
+        return _safe_json({"undone": undo(company, learned_id)})
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'\""))
+
+
+class RuleAnswerIn(BaseModel):
+    question: str
+    answer: str
+
+
+@app.post("/api/rules/{company}/answers")
+def rule_answer(company: str, body: RuleAnswerIn):
+    """Claude の質問への人の答えを記録する（同じ質問を二度しない・会社ルールの根拠になる）。"""
+    _check_company(company)
+    from core.rules import add_answer
+    from core.privacy import PrivacyError
+    if not body.question.strip() or not body.answer.strip():
+        raise HTTPException(400, "質問と答えを書いてください")
+    try:   # 施主名などが入っていたら記録しない（書く前に確かめる）
+        assert_clean(body.question + "\n" + body.answer, "人の答え")
+    except PrivacyError as e:
+        raise HTTPException(400, str(e))
+    return _safe_json({"answer": add_answer(body.question.strip(), body.answer.strip())})
+
+
 # ---------------------------------------------------------------- 設定（SPEC §10 の 8）
 
 @app.get("/api/settings")

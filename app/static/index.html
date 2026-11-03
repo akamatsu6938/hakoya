@@ -74,6 +74,7 @@
       <button data-tab="shist">修正の履歴</button>
       <button data-tab="schk">検査</button>
       <button data-tab="sout">書き出し</button>
+      <button data-tab="srules">会社ルール</button>
       <button data-tab="sset">設定</button>
     </nav>
     <div id="sinsp" class="pane">
@@ -117,6 +118,24 @@
         <button id="apikey-del">消す</button>
       </div>
       <p class="hint">キーは Windows の資格情報マネージャーに保存します。画面・ファイル・記録には出しません。<br>API キーで検品すると、キーの持ち主に Claude の API の料金がかかります。1回の上限は rules/ai_models.yaml の max_budget_usd（いまは $3.00）で、超えそうになると止まります。</p>
+    </div>
+    <div id="srules" class="pane">
+      <p class="hint">家・会社によって変わる値（窓の高さ・屋根の勾配など）は、物件ごとに glb から作ります。物件によらず同じ値（壁厚など）と細かい決まりを「会社ルール」として残し、困ったとき（glb が読めない・いつもと違う・新しい形）の予防に使います。</p>
+      <h3 id="rules-title">集計（コードが全物件から計算）</h3>
+      <table id="rules-stats" class="rules-stats"></table>
+      <h3>会社ルールの案</h3>
+      <div class="lasso-actions">
+        <select id="rules-conn">
+          <option value="claude_code">Claude（自分のプラン）</option>
+          <option value="api_key">Claude（API キー）</option>
+          <option value="off">AI なし（コードの候補だけ）</option>
+        </select>
+        <button id="rules-draft" class="primary">案を書いてもらう</button>
+      </div>
+      <input id="rules-text" type="text" placeholder="一言（なくてもよい。例：壁の決まりを中心に）">
+      <div id="rules-proposals"></div>
+      <h3>学んだ会社ルール（承認したもの）</h3>
+      <ul id="rules-learned" class="list"></ul>
     </div>
   </aside>
 </main>
