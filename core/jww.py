@@ -74,6 +74,7 @@ def _title_band_top(entities: list[dict], paper: tuple[float, float]) -> float:
 def read_drawing(path: Path, kind: str, ng_words: list[str] | None = None) -> Drawing:
     """図面を読む。表題欄・縮尺1の層・用紙の外・ng_words の文字は捨てる（数だけ dropped に残す）。"""
     import ezjww
+    from core.privacy import find_ng
     if ng_words is None:
         from core.privacy import ng_words as _ng
         ng_words = _ng()
@@ -115,7 +116,7 @@ def read_drawing(path: Path, kind: str, ng_words: list[str] | None = None) -> Dr
                 dropped["title_band"] += 1                 # 表題欄の帯：読み捨てる
             elif not on_paper(x, y):
                 dropped["off_paper"] += 1
-            elif any(word in content for word in ng_words):
+            elif find_ng(content, ng_words) is not None:     # 全角・半角と空白の違いも同じに見る
                 dropped["ng_words"] += 1
             elif g == main:
                 ex, ey = float(e.get("end_x", x)), float(e.get("end_y", y))

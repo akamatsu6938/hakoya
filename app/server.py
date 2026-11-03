@@ -42,6 +42,42 @@ app = FastAPI(title="HAKOYA")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
+class HideErrorText:
+    """思いがけないエラーの文を、黒い画面にも画面にも出さない（★11/4 の見直し：YAML の書き間違いやフォルダの読めないエラーの文には、
+    施主名の入った場所がそのまま入る）。出すのはエラーの種類と、HAKOYA のどのファイルの何行目かだけ。"""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.inner(scope, receive, send)
+        started = False
+
+        async def send_wrapper(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+        try:
+            await self.inner(scope, receive, send_wrapper)
+        except Exception as e:  # noqa: BLE001  ここで止めて、uvicorn にエラーの文を出させない
+            import traceback
+            frames = traceback.extract_tb(e.__traceback__)[-4:]          # ファイルの名前と行だけ（中身・場所は出さない）
+            where = " ← ".join(f"{Path(f.filename).name}:{f.lineno}" for f in reversed(frames)) or "?"
+            print(f"[HAKOYA] {scope.get('path', '')} でエラー：{type(e).__name__}（{where}）", file=sys.stderr, flush=True)
+            if started:
+                return
+            body = json.dumps({"detail": f"思いがけないエラーです（{type(e).__name__}）。黒い画面の [HAKOYA] の行を見せてください"},
+                              ensure_ascii=False).encode("utf-8")
+            await send({"type": "http.response.start", "status": 500,
+                        "headers": [(b"content-type", b"application/json; charset=utf-8")]})
+            await send({"type": "http.response.body", "body": body})
+
+
+app.add_middleware(HideErrorText)
+
+
 @app.middleware("http")
 async def same_origin_only(request: Request, call_next):
     """書き換える操作（GET 以外）は、HAKOYA の画面から来たものだけ受け付ける。
@@ -575,22 +611,34 @@ def registry_pick(body: PickIn):
         raise HTTPException(400, "選ぶものが分かりません")
     try:
         chosen = rg.pick(body.what)
-    except Exception as e:  # noqa: BLE001  PowerShell が使えない PC など
+        if chosen:
+            ok, text = (rg.describe_glb if body.what == "glb" else rg.describe_drawings)(Path(chosen))
+    except Exception as e:  # noqa: BLE001  PowerShell が使えない PC・フォルダが読めないなど（文には場所が入るので種類だけ）
         raise HTTPException(500, f"選ぶ窓を出せませんでした（{type(e).__name__}）。場所を貼り付けてください")
     if not chosen:
         return _safe_json({"cancelled": True})
-    token = _secrets.token_hex(8)
+    token = "".join(_secrets.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(16))   # 数字の言葉に当たらないよう英字だけ
     PICKS[token] = chosen
-    ok, text = (rg.describe_glb if body.what == "glb" else rg.describe_drawings)(Path(chosen))
     return _safe_json({"token": token, "ok": ok, "text": text})
+
+
+def _chosen(token: str | None, pasted: str | None) -> str | None:
+    """登録に使う場所：貼り付けた場所があればそれ（★11/4：前は前に選んだものが優先された）、なければ「選ぶ」で選んだもの。"""
+    if pasted and pasted.strip():
+        return pasted
+    if token:
+        if token not in PICKS:
+            raise HTTPException(400, "選んだ場所の記録が消えています（アプリを起動し直したため）。もう一度「選ぶ」を押してください")
+        return PICKS[token]
+    return None
 
 
 @app.post("/api/registry")
 def registry_add(body: RegisterIn):
     """物件を登録する（local_paths.yaml の最後に書き足す。元のファイルは読むだけ）。"""
     from core import registry as rg
-    glb = PICKS.get(body.glb_token or "") or (body.glb_path or "")
-    drawings = PICKS.get(body.drawings_token or "") or (body.drawings_path or None)
+    glb = _chosen(body.glb_token, body.glb_path) or ""
+    drawings = _chosen(body.drawings_token, body.drawings_path)
     if not glb.strip():
         raise HTTPException(400, "glb を選んでください")
     try:

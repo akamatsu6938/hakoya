@@ -29,3 +29,29 @@ def test_api_key():
 def test_blocked_files():
     for name in ["data/local_paths.yaml", "x/物件A.glb", "out/model.3mf", "docs/plan.png", "a/平面図.jww"]:
         assert find_problems({name: b""}, NG), name
+
+
+def test_ng_words_include_each_property(tmp_path):
+    """★11/4 の見直し：物件ごとに足した言葉（画面の「物件の登録」・手で書いたもの）も、コミット前の検査に入る。"""
+    from tools.precommit_check import load_ng_words
+    p = tmp_path / "local_paths.yaml"
+    p.write_text("ng_words: [架空施主]\n物件C:\n  glb: C:/x\n  ng_words: [架空次郎, ほげ町9-9]\n", encoding="utf-8")
+    assert load_ng_words(p) == ["架空施主", "架空次郎", "ほげ町9-9"]
+
+
+def test_ng_word_with_other_width_or_spaces():
+    """全角・半角と空白の違いでも見つける（言葉「架空 施主」→ 中身「架空施主様」、言葉「ほげ市1-2-3」→ 中身「ほげ市１－２－３」）。"""
+    assert find_problems({"docs/a.md": "架空施主様".encode()}, ["架空 施主"])
+    assert find_problems({"docs/a.md": "ほげ市１－２－３".encode()}, NG)
+
+
+def test_broken_yaml_does_not_show_the_line(tmp_path):
+    """YAML の書き間違いのエラーに、その行（施主名の入った場所）を出さない。"""
+    import pytest
+
+    from tools.precommit_check import load_ng_words
+    p = tmp_path / "local_paths.yaml"
+    p.write_text("ng_words: [架空施主]\n物件C:\n" + r'  glb: "C:\Users\架空施主邸\家.glb"' + "\n", encoding="utf-8")
+    with pytest.raises(ValueError) as e:
+        load_ng_words(p)
+    assert "3 行目" in str(e.value) and "架空施主" not in str(e.value) and e.value.__cause__ is None

@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,16 +45,21 @@ class PropertyFiles:
 # 図面の種類を、ファイル名の言葉から推定する（local_paths.yaml に jww: の指定がないとき）
 JWW_KIND_WORDS = {"section": ("断面",), "elevation": ("立面",), "plan": ("平面",)}
 JWW_KIND_JA = {"plan": "平面図（1階）", "plan_2f": "平面図（2階）", "elevation": "立面図", "section": "断面図"}
-UPPER_FLOOR_WORDS = ("2階", "２階", "2F", "２F", "2Ｆ", "２Ｆ")
-LOWER_FLOOR_WORDS = ("1階", "１階", "1F", "１F", "1Ｆ", "１Ｆ")
-BOTH_FLOORS = re.compile(r"[1１]\s*[・,、，\-－~〜～]\s*[2２]\s*[階FＦ]")   # 「1・2階」「1,2F」など
+# 名前は全角・半角をそろえ（NFKC）、英字を大文字にしてから見る
+UPPER_FLOOR_WORDS = ("2階", "2F", "二階")
+LOWER_FLOOR_WORDS = ("1階", "1F", "一階")
+BOTH_FLOORS = re.compile(r"[1一]\s*[・,、.\-_~〜ー\s]\s*[2二]\s*[階F]")   # 「1・2階」「1,2F」「1.2階」など
+NOT_PLAN_WORDS = ("詳細", "小屋裏", "ロフト", "屋根", "基礎", "配置", "伏", "天井")   # 平面詳細図・基礎平面図などは照合に使わない
 
 
 def _resolve_glb(p: Path) -> tuple[Path | None, str | None]:
     """glb の場所。フォルダが書いてあれば、すぐ下の glb が1つのときだけそれを使う（取り違えないように）。"""
     if not p.is_dir():
         return p, None
-    found = sorted(x for x in p.iterdir() if x.is_file() and x.suffix.lower() == ".glb")
+    try:
+        found = sorted(x for x in p.iterdir() if x.is_file() and x.suffix.lower() == ".glb")
+    except OSError as e:     # エラーの文にはフォルダの場所（施主名が入ることがある）が入るので、種類だけ出す
+        return None, f"glb のフォルダを読めません（{type(e).__name__}。権限やネットワークの切断を確かめてください）"
     if len(found) == 1:
         return found[0], None
     if not found:
@@ -62,12 +68,18 @@ def _resolve_glb(p: Path) -> tuple[Path | None, str | None]:
 
 
 def jww_kind(stem: str) -> str | None:
-    """ファイル名（拡張子なし）から図面の種類。種類の言葉がない・2つ以上あるときは None。"""
-    hits = [k for k, words in JWW_KIND_WORDS.items() if any(w in stem for w in words)]
+    """ファイル名（拡張子なし）から図面の種類。種類の言葉がない・2つ以上あるときは None。
+    ★11/4 の見直し：平面詳細図・小屋裏平面図・基礎平面図が「1階の平面図」と重なって、本物の平面図まで使えなくなっていた。
+    「兼」の後ろ（2階平面図兼1階屋根伏図 の「1階屋根伏図」）と「2階建」は、種類・階の言葉として見ない。"""
+    s = unicodedata.normalize("NFKC", stem).upper().split("兼")[0]
+    s = re.sub(r"[0-9一二三]\s*階建", "", s)
+    hits = [k for k, words in JWW_KIND_WORDS.items() if any(w in s for w in words)]
     if len(hits) != 1:
         return None
-    both = any(w in stem for w in LOWER_FLOOR_WORDS) or BOTH_FLOORS.search(stem)
-    if hits[0] == "plan" and any(w in stem for w in UPPER_FLOOR_WORDS) and not both:
+    if hits[0] == "plan" and any(w in s for w in NOT_PLAN_WORDS):
+        return None
+    both = any(w in s for w in LOWER_FLOOR_WORDS) or BOTH_FLOORS.search(s)
+    if hits[0] == "plan" and any(w in s for w in UPPER_FLOOR_WORDS) and not both:
         return "plan_2f"          # 「1・2階平面図」のように両方の階が書いてあるものは、1階の平面図として使う
     return hits[0]
 
@@ -76,8 +88,12 @@ def detect_jww(folder: Path) -> tuple[dict[str, Path], list[str]]:
     """図面のフォルダのすぐ下の .jww を、ファイル名から種類に分ける。同じ種類が2つ以上あれば使わない（取り違えないように）。"""
     if not folder.is_dir():
         return {}, ["図面のフォルダが見つかりません"]
+    try:
+        entries = sorted(folder.iterdir())
+    except OSError as e:     # 場所はエラーの文に出さない
+        return {}, [f"図面のフォルダを読めません（{type(e).__name__}。権限やネットワークの切断を確かめてください）"]
     found: dict[str, list[Path]] = {}
-    for p in sorted(folder.iterdir()):
+    for p in entries:
         if p.is_file() and p.suffix.lower() == ".jww" and (kind := jww_kind(p.stem)):
             found.setdefault(kind, []).append(p)
     out, notes = {}, []
@@ -92,7 +108,22 @@ def detect_jww(folder: Path) -> tuple[dict[str, Path], list[str]]:
 def load_local_paths(path: Path = LOCAL_PATHS) -> dict:
     if not path.exists():
         raise FileNotFoundError("data/local_paths.yaml がありません。README の手順5を見てください。")
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return parse_local_paths(path.read_text(encoding="utf-8"))
+
+
+def parse_local_paths(text: str) -> dict:
+    """local_paths.yaml の中身を読む。★11/4 の見直し：YAML の書き間違いのエラー文には、その行がそのまま入る
+    （施主名の入った場所が黒い画面に出る）ので、行の番号だけを出す。"""
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None) or getattr(e, "context_mark", None)
+        where = f"{mark.line + 1} 行目あたり" if mark else "どこか"
+        raise ValueError(f"data/local_paths.yaml の {where}が YAML として読めません。場所を \"…\" で囲むと \\ がそのまま書けないので、"
+                         "'…' で囲むか、囲まずに書いてください") from None
+    if not isinstance(data, dict):
+        raise ValueError("data/local_paths.yaml の形が違います（「物件A:」のように仮名で始まる書き方にしてください）")
+    return data
 
 
 def aliases(path: Path = LOCAL_PATHS) -> list[str]:
@@ -137,11 +168,14 @@ def glb_working_copy(files: PropertyFiles) -> Path:
         why = files.notes[0] if files.glb is None and files.notes else "local_paths.yaml に書かれた場所にありません"
         raise FileNotFoundError(f"{files.alias} の glb：{why}。")
     dst = cache_dir(files.alias) / "source.glb"
-    src_stat = files.glb.stat()
-    if dst.exists():
-        d = dst.stat()
-        if d.st_size == src_stat.st_size and int(d.st_mtime) == int(src_stat.st_mtime):
-            return dst
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(files.glb, dst)  # 元は読むだけ
+    try:
+        src_stat = files.glb.stat()
+        if dst.exists():
+            d = dst.stat()
+            if d.st_size == src_stat.st_size and int(d.st_mtime) == int(src_stat.st_mtime):
+                return dst
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(files.glb, dst)  # 元は読むだけ
+    except OSError as e:     # エラーの文には元の場所（施主名が入ることがある）が入るので、種類だけ出す
+        raise OSError(f"{files.alias} の glb を作業用に写せませんでした（{type(e).__name__}。場所・権限・空き容量を確かめてください）") from None
     return dst

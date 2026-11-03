@@ -89,3 +89,40 @@ def test_jww_detected_when_not_written(tmp_path):
 def test_ng_words_include_each_property(tmp_path):
     p = _yaml(tmp_path, {"ng_words": ["山田"], "物件A": {"glb": "x"}, "物件C": {"glb": "y", "ng_words": ["鈴木", " "]}})
     assert ng_words(p) == ["山田", "鈴木"]
+
+
+@pytest.mark.parametrize("stem, kind", [
+    ("平面詳細図", None), ("小屋裏平面図", None), ("基礎平面図", None), ("屋根平面図", None),
+    ("2階平面図兼1階屋根伏図", "plan_2f"), ("1･2階平面図", "plan"), ("1.2階平面図", "plan"), ("1 2階平面図", "plan"),
+    ("二階平面図", "plan_2f"), ("2f平面図", "plan_2f"), ("木造2階建_平面図", "plan"), ("立面図(南)", "elevation"),
+])
+def test_jww_kind_review_1104(stem, kind):
+    """★11/4 の見直し：平面詳細図などが「1階の平面図」と重なって本物まで使えなくなる・階の書き方の取りこぼし。"""
+    assert jww_kind(stem) == kind
+
+
+def test_broken_yaml_shows_only_the_line_number(tmp_path):
+    """YAML の書き間違いのエラーに、その行（施主名の入った場所）を出さない。"""
+    from core.paths import load_local_paths
+    p = tmp_path / "local_paths.yaml"
+    p.write_text("物件A:\n" + r'  glb: "C:\Users\架空施主邸\家.glb"' + "\n", encoding="utf-8")
+    with pytest.raises(ValueError) as e:
+        load_local_paths(p)
+    assert "2 行目" in str(e.value) and "架空施主" not in str(e.value) and e.value.__cause__ is None
+
+
+def test_unreadable_folders_do_not_show_the_place(tmp_path, monkeypatch):
+    """フォルダが読めない（権限・ネットワーク）ときのエラーに、場所を出さない。"""
+    from pathlib import Path
+
+    from core.paths import _resolve_glb, detect_jww
+    folder = tmp_path / "架空施主邸"
+    folder.mkdir()
+
+    def denied(self):
+        raise PermissionError(13, "アクセスが拒否されました", str(self))
+    monkeypatch.setattr(Path, "iterdir", denied)
+    glb, why = _resolve_glb(folder)
+    assert glb is None and "PermissionError" in why and "架空施主" not in why
+    jww, notes = detect_jww(folder)
+    assert jww == {} and "PermissionError" in notes[0] and "架空施主" not in notes[0]

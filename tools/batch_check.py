@@ -134,7 +134,11 @@ def run_one(alias: str, bambu: bool, images: bool) -> tuple[dict, dict | None]:
     from core.findings import code_findings
     from core.paths import out_dir, property_files
     row: dict = {"alias": alias, "ok": False, "seconds": {}}
-    files = property_files(alias)
+    try:
+        files = property_files(alias)
+    except Exception as e:  # noqa: BLE001  場所の文字が入るエラーの文は _safe_error が出さない（★11/4 の見直し）
+        row.update(glb=False, drawings=[], notes=[], stopped="場所の読み込み", error=_safe_error(e))
+        return row, None
     row.update(glb=files.glb is not None, drawings=sorted(files.jww), notes=list(files.notes))
     if files.glb is None:
         row["stopped"] = "glb がない"

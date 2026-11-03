@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 BLOCKED_EXT = (".glb", ".jww", ".jwc", ".3mf", ".stl", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".pdf")
@@ -24,17 +25,33 @@ LOCAL_PATHS = REPO_ROOT / "data" / "local_paths.yaml"
 
 
 def load_ng_words(path: Path = LOCAL_PATHS) -> list[str]:
+    """全体の ng_words と、物件ごとの ng_words（画面の「物件の登録」や手で書いたもの）を合わせたもの（core/privacy.py と同じ）。
+    ★11/4 の見直し：前は全体の ng_words だけを読み、物件ごとに足した施主名を素通りさせていた。"""
     import yaml  # .venv に入っている
 
     if not path.exists():
         return []
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return [str(w) for w in (data.get("ng_words") or []) if str(w).strip()]
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as e:   # エラー文にはその行がそのまま入る（施主名が入ることがある）ので、行の番号だけ出す
+        mark = getattr(e, "problem_mark", None) or getattr(e, "context_mark", None)
+        raise ValueError(f"data/local_paths.yaml の {mark.line + 1 if mark else '?'} 行目あたりが YAML として読めません") from None
+    words = list(data.get("ng_words") or []) if isinstance(data, dict) else []
+    for v in (data.values() if isinstance(data, dict) else []):
+        if isinstance(v, dict):
+            words += list(v.get("ng_words") or [])
+    return [str(w) for w in words if str(w).strip()]
+
+
+def _norm(s: str) -> str:
+    """全角・半角と空白の違いをなくした形（「山田 太郎」と「山田太郎」、全角の数字と半角の数字を同じに見る）。"""
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", s))
 
 
 def find_problems(files: dict[str, bytes], ng_words: list[str]) -> list[str]:
     """files: {リポジトリ内のパス: 中身}。見つかった問題を日本語で返す（言葉そのものは出さない）。"""
     problems: list[str] = []
+    normed = [_norm(w) for w in ng_words]
     for name, blob in files.items():
         lower = name.replace("\\", "/").lower()
         if lower.startswith("data/"):
@@ -44,8 +61,9 @@ def find_problems(files: dict[str, bytes], ng_words: list[str]) -> list[str]:
             problems.append(f"{name}: 図面・模型・画像のファイルはコミットできません")
             continue
         text = blob.decode("utf-8", errors="ignore")
-        for i, w in enumerate(ng_words, 1):
-            if w in name or w in text:
+        n_name, n_text = _norm(name), _norm(text)
+        for i, (w, nw) in enumerate(zip(ng_words, normed), 1):
+            if w in name or w in text or (nw and (nw in n_name or nw in n_text)):
                 problems.append(f"{name}: 出してはいけない言葉（ng_words の {i} 番目）が入っています")
         for pat in API_KEY_PATTERNS:
             if pat.search(text):

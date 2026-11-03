@@ -857,9 +857,10 @@ async function pickFor(what, key, el) {
   el.textContent = '選ぶ窓を開いています…（ブラウザの後ろに出ることがあります）'; el.className = 'hint';
   try {
     const r = await call('POST', '/api/registry/pick', { what });
-    if (r.cancelled) { el.textContent = '選ぶのをやめました'; return; }
+    // やめた・失敗したときは、前に選んだものも外す（前は前の選択が残ったまま登録された）
+    if (r.cancelled) { reg[key] = null; el.textContent = '選ぶのをやめました（選んだものはありません）'; return; }
     reg[key] = r.token; el.textContent = r.text; el.className = r.ok ? 'ok' : 'err';
-  } catch (e) { el.textContent = e.message; el.className = 'err'; }
+  } catch (e) { reg[key] = null; el.textContent = e.message; el.className = 'err'; }
 }
 $('#reg-pick-glb').addEventListener('click', () => pickFor('glb', 'glb', $('#reg-glb-status')));
 $('#reg-pick-dwg').addEventListener('click', () => pickFor('folder', 'dwg', $('#reg-dwg-status')));
@@ -867,6 +868,7 @@ $('#reg-submit').addEventListener('click', async () => {
   const body = { alias: $('#reg-alias').value.trim(), glb_token: reg.glb, glb_path: $('#reg-glb-path').value.trim() || null,
     drawings_token: reg.dwg, drawings_path: $('#reg-dwg-path').value.trim() || null, ng_words: $('#reg-ng').value.split('\n') };
   if (!body.ng_words.some((w) => w.trim()) && !confirm('出してはいけない言葉（施主名・住所など）が空です。このまま登録しますか？')) return;
+  $('#reg-submit').disabled = true;     // 連打で同じ仮名を2回書かないように
   try {
     const r = await call('POST', '/api/registry', body);
     reg.glb = reg.dwg = null;
@@ -877,6 +879,7 @@ $('#reg-submit').addEventListener('click', async () => {
     await fillAliases(r.alias);
     renderRegistry();
   } catch (e) { $('#reg-msg').textContent = '登録できませんでした：' + e.message; $('#reg-msg').className = 'err'; }
+  finally { $('#reg-submit').disabled = false; }
 });
 
 async function fillAliases(choose) {
