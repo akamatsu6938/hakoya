@@ -5,17 +5,21 @@ claude_code:
   inspect_merge:  {model: claude-opus-5-5, effort: xhigh}    # 指摘のまとめ役
   lasso:          {model: claude-opus-5-5, effort: high}     # 囲んで直す
   room_names:     {model: claude-sonnet-5-5, effort: low}    # 部屋の名前
+  rule_draft:     {model: claude-opus-5-5, effort: high}     # 会社ルールの言語化（集計と答えから案を書く）
 api_key:
   inspect_face:   {model: claude-sonnet-5-5, effort: medium}
   inspect_merge:  {model: claude-opus-5-5, effort: high}
   lasso:          {model: claude-sonnet-5-5, effort: medium}
   room_names:     {model: claude-haiku-5-5, effort: low}
+  rule_draft:     {model: claude-sonnet-5-5, effort: medium}
 limits:
   max_budget_usd: 3.0     # 1回の検品の費用の上限（安全装置。プランでも目安として効く）
   max_turns: 60           # まとめ役のやりとりの上限
   max_turns_per_face: 12  # api_key：面ごとの検品担当のやりとりの上限
   lasso_max_turns: 10         # 囲んで直す：1回のやりとりの上限
   lasso_max_budget_usd: 1.0   # 囲んで直す：1回の費用の上限
+  rule_max_turns: 15          # 会社ルールの言語化：1回のやりとりの上限
+  rule_max_budget_usd: 1.0    # 会社ルールの言語化：1回の費用の上限
 # api_key のときの費用の計算に使う料金（100万トークンあたりのドル）。2026-11 の公表値。変わったらここを直す。
 # cache_write は「指示を覚えさせる」とき、cache_read は「覚えさせた指示を読み直す」ときの料金。
 prices_usd_per_mtok:

@@ -128,6 +128,35 @@ def learned_skill_section(company: str) -> str:
     return "\n".join(lines)
 
 
+def _answer_files() -> list[tuple[str, Path]]:
+    """人の答えの記録：開発中に書いた rules/answers.jsonl（番号 A）と、アプリが足す DATA_DIR/rules/answers.jsonl（番号 D）。"""
+    return [("A", RULES_DIR / "answers.jsonl"), ("D", LEARNED_DIR / "answers.jsonl")]
+
+
+def load_answers() -> list[dict]:
+    """人の答え（同じ質問を二度しないため・会社ルールの言語化の根拠）。番号は行の順（足すだけなので変わらない）。"""
+    out = []
+    for prefix, p in _answer_files():
+        if not p.exists():
+            continue
+        for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if line.strip():
+                out.append({"id": f"{prefix}{i}", **json.loads(line)})
+    return out
+
+
+def add_answer(question: str, answer: str, property: str = "全体", evidence: str = "") -> dict:
+    """人の答えを DATA_DIR/rules/answers.jsonl に足す（rules/ は書き換えない）。"""
+    import datetime as dt
+    p = LEARNED_DIR / "answers.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    rec = {"property": property, "question": question, "answer": answer, "applied_as": "", "evidence": evidence,
+           "at": dt.date.today().isoformat()}
+    with p.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return {"id": f"D{sum(1 for x in p.read_text(encoding='utf-8').splitlines() if x.strip())}", **rec}
+
+
 def rule(rules: dict, dotted: str):
     """「walls.exterior_thickness_mm」の形で値を引く。"""
     cur = rules
