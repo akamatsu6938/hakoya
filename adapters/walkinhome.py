@@ -699,10 +699,10 @@ def _level_parts(model: GlbModel, levels: list[dict], i: int) -> dict:
 
 def _roof_level(roof: dict, levels: list[dict]) -> int:
     """屋根が載る階：屋根の下の面のいちばん低い所の、すぐ下に天井がある階（下屋は 1F、大屋根は 2F）。"""
-    bp, fp = roof.get("bottom_plane"), roof.get("footprint")
-    if not bp or not fp:
+    from core.roof_geom import bottom_min
+    zmin = bottom_min(roof)                   # 面が複数の屋根は面ごとに測る
+    if zmin is None:
         return len(levels) - 1
-    zmin = min(bp["a"] * x + bp["b"] * y + bp["c"] for x, y in fp)
     idx = 0
     for i, lv in enumerate(levels):
         if float(lv["fl_mm"]) + float(lv.get("ceiling_mm", 2400)) <= zmin + 1:

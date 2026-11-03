@@ -18,6 +18,7 @@ from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
 from core.builder import SIDE_DIRS, keep_above, keep_below, plane_z, prism, slab_outline, wall_rect
+from core.roof_geom import surfaces as roof_surfaces
 
 EAVE_BAND_MM = 600.0      # 軒の帯の幅（屋根板の縁から内側へ。軒の出と板金の分はさらに足す）
 PROUD_MM = 20.0           # 軒の帯を屋根板より厚く・広くする分（屋根全体より先に当たるように）
@@ -55,12 +56,12 @@ def _wall_solid(w: dict, roofs: list[dict], roof_top: float) -> Manifold:
     z1 = float(w.get("top_glb_mm") or roof_top)
     s = prism(wall_rect(w), z0, z1)
     r = _covering_roof(roofs, w)
-    return keep_below(s, r["bottom_plane"]) if r is not None and r.get("bottom_plane") else s
+    return keep_below(s, roof_surfaces(r)[0]) if r is not None and r.get("bottom_plane") else s
 
 
 def _roof_items(r: dict, overhang: float, cut: Polygon | None) -> list[tuple[str, str, str, Manifold]]:
     """1つの屋根の、辺ごとの軒の帯と屋根全体。"""
-    rb, rt = r["bottom_plane"], r["top_plane"]
+    rb, rt = roof_surfaces(r)                      # 面が複数の屋根も（MultiPlane）
     slab = slab_outline(r)
     slab = slab.buffer(overhang, join_style="mitre") if overhang else slab
     if cut is not None:

@@ -9,7 +9,9 @@ const api = (path) => path.replace('{a}', encodeURIComponent(state.alias));
 const state = { alias: null, building: null, root: null, exploded: false, pick: null, hl: null };
 const KIND = { window: '窓', door: 'ドア', entrance_door: '玄関ドア', exterior: '外壁', interior: '内壁', standalone: '単独の壁' };
 const SIDE = { W: '西', E: '東', S: '南', N: '北' };
-const roofKind = (r) => (r.kind === 'lean_to' ? '下屋の屋根' : state.multi ? '大屋根' : '屋根');
+const ROOF_SHAPE = { gable: '切妻', hip: '寄棟', multi: '複数の面' };   // 片流れは今までどおり書かない
+const roofKind = (r) => (r.kind === 'lean_to' ? '下屋の屋根' : state.multi ? '大屋根' : '屋根')
+  + (ROOF_SHAPE[r.shape] ? `（${ROOF_SHAPE[r.shape]}・面${(r.planes || []).length}枚）` : '');
 
 function setStatus(text, cls = '') { const s = $('#status'); s.textContent = text; s.className = 'status ' + cls; }
 

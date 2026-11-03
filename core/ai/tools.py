@@ -90,6 +90,9 @@ def get_building(ctx: ToolContext) -> dict:
         "walls": dict(walls), "openings": dict(ops),
         "roof": {"id": next((x.get("id") for x in b.get("roofs", []) if x.get("kind") == "main"), None),
                  **{k: r.get(k) for k in ("shape", "pitch", "low_side", "thickness_mm", "eave_mm", "eave_with_gutter_mm")},
+                 # 片流れ以外（切妻・寄棟など）は面ごとの低い側と勾配（面の式はコードが持つ。数値は作らない）
+                 **({"planes": [{k: p.get(k) for k in ("id", "low_side", "pitch")} for p in r["planes"]]}
+                    if len(r.get("planes") or []) > 1 else {}),
                  # ★説明がないと「軒の出が glb（樋込み 146mm）より短い」と誤って指摘された（検品 3回目 F2）
                  "note": "eave_mm は glb の屋根板の出（外壁の外の面から屋根の先まで、板金・樋を除く）、eave_with_gutter_mm は軒樋を含めた出。"
                          "直すときは target=屋根の id・field=eave_mm.S のように辺を付ける。樋・破風・鼻隠しは模型では省く"

@@ -74,9 +74,20 @@ def test_shed_roof_pitch_direction_thickness_and_eaves():
     assert r["eave_with_gutter_mm"]["W"] == 146                      # 146 は軒樋
 
 
-def test_non_planar_roof_is_unknown():
+def test_non_planar_roof_is_read_as_planes():
+    """上の面が1枚の平面でない屋根は、面ごとに分けて読む（2026-11-03 作者「片流れ以外もできるように」。
+    以前は「片流れ以外は対象外」で unknown にしていた）。"""
     p = _roof_part()
     p.primitives[0].vertices[0, 2] += 500  # 上の面を折る（片流れでない）
+    roof = detect_roof(p, box(-11010, -11010, -817, 90))
+    assert roof["shape"] in ("gable", "hip", "multi") and len(roof["planes"]) >= 2
+
+
+def test_roof_without_usable_planes_is_unknown():
+    p = _roof_part()
+    top = p.primitives[0]
+    top.vertices = top.vertices * np.array([0.001, 0.001, 1.0])      # 面が小さすぎる（0.1m² 未満のくず）
+    top.vertices[0, 2] += 500
     assert detect_roof(p, box(-11010, -11010, -817, 90))["shape"] == "unknown"
 
 

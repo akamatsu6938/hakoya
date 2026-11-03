@@ -42,7 +42,7 @@ STATS = {
 }
 # 物件ごとに違って当然の項目（違っても「いつもと違う」と知らせない。会社ルールの値は予備）
 VARIABLE_BY_NATURE = ("openings.window_head", "roofs.pitch", "levels.story_height")
-SHAPE_JA = {"shed": "片流れ", "gable": "切妻", "hip": "寄棟", "flat": "陸屋根", "unknown": "不明"}
+SHAPE_JA = {"shed": "片流れ", "gable": "切妻", "hip": "寄棟", "multi": "複数の面", "flat": "陸屋根", "unknown": "不明"}
 EXCEPTION_JA = {
     "agari_kamachi": "上がり框の位置に壁を作らない（框・靴箱などの造作は模型に入れない）",
     "back_to_back_exterior_faces": "背中合わせの外壁の面は1枚の内壁として作る",

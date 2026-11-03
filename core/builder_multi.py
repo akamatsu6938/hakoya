@@ -19,6 +19,8 @@ from manifold3d import Manifold
 from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
 
+from core.roof_geom import surfaces as roof_surfaces
+
 from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
                           drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note, slab_outline, slab_solid,
                           opening_keep_out, smooth_near_openings)
@@ -63,6 +65,8 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     main = next(r for r in roofs if r.get("kind") == "main")
     lean = [r for r in roofs if r.get("kind") == "lean_to" and r.get("bottom_plane") and r.get("footprint")]
     zone_b = [Polygon(r["footprint"]).buffer(ZONE_B_MARGIN_MM, join_style="mitre").difference(zone_a) for r in lean]
+    lean_s = [roof_surfaces(r) for r in lean]            # （下の面, 上の面）。片流れは平面の式、面が複数なら MultiPlane
+    main_b, main_t = roof_surfaces(main)
     zone_c = BIG.difference(unary_union([zone_a] + zone_b))
     walls1 = [w for w in b["walls"] if w["level"] == lv1["name"]]
     walls2 = [w for w in b["walls"] if w["level"] == lv2["name"]]
@@ -84,7 +88,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     def is_upper(w, fl):
         return float(w["bottom_mm"]) >= fl + UPPER_WALL_ABOVE_FL
 
-    def full_wall(w: dict, z0: float, z1: float, top_plane: dict | None = None) -> Manifold:
+    def full_wall(w: dict, z0: float, z1: float, top_plane=None) -> Manifold:
         """壁の立体（z0〜z1、上の屋根の下の面で切る）。開口を抜く。下に残る壁が細すぎれば下まで抜く。"""
         s = prism(wall_rect(w), z0, z1)
         if top_plane is not None:
@@ -97,7 +101,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
             cx, cy = o["center"]
             zone, k = zone_of(cx, cy)
             if w["level"] == lv1["name"] and zone == "B" and top_plane is None:
-                top_here = plane_z(lean[k]["bottom_plane"], cx, cy)
+                top_here = plane_z(lean_s[k][0], cx, cy)
             elif top_plane is not None:
                 top_here = plane_z(top_plane, cx, cy)
             else:
@@ -139,7 +143,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
         part = full - union_all([prism(zone_a, zf2, Z_HI), prism(zone_c, ceil1, Z_HI)] + [prism(zb, ceil1, Z_HI) for zb in zone_b])
         if w["kind"] != "interior":
             for k, zb in enumerate(zone_b):
-                lower_ext.append(keep_below(full ^ prism(zb, ceil1, Z_HI), lean[k]["bottom_plane"]))
+                lower_ext.append(keep_below(full ^ prism(zb, ceil1, Z_HI), lean_s[k][0]))
         cuts = slivers(w, cap1)
         if cuts:
             part = part - union_all(cuts)
@@ -212,7 +216,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     ext2_lo, ext2_up, int2 = [], [], []
     for w in walls2:
         if w["kind"] in ("exterior", "standalone"):
-            full = full_wall(w, zf2, Z_HI, top_plane=main.get("bottom_plane"))   # 床板の裏から（外の面を続ける）
+            full = full_wall(w, zf2, Z_HI, top_plane=main_b)   # 床板の裏から（外の面を続ける）
             lo = full.trim_by_plane((0.0, 0.0, -1.0), -ceil2)
             cuts = slivers(w, lambda x, y: ceil2)
             ext2_lo.append(lo - union_all(cuts) if cuts else lo)
@@ -243,7 +247,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     # ---------------------------------------------------------------- ③ 下屋の屋根
     roof_lower_parts, lower_soffit_tops = [], {}
     for k, r in enumerate(lean):
-        rb, rt = r["bottom_plane"], r["top_plane"]
+        rb, rt = roof_surfaces(r)
         zmax = float(r["top_z_range_mm"][1]) + 200
         sp = slab_outline(r)                                                       # 軒の出の修正はここだけに効く（区域B は元の形）
         sp = sp.buffer(overhang, join_style="mitre") if overhang else sp
@@ -270,14 +274,14 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
         for pp, top in lower_soffit_tops.values():
             if pp.intersects(wall_rect(w)) and abs(top - plate_t - bottom) <= 1.0:
                 bottom = top
-        lower_ext.append(keep_below(full_wall(w, bottom, Z_HI) ^ prism(zone_b[k], Z_LO, Z_HI), lean[k]["bottom_plane"]))
+        lower_ext.append(keep_below(full_wall(w, bottom, Z_HI) ^ prism(zone_b[k], Z_LO, Z_HI), lean_s[k][0]))
     if hanging1:   # 部屋の中の下がり壁（区域B は下屋の屋根へ、区域A は 1階に残す）
         standing = unary_union([wall_rect(o) for o in walls1 if float(o["bottom_mm"]) <= fl1 + 1]).buffer(clearance, join_style="mitre")
         for w in hanging1:
             mx, my = (np.array(w["start"]) + np.array(w["end"])) / 2
             zone, k = zone_of(mx, my)
             if zone == "B":
-                s = keep_below(prism(wall_rect(w), float(w["bottom_mm"]), Z_HI), lean[k]["top_plane"])
+                s = keep_below(prism(wall_rect(w), float(w["bottom_mm"]), Z_HI), lean_s[k][1])
                 roof_lower_parts.append(s - prism(standing, float(w["bottom_mm"]) - 1, ceil1))
             else:
                 floor1 = union_all([floor1, prism(wall_rect(w), float(w["bottom_mm"]), zf2)])
@@ -292,7 +296,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
         for v, e1, e2 in _real_corners(_pick_corners(inside_b, count=4, leg=leg, avoid=int1_fp), ext1_fp, leg):
             tri = Polygon([v, v + e1 * leg, v + e2 * leg])
             small = tri.buffer(-clearance, join_style="mitre")
-            roof_lower_parts.append(keep_below(prism(tri, ceil1, float(lean[k]["top_z_range_mm"][1]) + 200), lean[k]["top_plane"]))
+            roof_lower_parts.append(keep_below(prism(tri, ceil1, float(lean[k]["top_z_range_mm"][1]) + 200), lean_s[k][1]))
             roof_lower_parts.append(prism(small, ceil1 - block_h, ceil1 + 1))
             b_corners.append(v)
     notes["roof_lower"].append(f"ずれ止めの三角を {len(b_corners)} か所（下屋の下の1階の外壁の内側の角）。2階の外壁とは隙間を空けた（別々に外せる）")
@@ -300,7 +304,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     roof_lower = union_all(roof_lower_parts) - roof_lower_ext
 
     # ---------------------------------------------------------------- ⑤ 大屋根（平屋の屋根と同じ作り方を2階の値で）
-    rb, rt = main["bottom_plane"], main["top_plane"]
+    rb, rt = main_b, main_t
     zmax = float(main["top_z_range_mm"][1]) + 200
     sp = slab_outline(main)
     sp = sp.buffer(overhang, join_style="mitre") if overhang else sp

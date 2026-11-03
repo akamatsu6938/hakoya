@@ -129,11 +129,20 @@ def _roofs_with_level(building: dict) -> list[tuple[dict, int]]:
     return out
 
 
-def _shift_roof(roof: dict, dz: float) -> None:
-    """屋根を dz 上下させる（面の式の c と、上の面の高さの範囲）。入れ子の dict は作り直す。"""
+def _shift_planes(obj: dict, dz: float) -> dict:
+    """面の式の c を dz ずらした写し（入れ子の dict は作り直す）。"""
+    out = dict(obj)
     for k in ("top_plane", "bottom_plane"):
-        if isinstance(roof.get(k), dict) and "c" in roof[k]:
-            roof[k] = {**roof[k], "c": float(roof[k]["c"]) + dz}
+        if isinstance(out.get(k), dict) and "c" in out[k]:
+            out[k] = {**out[k], "c": float(out[k]["c"]) + dz}
+    return out
+
+
+def _shift_roof(roof: dict, dz: float) -> None:
+    """屋根を dz 上下させる（面の式の c と、上の面の高さの範囲。面が複数の屋根は面ごとに）。入れ子の dict は作り直す。"""
+    roof.update(_shift_planes(roof, dz))
+    if isinstance(roof.get("planes"), list):
+        roof["planes"] = [_shift_planes(p, dz) for p in roof["planes"]]
     if isinstance(roof.get("top_z_range_mm"), list):
         roof["top_z_range_mm"] = [_num(float(v) + dz) for v in roof["top_z_range_mm"]]
 
@@ -195,11 +204,9 @@ def _level_changed(building: dict, lv: dict, field: str, before, to) -> None:
 
 
 def _roof_bottom_min(roof: dict) -> float | None:
-    """屋根の下の面のいちばん低い所（屋根の平面の形の頂点で測る）。"""
-    p, fp = roof.get("bottom_plane"), roof.get("footprint")
-    if not isinstance(p, dict) or not fp:
-        return None
-    return min(float(p["a"]) * x + float(p["b"]) * y + float(p["c"]) for x, y in fp)
+    """屋根の下の面のいちばん低い所（屋根の平面の形の頂点で測る。面が複数の屋根は面ごとに）。"""
+    from core.roof_geom import bottom_min
+    return bottom_min(roof)
 
 
 def level_problems(building: dict, rules: dict) -> dict[tuple, str]:

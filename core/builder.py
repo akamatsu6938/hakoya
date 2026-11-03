@@ -21,6 +21,8 @@ from shapely.affinity import translate
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
+from core.roof_geom import MultiPlane, surfaces as roof_surfaces
+
 UPPER_WALL_ABOVE_FL = 1500.0   # 下端がこれより上の壁は「途中から始まる壁」（ポーチの上の垂れ壁など）
 DOMA_UNDER_WALL_MM = 100.0     # 土間を壁の下まで広げる幅（実寸）
 GAP_FILL_MM = 40.0             # ポーチの天井の板で埋める細いすき間の幅（実寸）
@@ -83,21 +85,27 @@ def drop_specks(m: Manifold, min_volume: float = SPECK_MM3) -> Manifold:
     return m if len(kept) == len(bodies) else union_all(kept)
 
 
-def keep_below(m: Manifold, plane: dict, offset: float = 0.0) -> Manifold:
-    """z <= a*x + b*y + c + offset の側を残す。"""
+def keep_below(m: Manifold, plane, offset: float = 0.0) -> Manifold:
+    """z <= a*x + b*y + c + offset の側を残す。面が複数の屋根（MultiPlane）は、面の受け持ちの範囲ごとに切る。"""
+    if isinstance(plane, MultiPlane):
+        return plane.keep_below(m, offset)
     a, b, c = plane["a"], plane["b"], plane["c"] + offset
     L = math.sqrt(a * a + b * b + 1)
     return m.trim_by_plane((a / L, b / L, -1 / L), -c / L)
 
 
-def keep_above(m: Manifold, plane: dict, offset: float = 0.0) -> Manifold:
-    """z >= a*x + b*y + c + offset の側を残す。"""
+def keep_above(m: Manifold, plane, offset: float = 0.0) -> Manifold:
+    """z >= a*x + b*y + c + offset の側を残す。面が複数の屋根（MultiPlane）は、面の受け持ちの範囲ごとに切る。"""
+    if isinstance(plane, MultiPlane):
+        return plane.keep_above(m, offset)
     a, b, c = plane["a"], plane["b"], plane["c"] + offset
     L = math.sqrt(a * a + b * b + 1)
     return m.trim_by_plane((-a / L, -b / L, 1 / L), c / L)
 
 
-def plane_z(plane: dict, x: float, y: float) -> float:
+def plane_z(plane, x: float, y: float) -> float:
+    if isinstance(plane, MultiPlane):
+        return plane.z(x, y)
     return plane["a"] * x + plane["b"] * y + plane["c"]
 
 
@@ -197,9 +205,17 @@ def smooth_near_openings(fuzzy: Manifold, plain: Manifold, keep_out: list[Manifo
     return fuzzy - ko, union_all([plain, near]), True
 
 
-def slab_solid(poly, rb: dict, rt: dict, zmax: float) -> Manifold:
+def slab_solid(poly, rb, rt, zmax: float) -> Manifold:
     """屋根板の立体：外形の柱を、屋根の上の面と下の面の間で切る。
-    柱の高さは屋根の面から決める（軒を伸ばしても上の面が平らに切られない）。外形が glb のままなら今までと同じ立体。"""
+    柱の高さは屋根の面から決める（軒を伸ばしても上の面が平らに切られない）。外形が glb のままなら今までと同じ立体。
+    面が複数の屋根は、外形を面の受け持ちの範囲で分けて、面ごとの板を合わせる（棟・隅棟・谷で板がつながる）。"""
+    if isinstance(rb, MultiPlane):
+        pieces = []
+        for (dom, b), (_, t) in zip(rb.items, rt.items):
+            sub = poly.intersection(dom)
+            if not sub.is_empty and sub.area > 1.0:
+                pieces.append(slab_solid(sub, b, t, zmax))
+        return union_all(pieces)
     x0, y0, x1, y1 = poly.bounds
     corners = [(x0, y0), (x0, y1), (x1, y0), (x1, y1)]
     z_lo = min(plane_z(rb, *poly.centroid.coords[0]) - 2000, min(plane_z(rb, x, y) for x, y in corners) - 10)
@@ -227,7 +243,7 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     fl = float(lv["fl_mm"])
     ftop = float(b["foundation"]["top_mm"])
     roof = b["roof"]
-    rb, rt = roof["bottom_plane"], roof["top_plane"]
+    rb, rt = roof_surfaces(roof)                 # 片流れは平面の式（dict）、面が複数の屋根は MultiPlane
     roof_zmax = float(roof["top_z_range_mm"][1]) + 200
     outline = Polygon(b["foundation"]["outline"])
     walls = b["walls"]
