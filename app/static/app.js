@@ -241,6 +241,20 @@ async function renderChecks() {
         : `<li class="lv-中"><span class="tag">いつもと違う</span>${esc(r.message)}</li>`);
     }
   } catch (e) { /* 組み立て前は出さない */ }
+  try {   // 図面（jww）と比べた結果：平面図の窓・テラスドアの注記（品番と上端）と模型の開口
+    const dw = await call('GET', '/api/drawing/{a}');
+    if (dw.available) {
+      ul.insertAdjacentHTML('beforeend', '<li class="lv-情報"><b>図面（jww）と比べた結果</b>（平面図の窓・テラスドアの注記の上端 FL+ と、模型の開口の上端）</li>');
+      for (const r of dw.levels) {
+        const name = LEVEL_JA[r.level] || r.level;
+        if (!r.aligned) { ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">${esc(name)}</span>${esc(r.note)}</li>`); continue; }
+        ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${esc(name)}</span>注記 ${r.notes} 件のうち ${r.matched} 件を開口に結び、${r.same} 件が一致`
+          + (r.unmatched ? `。近くに開口がない注記 ${r.unmatched} 件` : '') + '</li>');
+        for (const m of r.mismatches) ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">図面と違う</span>${esc(m.opening)}：模型 FL+${Math.round(m.model_head_fl_mm)}、図面の注記 FL+${m.head_fl_mm}（品番 ${esc(m.code)}）</li>`);
+        for (const n of r.unmatched_notes) ul.insertAdjacentHTML('beforeend', `<li class="lv-低"><span class="tag">要確認</span>図面に注記（品番 ${esc(n.code)}、FL+${n.head_fl_mm}）があるが、近くに模型の開口がない</li>`);
+      }
+    }
+  } catch (e) { /* 図面がない・読めないときは出さない */ }
   try {
     const s = await call('GET', '/api/model/{a}/checks.json');
     for (const [k, p] of Object.entries(s.parts)) for (const n of p.notes) ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${p.label}</span>${n}</li>`);

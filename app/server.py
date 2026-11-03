@@ -122,6 +122,27 @@ def rule_check(alias: str):
     return _safe_json({"rows": check_property(b, load_rules(b["source"].get("company_rules", "jisha")))})
 
 
+DRAWING_CACHE: dict[str, tuple] = {}     # 物件ごとの（building・修正の更新時刻, 照合の結果）。位置合わせに数秒かかるため
+
+
+@app.get("/api/drawing/{alias}")
+def drawing_check(alias: str):
+    """図面（jww）と比べた結果：平面図の窓・テラスドアの注記（品番と上端の FL+）と模型の開口の上端。数値はコードが読む。"""
+    _check_alias(alias)
+    from core.drawing_check import summary
+    key = tuple(p.stat().st_mtime if p.exists() else 0 for p in (_building_path(alias), ov.overrides_path(alias)))
+    hit = DRAWING_CACHE.get(alias)
+    if hit and hit[0] == key:
+        return _safe_json(hit[1])
+    b, _ = _effective(alias)
+    try:
+        result = summary(alias, b)
+    except Exception as e:                                    # 図面が読めない（壊れている・ライブラリがない）
+        result = {"available": False, "note": f"図面を読めませんでした（{type(e).__name__}）"}
+    DRAWING_CACHE[alias] = (key, result)
+    return _safe_json(result)
+
+
 @app.get("/api/plan/{alias}")
 def plan(alias: str, level: str | None = None):
     """平面図。2階建ては level（1F・2F）で階を選ぶ（省くと1階）。"""

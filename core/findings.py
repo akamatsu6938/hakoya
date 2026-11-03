@@ -48,6 +48,12 @@ def code_findings(alias: str) -> list[dict]:
     for d in differences(b, load_rules(b.get("source", {}).get("company_rules", "jisha"))):
         out.append({"view": "plan", "kind": "rule", "severity": "中", "message": d["message"],
                     "targets": [], "evidence": [f"会社ルール {d['rule_key']}"], "source": "code"})
+    try:   # 図面（jww）と比べて違う所（修正を当てたあとの家と比べる。図面が読めなくてもほかの指摘は出す）
+        from core import overrides as ov
+        from core.drawing_check import findings as drawing_findings
+        out += drawing_findings(alias, ov.apply(b, ov.load(alias))[0])
+    except Exception:  # noqa: BLE001  図面の読み取りの失敗で検品全体を止めない
+        pass
     for s in b.get("skipped", []):
         if "見つからない" in s.get("reason", ""):
             out.append({"view": "plan", "kind": "opening", "severity": "中", "message": f"{s['source']}：{s['reason']}",

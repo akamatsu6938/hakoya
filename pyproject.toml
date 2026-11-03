@@ -16,6 +16,7 @@ dependencies = [
     "claude-agent-sdk>=0.2",
     "anthropic>=2.3",
     "keyring>=25",
+    "ezjww>=0.7.6",
 ]
 
 [project.optional-dependencies]
