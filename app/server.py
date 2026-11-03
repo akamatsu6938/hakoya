@@ -268,10 +268,32 @@ def inspection_image(alias: str, view: str, hl: str = "", source: str = "model")
 # ---------------------------------------------------------------- 囲んで直す（SPEC §9-3）
 
 class LassoIn(BaseModel):
-    polygon: list[list[float]]           # 囲み（平面の mm。平面図の画面が座標を直して送る）
+    polygon: list[list[float]] | None = None   # 平面図の囲み（平面の mm。平面図の画面が座標を直して送る）
+    hits: list[dict] | None = None             # 3D の囲み：部材ごとの {id, inside, total}（画面が数えた画素の数）
+    mask_px: int = 0                           # 3D の囲みの広さ（画素）
+    view: str | None = None                    # 3D の画面をどちらから見ていたか（S/N/E/W/plan）
     text: str = ""
     connection: str = "off"
-    level: str | None = None             # 2階建て：表示している階（その階の部材だけを選ぶ）
+    level: str | None = None             # 2階建て：表示している階（平面図の囲みで、その階の部材だけを選ぶ）
+
+
+def _lasso_selection(b: dict, body: LassoIn) -> dict:
+    from core import lasso as geo
+    if body.hits is not None:
+        return geo.select_hits(b, body.hits, body.mask_px)
+    if body.polygon:
+        return geo.select(b, body.polygon, body.level)
+    raise ValueError("囲みがありません。もう一度囲んでください")
+
+
+@app.get("/api/pick/{alias}")
+def pick_proxies(alias: str):
+    """3D で囲んで直すの当たり判定用の形（部材ごと、実寸 mm）。修正を当てた後の家で作る。"""
+    _check_alias(alias)
+    from core.pick import proxies
+    from core.rules import load_rules
+    b, _ = _effective(alias)
+    return _safe_json(proxies(b, load_rules(b["source"].get("company_rules", "jisha"))))
 
 
 @app.post("/api/lasso/{alias}/select")
@@ -281,7 +303,7 @@ def lasso_select(alias: str, body: LassoIn):
     from core import lasso as geo
     b, _ = _effective(alias)
     try:
-        sel = geo.select(b, body.polygon, body.level)
+        sel = _lasso_selection(b, body)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _safe_json({"selection": geo.describe(b, sel)})
@@ -301,7 +323,8 @@ def lasso_ask(alias: str, body: LassoIn):
         raise HTTPException(409, "この物件はいま検品中です。検品が終わってから頼んでください")
     from core.ai.lasso import run_lasso
     try:
-        res = asyncio.run(run_lasso(alias, body.connection, body.polygon, body.text, level=body.level))
+        res = asyncio.run(run_lasso(alias, body.connection, body.polygon, body.text, level=body.level,
+                                    hits=body.hits, mask_px=body.mask_px, view=body.view))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:

@@ -7,6 +7,8 @@ const $ = (s) => document.querySelector(s);
 const api = (path) => path.replace('{a}', encodeURIComponent(state.alias));
 const state = { alias: null, building: null, root: null, exploded: false };
 const KIND = { window: '窓', door: 'ドア', entrance_door: '玄関ドア', exterior: '外壁', interior: '内壁', standalone: '単独の壁' };
+const SIDE = { W: '西', E: '東', S: '南', N: '北' };
+const roofKind = (r) => (r.kind === 'lean_to' ? '下屋の屋根' : state.multi ? '大屋根' : '屋根');
 
 function setStatus(text, cls = '') { const s = $('#status'); s.textContent = text; s.className = 'status ' + cls; }
 
@@ -143,6 +145,15 @@ function renderTables(b) {
     rows[0].lastChild.appendChild(del);
     rows.forEach((r) => wt.appendChild(r));
   }
+  // 屋根：番号・種類・勾配・低い側は表示だけ。軒の出（西・東・南・北）を直せる
+  const rt = $('#roofs');
+  rt.innerHTML = `<tr><th>番号</th>${lvHead}<th>種類</th><th>勾配</th><th>低い側</th>${[...'WESN'].map((s) => `<th>軒の出 ${SIDE[s]}</th>`).join('')}</tr>`;
+  for (const r of b.roofs || []) {
+    const eaves = [...'WESN'].map((s) => (r.eave_mm && s in r.eave_mm ? { field: `eave_mm.${s}`, value: r.eave_mm[s] } : { text: '' }));
+    const rows = editableRow([{ text: r.id }, ...lvCell(r), { text: roofKind(r) }, { text: (r.pitch || []).join('/') },
+      { text: SIDE[r.low_side] || r.low_side || '' }, ...eaves], (inputs, reason) => approveChanges(r.id, inputs, reason));
+    rows.forEach((x) => rt.appendChild(x));
+  }
 }
 
 async function renderHistory(results) {
@@ -152,7 +163,7 @@ async function renderHistory(results) {
   const label = { applied: '当てた', applied_changed: '当てた（自動の値が変わっていた）', failed: '当てられない' };
   for (const it of items.slice().reverse()) {
     const li = document.createElement('li'); const st = status[it.id];
-    const what = it.field === '_delete' ? '取り除く' : `${it.field}：${it.from} → ${it.to}`;
+    const what = it.field === '_delete' ? '取り除く' : `${FIELD[it.field] || it.field}：${it.from} → ${it.to}`;
     li.innerHTML = `<span class="tag">${it.id}</span><b>${it.target}</b> ${what}<br><span class="hint">${it.reason}（${it.value_source}・${it.at.slice(0, 16).replace('T', ' ')}）${st ? '・' + label[st.status] : ''}</span> `;
     const undo = document.createElement('button'); undo.textContent = '取り消す';
     undo.addEventListener('click', async () => {
@@ -189,6 +200,7 @@ const VIEW_OF = { S: 'S', N: 'N', E: 'E', W: 'W', plan: 'plan', plan2: 'plan2', 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const FIELD = { thickness_mm: '厚み', width_mm: '幅', offset_mm: '壁の端からの位置', sill_fl_mm: '下端 FL+', head_fl_mm: '上端 FL+' };
+for (const s of 'WESN') FIELD[`eave_mm.${s}`] = `軒の出（${SIDE[s]}）`;
 
 function sourceText(vs) {   // 数値の出どころを日本語にする（例：majority:exterior → 外壁の多数派）
   const s = String(vs ?? '');

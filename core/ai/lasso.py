@@ -22,21 +22,33 @@ from core.paths import out_dir
 from core.privacy import assert_clean
 
 ROLE = ("あなたは住宅模型（1/50、3D プリント）の手直しの担当。日本語で考え、日本語で書く。"
-        "人が平面図で部材を囲み、一言で直したいことを書いた。使える道具は HAKOYA の道具だけ。"
+        "人が平面図か 3D の画面で部材を囲み、一言で直したいことを書いた。使える道具は HAKOYA の道具だけ。"
         "数値（座標・寸法・高さ）は自分で作らず、直す案は propose_override に数値の出どころ（value_source）を渡して、"
         "コードに計算させる。人が数値を書いたときだけ value_source=number と number を使う。"
         "どの部材か・どの値か・何に合わせるかが決まらないときは、ask_question で選択肢（2〜3個）つきの質問をする。"
         "Skill（検品の決まり・模型のルール・会社のルール）に従う。")
 
 
-def lasso_prompt(rows: list[dict], text: str) -> str:
+VIEW_JA = {"S": "南", "N": "北", "E": "東", "W": "西", "plan": "真上"}
+ROOF_GUIDE = ("屋根の軒の出は propose_override（target=屋根の番号、field=eave_mm.辺）で直す。"
+              "図面（jww）はまだ読めない。一言に数値があればその数値を value_source=number で使い、"
+              "なければ ask_question で図面の軒の出（外壁の外の面から屋根の先まで、板金・樋を除く）を人に聞く。"
+              "数値を自分で作らない（選択肢にも数値を書かない。例：「図面の数値を答える」「glb のままにする」）。")
+
+
+def lasso_prompt(rows: list[dict], text: str, view: str | None = None) -> str:
+    """view を渡すと 3D の画面で囲んだときの言い方（どちらから見た画面か）。"""
     listing = "\n".join(f"- {r['id']}（{r['label']}）：{r['text']}" for r in rows) or "- （なし）"
-    ids = ",".join(r["id"] for r in rows)
-    return (f"人が平面図で部材を囲み、こう書きました：「{text}」\n\n"
+    ids = ",".join(r["id"] for r in rows if r["id"][:1] in "WO")
+    where = f"{VIEW_JA.get(view, view)}から見た 3D の画面で" if view else "平面図で"
+    look = (f"必要なら render_view（view={view if view in VIEW_JA else 'plan'}、highlight={ids}）で図を見て、"
+            "get_elements で値を確かめてください（屋根・軒は図に枠を付けられないので get_elements の ids で確かめる）。"
+            if view else f"必要なら render_view（view=plan、highlight={ids}）で図を見て、get_elements で値を確かめてください。")
+    roof = ROOF_GUIDE if any(r["kind"] in ("eave", "roof") for r in rows) else ""
+    return (f"人が{where}部材を囲み、こう書きました：「{text}」\n\n"
             f"囲みの中の部材（コードが決めたもの）：\n{listing}\n\n"
             "この一言に合う直す案を propose_override で作ってください（1つの部材の1つの値ごとに1件）。"
-            "決まらないときは ask_question で質問してください。"
-            f"必要なら render_view（view=plan、highlight={ids}）で図を見て、get_elements で値を確かめてください。"
+            f"決まらないときは ask_question で質問してください。{roof}{look}"
             "最後に、何をしたかを日本語で1〜2文で書いてください。")
 
 
@@ -91,12 +103,18 @@ async def _run_api(ctx: ToolContext, prompt: str, conf: dict, client=None) -> tu
     return text, round(meter.cost_usd, 4)
 
 
-async def run_lasso(alias: str, connection: str, points: list[list[float]], text: str, *,
-                    client=None, ctx: ToolContext | None = None, level: str | None = None) -> dict:
-    """囲み（平面の mm）と一言から、直す案と質問を返す。保存はしない（人が承認したら approve で記録する）。
-    level：2階建てで表示している階（その階の部材だけを選ぶ）。"""
+async def run_lasso(alias: str, connection: str, points: list[list[float]] | None, text: str, *,
+                    client=None, ctx: ToolContext | None = None, level: str | None = None,
+                    hits: list[dict] | None = None, mask_px: int = 0, view: str | None = None) -> dict:
+    """囲み（平面の mm）か 3D の画素の数（hits）と一言から、直す案と質問を返す。保存はしない（人が承認したら approve で記録する）。
+    level：2階建てで表示している階（平面図の囲みで、その階の部材だけを選ぶ）。view：3D の画面をどちらから見ていたか。"""
     ctx = ctx or ToolContext.load(alias)
-    selection = geo.select(ctx.building, points, level)
+    if hits is not None:
+        selection = geo.select_hits(ctx.building, hits, mask_px)
+    elif points:
+        selection = geo.select(ctx.building, points, level)
+    else:
+        raise ValueError("囲みがありません。もう一度囲んでください")
     rows = geo.describe(ctx.building, selection)
     out = {"connection": connection, "selection": rows, "message": "", "proposals": [], "questions": [], "cost_usd": None}
     if connection == "off" or not rows:
@@ -106,7 +124,8 @@ async def run_lasso(alias: str, connection: str, points: list[list[float]], text
     text = (text or "").strip()
     if not text:
         raise ValueError("一言を書いてください（例：この壁厚だけおかしい。ほかとそろえて）")
-    prompt = lasso_prompt(rows, text)
+    ctx.human_text = text                                # number の数値は、この一言（と質問への答え）にあるものだけ
+    prompt = lasso_prompt(rows, text, view if hits is not None else None)
     assert_clean(prompt, "Claude に送るデータ")
     conf = load_ai_models()
     started = time.time()
@@ -118,6 +137,7 @@ async def run_lasso(alias: str, connection: str, points: list[list[float]], text
         raise ValueError("connection は claude_code・api_key・off のどれかです")
     out.update(message=message, proposals=ctx.proposals, questions=ctx.questions, cost_usd=cost)
     _log(alias, {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "connection": connection, "text": text,
+                 "where": ("3d:" + str(view)) if hits is not None else "plan",
                  "selection": [r["id"] for r in rows], "proposals": ctx.proposals, "questions": ctx.questions,
                  "message": message, "cost_usd": cost, "duration_s": round(time.time() - started, 1)})
     return out
