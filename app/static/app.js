@@ -321,13 +321,14 @@ function inspectButtons(disabled) {
   for (const id of ['#inspect-ai', '#inspect-api', '#inspect-off']) $(id).disabled = disabled;
 }
 
-async function startInspection(connection) {
+async function startInspection(connection, opts = {}) {
+  // opts.auto：組み立てたあとに自動で始める（設定で自分が選んだので、確かめの窓は出さない）
   if (!state.alias) return;
-  if (connection === 'claude_code' && !confirm('Claude に検品してもらいます。5分ほどかかり、Claude のプランの利用枠を使います。よろしいですか？')) return;
+  if (!opts.auto && connection === 'claude_code' && !confirm('Claude に検品してもらいます。5分ほどかかり、Claude のプランの利用枠を使います。よろしいですか？')) return;
   if (connection === 'api_key') {
     const st = await call('GET', '/api/settings');
     if (!st.api_key_set) { setStatus('API キーが設定されていません。「設定」タブで API キーを入れてください', 'err'); return; }
-    if (!confirm('API キーで Claude に検品してもらいます。5分ほどかかり、キーの持ち主に API の料金がかかります（1回の上限 $3.00）。よろしいですか？')) return;
+    if (!opts.auto && !confirm('API キーで Claude に検品してもらいます。5分ほどかかり、キーの持ち主に API の料金がかかります（1回の上限 $3.00）。よろしいですか？')) return;
   }
   try {
     await call('POST', `/api/inspect/{a}?connection=${connection}`);
@@ -431,13 +432,32 @@ $('#rules-draft').addEventListener('click', async () => {
   $('#rules-draft').disabled = false;
 });
 
+const AUTO_JA = { claude_code: 'Claude に検品してもらう（自分のプラン）', api_key: 'Claude に検品してもらう（API キー）',
+  off: 'コードの検査だけ（AI なし）', none: '検品しない' };
 async function renderSettings() {
   try {
     const st = await call('GET', '/api/settings');
     $('#apikey-state').textContent = st.api_key_set ? 'API キー：保存してあります' : 'API キー：まだ入っていません';
     $('#apikey-del').disabled = !st.api_key_set;
+    const sel = $('#auto-inspect');
+    sel.innerHTML = (st.connections || []).map((c) => `<option value="${c}">${AUTO_JA[c] || c}</option>`).join('');
+    sel.value = st.auto_inspect; sel.dataset.prev = st.auto_inspect; sel.dataset.budget = st.max_budget_usd; sel.dataset.ack = st.api_cost_ack ? '1' : '';
   } catch (e) { $('#apikey-state').textContent = '設定を読めませんでした：' + e.message; }
 }
+$('#auto-inspect').addEventListener('change', async (e) => {
+  const sel = e.target; const value = sel.value;
+  let costAck = false;
+  if (value === 'api_key' && !sel.dataset.ack) {   // API キーは1回だけ費用を確かめる
+    if (!confirm(`組み立てるたびに API キーで Claude が検品します。キーの持ち主に API の料金がかかります（1回の上限 $${Number(sel.dataset.budget || 3).toFixed(2)}）。よろしいですか？`)) {
+      sel.value = sel.dataset.prev; return;
+    }
+    costAck = true;
+  }
+  try {
+    await call('POST', '/api/settings/auto_inspect', { value, cost_ack: costAck });
+    setStatus(`組み立てたあとの検品：${AUTO_JA[value]}`, 'ok'); renderSettings();
+  } catch (err) { setStatus('設定を保存できませんでした：' + err.message, 'err'); sel.value = sel.dataset.prev; }
+});
 $('#apikey-save').addEventListener('click', async () => {
   const key = $('#apikey').value.trim();
   if (!key) { setStatus('API キーを貼り付けてから「保存」を押してください', 'err'); return; }
@@ -713,10 +733,24 @@ async function selectAlias(alias, built) {
 $('#build').addEventListener('click', async () => {
   if (!state.alias) return;
   const btn = $('#build'); btn.disabled = true;
-  try { setStatus('glb を読んで、壁を作り直し、模型を組み立てています（数秒かかります）…', 'busy'); await call('POST', '/api/build/{a}'); await refresh(); setStatus(`${state.alias} を組み立てました`, 'ok'); }
+  let built = false;
+  try { setStatus('glb を読んで、壁を作り直し、模型を組み立てています（数秒かかります）…', 'busy'); await call('POST', '/api/build/{a}'); await refresh(); setStatus(`${state.alias} を組み立てました`, 'ok'); built = true; }
   catch (e) { setStatus('組み立てられませんでした：' + e.message, 'err'); }
   finally { btn.disabled = false; }
+  if (built) await autoInspect();
 });
+
+// 組み立てたあと、設定どおりに自動で検品を始める（SPEC §12）。検品タブを開いて、面ごとの担当が動く様子を見せる
+async function autoInspect() {
+  let st;
+  try { st = await call('GET', '/api/settings'); } catch (e) { return; }
+  const conn = st.auto_inspect;
+  if (!conn || conn === 'none') return;
+  if (conn === 'api_key' && !st.api_key_set) { setStatus('組み立てました。自動の検品は API キーが入っていないため始めませんでした（「設定」タブ）', 'err'); return; }
+  document.querySelector('.tabs button[data-tab="sinsp"]').click();
+  await startInspection(conn, { auto: true });
+  setStatus(`${state.alias} を組み立てました。自動で検品を始めました（設定で変えられます）`, 'ok');
+}
 
 // URL の末尾でタブを開く（例：#sinsp で検品、#vplan で平面図）。撮影や説明のとき用
 for (const id of (location.hash || '').slice(1).split(',').filter(Boolean)) {

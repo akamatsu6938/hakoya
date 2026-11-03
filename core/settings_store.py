@@ -1,0 +1,72 @@
+"""使う人の設定（秘密でないもの）：DATA_DIR/settings.json。API キーはここに入れない（資格情報マネージャー。core/secret_store.py）。
+
+- auto_inspect：組み立てたあとの検品。claude_code（Claude、自分のプラン）／api_key（Claude、API キー）／
+  off（コードの検査だけ、AI なし）／none（しない）。
+  既定は off（勝手にプランや API の利用枠を使わない。それでも検品の欄は動く）。SPEC §12「組み立てると自動で検品が始まる」。
+- 社外用の exe（HAKOYA_EDITION=external）ではプランの接続（claude_code）を出さない（規約。SPEC §7-4）。
+- api_key を選ぶときは、費用の上限を見せて1回だけ確かめる（api_cost_ack）。
+"""
+from __future__ import annotations
+
+import json
+import os
+from importlib.util import find_spec
+
+from core import paths
+
+DEFAULTS = {"version": 1, "auto_inspect": "off", "api_cost_ack": False}
+AUTO_CHOICES = ("claude_code", "api_key", "off", "none")
+
+
+def settings_path():
+    return paths.DATA_DIR / "settings.json"
+
+
+def load() -> dict:
+    p = settings_path()
+    data = dict(DEFAULTS)
+    try:
+        if p.exists():
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data.update({k: raw[k] for k in DEFAULTS if k in raw})
+    except (OSError, ValueError):
+        pass                                          # 壊れていたら既定で動く
+    if data["auto_inspect"] not in available_connections():
+        data["auto_inspect"] = DEFAULTS["auto_inspect"]
+    return data
+
+
+def save(data: dict) -> None:
+    p = settings_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({k: data[k] for k in DEFAULTS}, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def edition() -> str:
+    return os.environ.get("HAKOYA_EDITION", "self")
+
+
+def available_connections() -> list[str]:
+    """自動の検品で選べるつなぎ方。社外用ではプランの接続を出さない。"""
+    out = []
+    if edition() != "external" and find_spec("claude_agent_sdk") is not None:
+        out.append("claude_code")
+    return out + ["api_key", "off", "none"]
+
+
+def set_auto_inspect(value: str, cost_ack: bool = False) -> dict:
+    if value not in AUTO_CHOICES:
+        raise ValueError("組み立てたあとの検品は claude_code・api_key・off・none のどれかです")
+    if value not in available_connections():
+        raise ValueError("この版では、その検品のしかたは選べません（社外用の版では Claude のプランの接続は使えません）")
+    data = load()
+    if value == "api_key" and not (cost_ack or data["api_cost_ack"]):
+        raise ValueError("API キーで自動の検品をするには、費用の確認が要ります")
+    data["auto_inspect"] = value
+    if value == "api_key":
+        data["api_cost_ack"] = True
+    save(data)
+    return data

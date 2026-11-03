@@ -98,6 +98,8 @@ def properties():
 def build_property(alias: str):
     """glb を読み直して building.json を作り（番号は前回から引き継ぐ）、模型を組み立てて書き出す。"""
     _check_alias(alias)
+    if RUNS.get(alias, {}).get("running"):
+        raise HTTPException(409, "この物件はいま検品中です。検品が終わってから組み立ててください")
     write_building(alias, build(alias))
     summary = write_outputs(alias)
     return _safe_json(summary)
@@ -487,11 +489,34 @@ def rule_answer(company: str, body: RuleAnswerIn):
 
 @app.get("/api/settings")
 def settings():
-    """設定の状態。API キーは「入っているかどうか」だけを返す（キーそのものは返さない）。"""
+    """設定の状態。API キーは「入っているかどうか」だけを返す（キーそのものは返さない）。
+    組み立てたあとの検品（auto_inspect）と、選べるつなぎ方・API の1回の上限も返す。"""
+    from core import settings_store
+    from core.ai.agent import load_ai_models
     try:
-        return _safe_json({"api_key_set": secret_store.has_api_key()})
+        key = secret_store.has_api_key()
     except secret_store.SecretStoreError as e:
         raise HTTPException(500, str(e))
+    st = settings_store.load()
+    return _safe_json({"api_key_set": key, "auto_inspect": st["auto_inspect"], "api_cost_ack": st["api_cost_ack"],
+                       "connections": settings_store.available_connections(),
+                       "max_budget_usd": float(load_ai_models()["limits"]["max_budget_usd"])})
+
+
+class AutoInspectIn(BaseModel):
+    value: str
+    cost_ack: bool = False
+
+
+@app.post("/api/settings/auto_inspect")
+def save_auto_inspect(body: AutoInspectIn):
+    """組み立てたあとの検品のしかたを保存する（DATA_DIR/settings.json。API キーは入れない）。"""
+    from core import settings_store
+    try:
+        st = settings_store.set_auto_inspect(body.value, body.cost_ack)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _safe_json({"auto_inspect": st["auto_inspect"], "api_cost_ack": st["api_cost_ack"]})
 
 
 class ApiKeyIn(BaseModel):
