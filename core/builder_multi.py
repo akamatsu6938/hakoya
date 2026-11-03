@@ -23,7 +23,7 @@ from core.roof_geom import surfaces as roof_surfaces
 
 from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
                           drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note, slab_outline, slab_solid,
-                          opening_keep_out, smooth_near_openings)
+                          opening_keep_out, openings_by_wall_of, smooth_near_openings)
 
 Z_LO, Z_HI = -10000.0, 100000.0       # 「下・上の限りなし」の代わりの高さ（実寸 mm）
 BIG = box(-1e6, -1e6, 1e6, 1e6)
@@ -70,9 +70,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     zone_c = BIG.difference(unary_union([zone_a] + zone_b))
     walls1 = [w for w in b["walls"] if w["level"] == lv1["name"]]
     walls2 = [w for w in b["walls"] if w["level"] == lv2["name"]]
-    ops_by: dict[str, list[dict]] = {}
-    for o in b.get("openings", []):
-        ops_by.setdefault(o["wall"], []).append(o)
+    ops_by = openings_by_wall_of(b["walls"], b.get("openings", []))   # 隣の壁にはみ出す開口は、隣の壁でも抜く
     notes = {k: [] for k in ("foundation", "floor1", "roof_lower", "floor2", "roof")}
     notes["floor1"].append(f"2階の下は 2階の床板の裏（{zf2:.0f}）まで、下屋の下は 1階の天井（{ceil1:.0f}）まで。下屋の下の天井より上は下屋の屋根の部品へ")
 

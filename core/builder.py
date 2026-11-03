@@ -124,6 +124,40 @@ def _wall_top(w: dict) -> float | None:
     return None if w["height"] == "to_roof" else float(w["height"])
 
 
+def openings_by_wall_of(walls: list[dict], openings: list[dict]) -> dict[str, list[dict]]:
+    """壁ごとの、抜く開口。開口が壁の端から、一直線に続く隣の壁へはみ出す分は、隣の壁でも抜く
+    （★物件E の窓 O1：隣の外壁に 30mm かかり、窓の中に細い壁が残った。11/3 深夜）。隣の壁の分は "_from" に元の壁の番号。"""
+    by: dict[str, list[dict]] = {}
+    for o in openings:
+        by.setdefault(o["wall"], []).append(o)
+    lines = {}
+    for w in walls:
+        s, e = np.array(w["start"], float), np.array(w["end"], float)
+        L = float(np.linalg.norm(e - s))
+        if L > 0:
+            lines[w["id"]] = (s, (e - s) / L, L, w)
+    cos_tol = math.cos(math.radians(1.0))
+    for o in openings:
+        if o["wall"] not in lines:
+            continue
+        s, d, L, host = lines[o["wall"]]
+        a, c = float(o["offset_mm"]), float(o["offset_mm"]) + float(o["width_mm"])
+        if a >= -1.0 and c <= L + 1.0:
+            continue
+        p0, p1 = s + d * a, s + d * c
+        for wid, (s2, d2, L2, w) in lines.items():
+            if wid == host["id"] or w.get("level") != host.get("level") or abs(float(d @ d2)) < cos_tol:
+                continue
+            n2 = np.array([-d2[1], d2[0]])
+            if abs(float((s - s2) @ n2)) > (float(host["thickness_mm"]) + float(w["thickness_mm"])) / 2:
+                continue
+            t0, t1 = sorted([float((p0 - s2) @ d2), float((p1 - s2) @ d2)])
+            t0, t1 = max(t0, 0.0), min(t1, L2)
+            if t1 - t0 >= 1.0:
+                by.setdefault(wid, []).append({**o, "offset_mm": t0, "width_mm": t1 - t0, "_from": host["id"]})
+    return by
+
+
 LOOSE_RATIO = 0.01   # いちばん大きい塊の 1% より小さく、離れているかけらは作らない
 
 
@@ -328,9 +362,7 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
             std_in.append(w)
         else:
             int_walls.append(w)
-    openings_by_wall: dict[str, list[dict]] = {}
-    for o in b.get("openings", []):
-        openings_by_wall.setdefault(o["wall"], []).append(o)
+    openings_by_wall = openings_by_wall_of(walls, b.get("openings", []))
 
     def wall_solid(w: dict, bottom: float | None = None) -> Manifold:
         z0 = float(w["bottom_mm"]) if bottom is None else bottom
@@ -356,7 +388,7 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         out = []
         depth_extra = -w["thickness_mm"] / 2          # wall_rect の厚みの足し分（マイナスで薄くする）
         for o in openings_by_wall.get(w["id"], []):
-            if o["kind"] != "window":
+            if o["kind"] != "window" or o.get("_from"):     # 隣の壁にかかる分には枠を作らない
                 continue
             a, wdt = float(o["offset_mm"]), float(o["width_mm"])
             sill, head = float(o["sill_mm"]), float(o["head_mm"])
