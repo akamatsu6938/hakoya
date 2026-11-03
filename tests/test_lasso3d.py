@@ -80,6 +80,15 @@ def test_select_hits_rules():
         geo.select_hits(_house(), [{"id": "W99", "inside": 100, "total": 100}], 4000)
 
 
+def test_minor_side_eaves_are_dropped():
+    """正面から南の軒を囲むと、東・西の軒の端も少し入る（物件A の撮影で S 2795・E 468・W 446 画素）。横の軒は外す。"""
+    hits = [{"id": "Y1:S", "inside": 2795, "total": 4262}, {"id": "Y1:E", "inside": 468, "total": 603},
+            {"id": "Y1:W", "inside": 446, "total": 576}, {"id": "Y1", "inside": 5565, "total": 6579}]
+    assert geo.select_hits(_house(), hits, 10068)["roof_edges"] == ["Y1:S"]
+    corner = [{"id": "Y1:S", "inside": 1500, "total": 2500}, {"id": "Y1:E", "inside": 1200, "total": 1800}]   # 斜めから角を囲む
+    assert geo.select_hits(_house(), corner, 6000)["roof_edges"] == ["Y1:E", "Y1:S"]
+
+
 def test_describe_roof_rows():
     rows = geo.describe(_house(), {"roof_edges": ["Y1:S"], "roofs": ["Y1"]})
     assert rows[0]["label"] == "軒（南）" and "軒の出 1mm" in rows[0]["text"] and "target=Y1・field=eave_mm.S" in rows[0]["text"]

@@ -20,6 +20,7 @@ SIDE_JA = {"W": "西", "E": "東", "S": "南", "N": "北"}
 HIT_MIN_PX = 30            # 囲みの中に見えている画素がこれ未満の部材は選ばない
 HIT_VISIBLE_SHARE = 0.5    # 見えている部分のうち囲みの中の割合
 HIT_LASSO_SHARE = 0.2      # 囲みの広さのうち、その部材が占める割合（長い壁の一部だけを囲んだとき）
+EDGE_MINOR_SHARE = 0.25    # 同じ屋根でいちばん多く写っている軒に比べて、これ未満しか写っていない軒は外す
 
 
 def lasso_polygon(points: list[list[float]]) -> Polygon:
@@ -88,6 +89,14 @@ def select_hits(building: dict, hits: list[dict], mask_px: int) -> dict:
             continue
         if inside / total >= HIT_VISIBLE_SHARE or (mask_px > 0 and inside / mask_px >= HIT_LASSO_SHARE):
             out[groups[mid]].append(mid)
+    # 同じ屋根の軒のうち、いちばん多く写っている軒の 1/4 に満たない軒は外す
+    # （正面から南の軒を囲むと、東・西の軒の端だけが囲みに入って選ばれてしまうため。斜めから角を囲めば両方残る）
+    inside_of = {str(h.get("id")): int(h.get("inside", 0)) for h in hits}
+    best = {}
+    for e in out["roof_edges"]:
+        rid = e.split(":")[0]
+        best[rid] = max(best.get(rid, 0), inside_of.get(e, 0))
+    out["roof_edges"] = [e for e in out["roof_edges"] if inside_of.get(e, 0) >= EDGE_MINOR_SHARE * best[e.split(":")[0]]]
     with_edges = {e.split(":")[0] for e in out["roof_edges"]}
     out["roofs"] = [r for r in out["roofs"] if r not in with_edges]
     return {k: sorted(set(v), key=_natural) for k, v in out.items()}

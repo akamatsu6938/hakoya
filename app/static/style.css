@@ -56,6 +56,14 @@ tr.approve input[type=text] { width: 100%; }
 #lasso-toggle.on { background: #e0008c; border-color: #e0008c; color: white; }
 .plan.lassoing { cursor: crosshair; user-select: none; touch-action: none; }
 .lasso-line { fill: rgba(224, 0, 140, 0.08); stroke: #e0008c; stroke-width: 2; stroke-dasharray: 6 3; pointer-events: none; }
+/* 3D で囲む：3D の上に透明な層を重ね、囲む間だけ線を描けるようにする */
+#lasso3d-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+#canvas.lassoing3d #lasso3d-overlay { pointer-events: auto; cursor: crosshair; touch-action: none; user-select: none; }
+#lasso3d-toggle.on { background: #e0008c; border-color: #e0008c; color: white; }
+.viewer > .lasso-panel { border-bottom: none; border-top: 1px solid var(--line); max-height: 45%; overflow: auto; }
+#lasso-result .answer { display: flex; gap: 6px; margin-top: 4px; }
+#lasso-result .answer input { flex: 1; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+#sedit input.picked-input { outline: 2px solid #e0008c; outline-offset: 1px; }
 .plan [data-id].picked { stroke: #e0008c; stroke-width: 4; }
 #sedit tr.picked td { background: #ffe3f3; }
 .apikey { display: flex; gap: 6px; margin: 4px 0 8px; }

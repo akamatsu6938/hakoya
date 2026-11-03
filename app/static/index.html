@@ -36,8 +36,9 @@
         <button data-view="side">横（西）</button>
         <button data-view="top">上</button>
         <button data-view="explode" id="explode">パーツを離す</button>
+        <button id="lasso3d-toggle">囲む</button>
       </div>
-      <div id="canvas"></div>
+      <div id="canvas"><svg id="lasso3d-overlay"></svg></div>
     </div>
     <div id="vplan" class="pane">
       <div class="toolbar">
@@ -48,21 +49,22 @@
         <button id="lasso-toggle">囲む</button>
         <span class="label" id="lasso-hint">「囲む」を押してから、平面図の上で直したい壁や窓をぐるっと囲んでください。</span>
       </div>
-      <div id="lasso-panel" class="lasso-panel" hidden>
-        <div id="lasso-picked" class="picked"></div>
-        <textarea id="lasso-text" rows="2" placeholder="一言（例：この壁厚だけおかしい。ほかとそろえて）"></textarea>
-        <div class="lasso-actions">
-          <select id="lasso-conn">
-            <option value="claude_code">Claude（自分のプラン）</option>
-            <option value="api_key">Claude（API キー）</option>
-          </select>
-          <button id="lasso-ask" class="primary">Claude に頼む</button>
-          <button id="lasso-table">表で直す（AI なし）</button>
-          <button id="lasso-clear">囲みを消す</button>
-        </div>
-        <div id="lasso-result"></div>
-      </div>
       <div id="plan" class="plan">まだ組み立てていません</div>
+    </div>
+    <!-- 囲んで直すの欄：平面図と 3D の両方で使う -->
+    <div id="lasso-panel" class="lasso-panel" hidden>
+      <div id="lasso-picked" class="picked"></div>
+      <textarea id="lasso-text" rows="2" placeholder="一言（例：この壁厚だけおかしい。ほかとそろえて／図面だと軒がもう少し出ている）"></textarea>
+      <div class="lasso-actions">
+        <select id="lasso-conn">
+          <option value="claude_code">Claude（自分のプラン）</option>
+          <option value="api_key">Claude（API キー）</option>
+        </select>
+        <button id="lasso-ask" class="primary">Claude に頼む</button>
+        <button id="lasso-table">表で直す（AI なし）</button>
+        <button id="lasso-clear">囲みを消す</button>
+      </div>
+      <div id="lasso-result"></div>
     </div>
   </section>
   <aside class="side">

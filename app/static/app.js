@@ -2,10 +2,11 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { buildPickGroup, pickHits } from './pick3d.js';
 
 const $ = (s) => document.querySelector(s);
 const api = (path) => path.replace('{a}', encodeURIComponent(state.alias));
-const state = { alias: null, building: null, root: null, exploded: false };
+const state = { alias: null, building: null, root: null, exploded: false, pick: null, hl: null };
 const KIND = { window: '窓', door: 'ドア', entrance_door: '玄関ドア', exterior: '外壁', interior: '内壁', standalone: '単独の壁' };
 const SIDE = { W: '西', E: '東', S: '南', N: '北' };
 const roofKind = (r) => (r.kind === 'lean_to' ? '下屋の屋根' : state.multi ? '大屋根' : '屋根');
@@ -23,6 +24,7 @@ document.querySelectorAll('.tabs').forEach((nav) => nav.addEventListener('click'
   const tab = e.target.dataset.tab; if (!tab) return;
   nav.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.target));
   nav.parentElement.querySelectorAll(':scope > .pane').forEach((p) => p.classList.toggle('on', p.id === tab));
+  if (nav.dataset.group === 'view') { clearLasso(); setLassoMode(false); setLasso3dMode(false); }   // 囲みは表示している図だけのもの
   if (tab === 'v3d') resize();
 }));
 
@@ -72,7 +74,12 @@ function setView(kind) {
   controls.target.copy(c); controls.update();
 }
 document.querySelectorAll('button[data-view]').forEach((b) => b.addEventListener('click', () => {
-  if (b.dataset.view === 'explode') { state.exploded = !state.exploded; b.textContent = state.exploded ? 'パーツを戻す' : 'パーツを離す'; applyVisibility(); return; }
+  if (b.dataset.view === 'explode') {
+    state.exploded = !state.exploded; b.textContent = state.exploded ? 'パーツを戻す' : 'パーツを離す'; applyVisibility();
+    if (lasso.source === '3d') clearLasso();                    // 離すと色付けの位置がずれるので消す
+    if (state.exploded) setLasso3dMode(false);
+    return;
+  }
   setView(b.dataset.view);
 }));
 
@@ -350,7 +357,9 @@ renderSettings();
 
 // ---------------------------------------------------------------- 囲んで直す（平面図、SPEC §9-3）
 // 囲みの中の部材はサーバー（コード）が決める。画面は囲んだ点を平面の mm に直して送るだけ。
-const lasso = { on: false, pts: [], line: null, polygon: null, selection: [] };
+// source：最後に囲んだ図（plan＝平面図、3d＝3D）。3D は部材ごとの画素の数（hits）を送る
+const lasso = { on: false, pts: [], line: null, polygon: null, selection: [], source: null,
+  on3d: false, pts3d: [], line3d: null, hits: null, maskPx: 0, view: null };
 const planSvg = () => $('#plan svg');
 
 function svgPoint(svg, e) {
@@ -371,10 +380,15 @@ function setLassoMode(on) {
 }
 
 function clearLasso() {
-  lasso.pts = []; lasso.polygon = null; lasso.selection = [];
+  lasso.pts = []; lasso.polygon = null; lasso.selection = []; lasso.source = null;
   if (lasso.line) { lasso.line.remove(); lasso.line = null; }
+  lasso.pts3d = []; lasso.hits = null; lasso.maskPx = 0; lasso.view = null;
+  if (lasso.line3d) { lasso.line3d.remove(); lasso.line3d = null; }
+  clearHighlight3d();
   document.querySelectorAll('#plan [data-id].picked').forEach((el) => el.classList.remove('picked'));
+  const wasOpen = !$('#lasso-panel').hidden;
   $('#lasso-panel').hidden = true; $('#lasso-result').innerHTML = '';
+  if (wasOpen) resize();                                   // 欄を閉じると 3D の画面が広がる
 }
 
 $('#lasso-toggle').addEventListener('click', () => { if (planSvg()) setLassoMode(!lasso.on); });
@@ -401,9 +415,81 @@ $('#plan').addEventListener('pointerup', async () => {
   lasso.line.setAttribute('points', lasso.pts.concat([lasso.pts[0]]).map((q) => q.join(',')).join(' '));   // 囲みを閉じる
   setLassoMode(false);
   lasso.polygon = lasso.pts.map(([x, y]) => toMm(svg, x, y));
+  lasso.source = 'plan';
   try {
     const res = await call('POST', '/api/lasso/{a}/select', { polygon: lasso.polygon, level: state.multi ? $('#plan-level').value : null });
     showPicked(res.selection);
+  } catch (e) { setStatus('囲みを読めませんでした：' + e.message, 'err'); clearLasso(); }
+});
+
+// ---------------------------------------------------------------- 囲んで直す（3D）
+// 画面に見えている部材だけを選ぶ。当たり判定用の形（/api/pick）を部材ごとの色で塗って画素を数え（pick3d.js）、
+// 数をサーバーに送る。どれを選ぶかはサーバー（コード）が決める
+const overlay = $('#lasso3d-overlay');
+const SVGNS = 'http://www.w3.org/2000/svg';
+const HL_MAT = new THREE.MeshBasicMaterial({ color: 0xe0008c, transparent: true, opacity: 0.45, depthTest: false, side: THREE.DoubleSide });
+
+function setLasso3dMode(on) {
+  if (on && state.exploded) { setStatus('パーツを戻してから囲んでください（離した表示では囲めません）', 'err'); return; }
+  lasso.on3d = on; controls.enabled = !on;                 // 囲む間は回さない
+  $('#lasso3d-toggle').classList.toggle('on', on);
+  $('#lasso3d-toggle').textContent = on ? '囲むのをやめる' : '囲む';
+  holder.classList.toggle('lassoing3d', on);
+  if (on) setStatus('直したい部材（壁・窓・軒）をぐるっと囲んでください');   // 長いと上の帯が2行になり、画面がずれる
+}
+$('#lasso3d-toggle').addEventListener('click', () => { if (state.root) setLasso3dMode(!lasso.on3d); });
+
+function clearHighlight3d() { if (state.hl) { scene.remove(state.hl); state.hl = null; } }
+function highlight3d(rows) {        // 選んだ部材に半透明の色を重ねる
+  clearHighlight3d();
+  if (!state.pick) return;
+  const ids = new Set(rows.map((r) => r.id));
+  state.hl = new THREE.Group();
+  state.pick.children.forEach((m) => { if (ids.has(m.userData.id)) state.hl.add(new THREE.Mesh(m.geometry, HL_MAT)); });
+  state.hl.renderOrder = 10;
+  scene.add(state.hl);
+}
+
+function viewHint() {               // カメラの向きから「どちらから見た画面か」（core/render.py の面の名前）
+  const d = camera.getWorldDirection(new THREE.Vector3());
+  if (d.z < -0.8) return 'plan';
+  if (Math.abs(d.x) > Math.abs(d.y)) return d.x > 0 ? 'W' : 'E';   // 東（+x）を向いている＝西から見ている
+  return d.y > 0 ? 'S' : 'N';
+}
+
+function overlayPoint(e) { const r = overlay.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+
+overlay.addEventListener('pointerdown', (e) => {
+  if (!lasso.on3d) return;
+  e.preventDefault(); clearLasso();
+  lasso.line3d = document.createElementNS(SVGNS, 'polyline'); lasso.line3d.setAttribute('class', 'lasso-line');
+  overlay.appendChild(lasso.line3d);
+  lasso.pts3d = [overlayPoint(e)];
+  overlay.setPointerCapture(e.pointerId);
+});
+overlay.addEventListener('pointermove', (e) => {
+  if (!lasso.on3d || !lasso.line3d) return;
+  const p = overlayPoint(e); const last = lasso.pts3d[lasso.pts3d.length - 1];
+  if (Math.hypot(p[0] - last[0], p[1] - last[1]) < 3) return;
+  lasso.pts3d.push(p);
+  lasso.line3d.setAttribute('points', lasso.pts3d.map((q) => q.join(',')).join(' '));
+});
+overlay.addEventListener('pointerup', async () => {
+  if (!lasso.on3d || !lasso.line3d) return;
+  if (lasso.pts3d.length < 3) { clearLasso(); return; }
+  lasso.line3d.setAttribute('points', lasso.pts3d.concat([lasso.pts3d[0]]).map((q) => q.join(',')).join(' '));
+  setLasso3dMode(false);
+  try {
+    setStatus('囲みの中の部材を調べています…', 'busy');
+    if (!state.pick) state.pick = buildPickGroup(await call('GET', '/api/pick/{a}'));
+    const r = overlay.getBoundingClientRect();
+    const { hits, maskPx } = pickHits(renderer, camera, state.root, state.pick, lasso.pts3d, r.width, r.height);
+    Object.assign(lasso, { source: '3d', hits, maskPx, view: viewHint() });
+    const res = await call('POST', '/api/lasso/{a}/select', { hits, mask_px: maskPx, view: lasso.view });
+    if (lasso.line3d) { lasso.line3d.remove(); lasso.line3d = null; }   // 囲みの線は消し、選んだ部材に色を付ける
+    showPicked(res.selection);
+    highlight3d(res.selection);
+    setStatus(`囲んだ部材 ${res.selection.length} 件`, 'ok');
   } catch (e) { setStatus('囲みを読めませんでした：' + e.message, 'err'); clearLasso(); }
 });
 
@@ -412,18 +498,25 @@ function showPicked(rows) {
   for (const r of rows) document.querySelectorAll(`#plan [data-id="${CSS.escape(r.id)}"]`).forEach((el) => el.classList.add('picked'));
   $('#lasso-picked').innerHTML = rows.length
     ? '<b>囲んだ部材</b>' + rows.map((r) => `<div><span class="tag">${esc(r.id)}</span>${esc(r.label)}　${esc(r.text)}</div>`).join('')
-    : '<span class="hint">囲みの中に部材がありません。壁や窓をぐるっと囲んでください。</span>';
+    : '<span class="hint">囲みの中に部材がありません。壁や窓、軒をぐるっと囲んでください。</span>';
   $('#lasso-panel').hidden = false; $('#lasso-result').innerHTML = '';
   $('#lasso-ask').disabled = !rows.length; $('#lasso-table').disabled = !rows.length;
+  resize();                                                // 欄が開いた分、3D の画面の大きさを合わせ直す
   if (rows.length) $('#lasso-text').focus();
 }
 
-$('#lasso-table').addEventListener('click', () => {   // AI なし：囲んだ部材の表の行を開く
+$('#lasso-table').addEventListener('click', () => {   // AI なし：囲んだ部材の表の行を開く（軒は、その辺の軒の出の欄にも印）
   document.querySelector('.tabs button[data-tab="sedit"]').click();
   document.querySelectorAll('#sedit tr.picked').forEach((tr) => tr.classList.remove('picked'));
-  const ids = new Set(lasso.selection.map((r) => r.id));
+  document.querySelectorAll('#sedit input.picked-input').forEach((i) => i.classList.remove('picked-input'));
+  const ids = new Set(lasso.selection.map((r) => r.id.split(':')[0]));
   const rows = [...document.querySelectorAll('#sedit tr[data-id]')].filter((tr) => ids.has(tr.dataset.id));
   rows.forEach((tr) => tr.classList.add('picked'));
+  for (const r of lasso.selection.filter((x) => x.id.includes(':'))) {
+    const [rid, side] = r.id.split(':');
+    const inp = document.querySelector(`#sedit tr[data-id="${CSS.escape(rid)}"] input[data-field="eave_mm.${side}"]`);
+    if (inp) inp.classList.add('picked-input');
+  }
   if (rows[0]) rows[0].scrollIntoView({ block: 'center' });
   setStatus(`囲んだ部材 ${rows.length} 件の行に色を付けました。値を変えて「承認」で直せます`, 'ok');
 });
@@ -436,8 +529,9 @@ async function askLasso(extra = '') {
   $('#lasso-ask').disabled = true;
   setStatus('Claude が考えています（30秒〜数分）…', 'busy');
   try {
-    const res = await call('POST', '/api/lasso/{a}/ask', { polygon: lasso.polygon, text: text + extra, connection,
-      level: state.multi ? $('#plan-level').value : null });
+    const where = lasso.source === '3d' ? { hits: lasso.hits, mask_px: lasso.maskPx, view: lasso.view }
+      : { polygon: lasso.polygon, level: state.multi ? $('#plan-level').value : null };
+    const res = await call('POST', '/api/lasso/{a}/ask', { ...where, text: text + extra, connection });
     renderLassoResult(res);
     setStatus(`Claude の答えが届きました${res.cost_usd ? `（費用の目安 $${Number(res.cost_usd).toFixed(2)}）` : ''}`, 'ok');
   } catch (e) { setStatus('頼めませんでした：' + e.message, 'err'); }
@@ -470,6 +564,12 @@ function renderLassoResult(res) {
       b.addEventListener('click', () => askLasso(`\n（質問「${q.question}」への答え：${opt}）`));
       div.appendChild(b);
     }
+    // 選択肢にない答え（図面の数値など）は書いて答える。数値は人が書いたものだけが案に使われる
+    const ans = document.createElement('div'); ans.className = 'answer';
+    const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = '答えを書く（例：図面の軒の出は 450）';
+    const send = document.createElement('button'); send.textContent = '答える';
+    send.addEventListener('click', () => { const v = inp.value.trim(); if (v) askLasso(`\n（質問「${q.question}」への答え：${v}）`); });
+    ans.append(inp, send); div.appendChild(ans);
     box.appendChild(div);
   }
   if (res.connection !== 'off' && !(res.proposals || []).length && !(res.questions || []).length)
@@ -489,6 +589,7 @@ $('#plan-level').addEventListener('change', async () => {
 async function refresh() {
   const data = await call('GET', '/api/building/{a}');
   state.building = data.building;
+  state.pick = null; clearHighlight3d();                   // 組み直したら当たり判定用の形も読み直す（次に囲むとき）
   state.multi = (data.building.levels || []).length > 1;          // 2階建てか
   renderPartToggles();
   $('#plan-level').hidden = !state.multi;
