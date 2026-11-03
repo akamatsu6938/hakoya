@@ -118,3 +118,31 @@ def test_level_helpers():
     lean_to = {"footprint": [[0, -6000], [8000, -6000], [8000, 0], [0, 0]], "bottom_plane": {"a": 0.0, "b": 0.05, "c": 4000.0}}
     main = {"footprint": [[0, 0], [8000, 0], [8000, 4000], [0, 4000]], "bottom_plane": {"a": -0.05, "b": 0.0, "c": 7000.0}}
     assert wh._roof_level(lean_to, levels) == 0 and wh._roof_level(main, levels) == 1
+
+
+def test_pocket_door_keeps_the_hiding_wall():
+    """★物件B の O17（引き込み戸）：建具の箱は戸袋まで含む。戸袋（HANK の所）は戸を隠す壁として残し、穴は通れる所だけ。"""
+    # 戸袋の壁（仕上げ面から作り直した内壁、長さ 1000）。glb の引き込み戸は、壁の端の先まで続く
+    wall = wl.Wall(start=np.array([0.0, 0.0]), end=np.array([0.0, 1000.0]), thickness=130, kind="interior", bottom=624, top=3024)
+    pocket = _tate(99, [_box_prim("TATE_KURI", 0, 72, 980, 2680, 624, 624.5),        # 敷居（通れる所の半分の厚み）
+                        _box_prim("TATE_KURI", -72, 0, 125, 2680, 624, 624.5),       # 敷居（戸袋まで）
+                        _box_prim("TATE_HANK", 0, 0.1, 155, 1010, 654, 2994),        # 戸袋の中の板
+                        _box_prim("TATE_SDOR", -53, -27, 162, 1010, 654, 2994),
+                        _box_prim("TATE_SDOR", -27, 0, 162, 1010, 654, 2994)])
+    ops, orphans = openings([pocket], [wall], 624.0)
+    assert orphans == [] and len(ops) == 1
+    o = ops[0]
+    assert (o["kind"], o["style"]) == ("door", "pocket_sliding")
+    assert o["wall"] is wall
+    assert (round(o["offset_mm"]), round(o["width_mm"])) == (1010, 1670)          # 戸袋（125〜1010）は穴にしない
+    assert round(o["center"][1]) == 1845 and any(a.startswith("pocket:") for a in o["assumptions"])
+
+
+def test_narrow_agari_along_a_gap_is_not_a_wall():
+    """★物件B の U1：框（幅 146）が隙間（幅 352）より細くても、隙間の長さに沿っていれば框の位置とみなす。"""
+    gap = wl.Wall(start=np.array([-3918.8, 0.0]), end=np.array([-3918.8, -1737.5]), thickness=352, kind="interior", bottom=624)
+    agari = box(-4168, -1748, -4022, 72).buffer(50, join_style="mitre")
+    assert gap.rect().intersection(agari).area / gap.rect().area < 0.5        # 面積の割合だけでは見つからない
+    assert wh._runs_along(gap, agari)
+    corner_only = box(-4168, -72, -3712, 72).buffer(50, join_style="mitre")   # 角をかすめるだけの框
+    assert not wh._runs_along(gap, corner_only)

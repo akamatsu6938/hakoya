@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-
+import shapely
 from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
 
@@ -197,6 +197,16 @@ def _finish_triangles(parts: list[Part], fl_mm: float, band: tuple = (None, None
             f = f[f[:, :, 2].max(axis=1) > fl_mm + LOW_FACE_MM]
             tris += wl.vertical_triangles(f, p.source)
     return tris
+
+
+def _runs_along(u: wl.Wall, fp: Polygon, share: float = 0.5) -> bool:
+    """細い物（上がり框など）が隙間の中を通り、隙間の長さの半分以上に沿っているか。
+    ★物件B：框（幅 146mm）が隙間（幅 352mm）より細く、面積の割合だけでは框の位置と分からなかった（U1）。"""
+    pts = shapely.get_coordinates(u.rect().intersection(fp))
+    if not len(pts) or u.length <= 0:
+        return False
+    t = (pts - u.start[:2]) @ u.direction[:2]
+    return float(t.max() - t.min()) / u.length >= share
 
 
 def _drop_lower_gable_faces(faces: np.ndarray, lower_roofs: list[dict]) -> np.ndarray:
@@ -391,7 +401,7 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
     for u in list(unresolved):
         r = u.rect()
         for p, fp in zip(agar_parts, agari):
-            if r.intersection(fp).area / r.area >= 0.5:
+            if r.intersection(fp).area / r.area >= 0.5 or _runs_along(u, fp):
                 unresolved.remove(u)
                 exceptions.append({"kind": "agari_kamachi", "start": u.start, "end": u.end, "wall": None,
                                    "source": p.source, "note": "上がり框の位置。壁は作らない（框・靴箱などの造作は模型に入れない）"})

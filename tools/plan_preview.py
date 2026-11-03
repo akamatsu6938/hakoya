@@ -18,7 +18,7 @@ LABELS = {"exterior": "外壁", "standalone": "単独の壁", "interior": "内�
 OPENING_COLORS = {"window": "#1a73c9", "door": "#c26a00", "entrance_door": "#8a3fc0"}
 OPENING_LABELS = {"window": "窓", "door": "ドア", "entrance_door": "玄関ドア"}
 STYLE_LABELS = {"sliding": "引き違い", "fixed": "FIX", "unknown": "形不明", "outset_sliding": "吊り引き戸",
-                "hinged": "開き戸", "sliding_pair": "引き違い戸", "entrance": "玄関"}
+                "hinged": "開き戸", "sliding_pair": "引き違い戸", "entrance": "玄関", "pocket_sliding": "引き込み戸"}
 SCALE = 0.08     # 1mm → 0.08px（10m が 800px）
 MARGIN = 60
 LIST_WIDTH = 400  # 右側の壁の一覧の幅

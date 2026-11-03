@@ -19,6 +19,7 @@ RAIL = ("OSTN",)                                     # 吊り戸のレール
 SILL = "KURI"                                        # 敷居（くつずり）
 DOOR_CODES = ("SDOR", "DTOT", "OSTN", "SGDR")        # 戸・取っ手・吊り戸のレール
 GLASS_CODES = ("MADO", "MGLS", "GMAD")               # 窓の障子・ガラス
+POCKET = "HANK"                                      # 引き込み戸の戸袋（戸が引き込まれる所）の板（★物件B）
 
 
 def _suffix(code: str | None) -> str:
@@ -53,6 +54,8 @@ def _classify(codes: list[str], sill: float, fl: float) -> tuple[str, str]:
     # ★床まで届く FIX 窓（物件B）：戸の部位がなく窓ガラスの部位があれば、床から始まっていても窓。
     # ★FL+400 から始まる吊り戸（物件B）：戸の部位があれば、床から浮いていてもドア
     if is_door or (sill <= fl + 100 and not is_glass):
+        if POCKET in codes:
+            return "door", "pocket_sliding"    # 引き込み戸
         if "OSTN" in codes:
             return "door", "outset_sliding"    # 壁の外に吊る引き戸
         if "DTOT" in codes:
@@ -153,12 +156,26 @@ def openings(tate: list[Part], walls: list[Wall], fl: float) -> tuple[list[dict]
         d = w.direction
         pts = np.array(fp.exterior.coords)[:-1]
         proj = (pts - w.start) @ d
+        a0, a1 = float(proj.min()), float(proj.max())
+        center = np.asarray(fp.centroid.coords[0])
+        notes = [f"stacked: 上下に重なる建具 {len(g)} 個を1つの穴にまとめた"] if len(g) > 1 else []
+        # ★引き込み戸（物件B の O17）：建具の箱は戸袋まで含む。戸袋は戸を隠す壁なので、穴は通れる所だけにする
+        pocket = [pr.vertices[:, :2] for p in parts for pr in p.primitives if _suffix(pr.code) == POCKET and len(pr.vertices)]
+        if pocket:
+            hp = (np.vstack(pocket) - w.start) @ d
+            h0, h1 = float(hp.min()), float(hp.max())
+            n0, n1 = max((a0, min(a1, h0)), (max(a0, h1), a1), key=lambda s: s[1] - s[0])
+            if n1 > n0:
+                center = center + d * ((n0 + n1) - (a0 + a1)) / 2
+                notes.append(f"pocket: 引き込み戸。戸が引き込まれる所（{h1 - h0:.0f}mm）は穴にせず、戸を隠す壁として残した")
+                a0, a1 = n0, n1
         rec = {"wall": w, "kind": kind, "style": style,
-               "offset_mm": float(proj.min()), "width_mm": float(proj.max() - proj.min()),
+               "offset_mm": a0, "width_mm": a1 - a0,
                "sill_mm": sill, "head_mm": head, "sill_fl_mm": sill - fl, "head_fl_mm": head - fl,
-               "center": np.asarray(fp.centroid.coords[0]), "source": parts[0].source, "footprint": fp}
+               "center": center, "source": parts[0].source, "footprint": fp}
         if len(g) > 1:
             rec["sources"] = [p.source for p in parts]
-            rec["assumptions"] = [f"stacked: 上下に重なる建具 {len(g)} 個を1つの穴にまとめた"]
+        if notes:
+            rec["assumptions"] = notes
         out.append(rec)
     return out, orphans
