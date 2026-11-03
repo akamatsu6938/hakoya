@@ -20,7 +20,7 @@ from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
 
 from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
-                          drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect)
+                          drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note, slab_outline, slab_solid)
 
 Z_LO, Z_HI = -10000.0, 100000.0       # 「下・上の限りなし」の代わりの高さ（実寸 mm）
 BIG = box(-1e6, -1e6, 1e6, 1e6)
@@ -244,9 +244,12 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     for k, r in enumerate(lean):
         rb, rt = r["bottom_plane"], r["top_plane"]
         zmax = float(r["top_z_range_mm"][1]) + 200
-        sp = Polygon(r["footprint"]).buffer(overhang, join_style="mitre") if overhang else Polygon(r["footprint"])
+        sp = slab_outline(r)                                                       # 軒の出の修正はここだけに効く（区域B は元の形）
+        sp = sp.buffer(overhang, join_style="mitre") if overhang else sp
         sp = sp.difference(zone_a.buffer(clearance, join_style="mitre"))          # 2階の外形の所は除く（④ と重ねない）
-        roof_lower_parts.append(keep_above(keep_below(prism(sp, plane_z(rb, *sp.centroid.coords[0]) - 2000, zmax), rt), rb))
+        roof_lower_parts.append(slab_solid(sp, rb, rt, zmax))
+        if eave_note(r, f"下屋の屋根 {r.get('id', '')}"):
+            notes["roof_lower"].append(eave_note(r, f"下屋の屋根 {r.get('id', '')}"))
     for s in soffits:   # 下屋の下の天井（南西のへこみなど）：平らな板。区域Bの途中から始まる壁の下まで広げる
         sp, z = Polygon(s["polygon"]), float(s["z_mm"])
         if sp.intersection(zone_a).area >= 0.5 * sp.area:
@@ -298,8 +301,11 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     # ---------------------------------------------------------------- ⑤ 大屋根（平屋の屋根と同じ作り方を2階の値で）
     rb, rt = main["bottom_plane"], main["top_plane"]
     zmax = float(main["top_z_range_mm"][1]) + 200
-    sp = Polygon(main["footprint"]).buffer(overhang, join_style="mitre") if overhang else Polygon(main["footprint"])
-    roof_parts = [keep_above(keep_below(prism(sp, plane_z(rb, *sp.centroid.coords[0]) - 2000, zmax), rt), rb)]
+    sp = slab_outline(main)
+    sp = sp.buffer(overhang, join_style="mitre") if overhang else sp
+    roof_parts = [slab_solid(sp, rb, rt, zmax)]
+    if eave_note(main, f"大屋根 {main.get('id', '')}"):
+        notes["roof"].append(eave_note(main, f"大屋根 {main.get('id', '')}"))
     ext2_fp = unary_union([wall_rect(w) for w in walls2 if w["kind"] == "exterior"])
     inside2 = zone_a.difference(ext2_fp)
     inside2 = max(getattr(inside2, "geoms", [inside2]), key=lambda g: g.area)

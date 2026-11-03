@@ -9,6 +9,7 @@
 {"id": "OV7", "target": "O1", "field": "head_mm", "from": 3024, "to": 2824,
  "value_source": "jww:elevation:dim#40", "reason": "...", "origin": "finding:F3", "approved_by": "human", "at": "..."}
 field に "_delete" を指定すると、その部材を取り除く（to は使わない）。
+屋根（Y1 など）の軒の出は、入れ子の項目 "eave_mm.S" のように1段の点でつないで指定する。
 """
 from __future__ import annotations
 
@@ -19,9 +20,12 @@ from pathlib import Path
 
 from core.paths import out_dir
 
-COLLECTIONS = {"W": "walls", "O": "openings", "R": "rooms", "P": "porches", "S": "porch_soffits"}
+COLLECTIONS = {"W": "walls", "O": "openings", "R": "rooms", "P": "porches", "S": "porch_soffits", "Y": "roofs"}
 DELETE = "_delete"
+DELETABLE = ("W", "O", "R", "P", "S")      # 取り除ける部材（屋根は取り除けない）
 TOL = 0.5  # 「前回の自動の値」と比べるときの許容差（mm）
+EAVE_PREFIX = "eave_mm."
+EAVE_RANGE_MM = (0.0, 2000.0)               # 軒の出（外壁の外の面から屋根の先まで、板金・樋を除く）の範囲
 
 
 def overrides_path(alias: str) -> Path:
@@ -49,6 +53,57 @@ def _find(building: dict, target: str) -> dict | None:
     if coll is None:
         return None
     return next((x for x in building.get(coll, []) if x.get("id") == target), None)
+
+
+def has_field(obj: dict, field: str) -> bool:
+    """項目があるか。"eave_mm.S" のような1段の入れ子も見る。"""
+    head, _, tail = field.partition(".")
+    if not tail:
+        return field in obj
+    return isinstance(obj.get(head), dict) and tail in obj[head]
+
+
+def get_field(obj: dict, field: str):
+    head, _, tail = field.partition(".")
+    return obj[head][tail] if tail else obj[field]
+
+
+def _set_field(obj: dict, field: str, value) -> None:
+    """入れ子の項目は dict を作り直して入れる（roof と roofs の中身が同じ dict を共有していることがあり、
+    その場で書き換えると、ほかの屋根や glb の値まで変わってしまうため）。"""
+    head, _, tail = field.partition(".")
+    if tail:
+        obj[head] = {**obj[head], tail: value}
+    else:
+        obj[field] = value
+
+
+def check_value(field: str, to) -> None:
+    """値の範囲を確かめる（いまは軒の出だけ）。外れたら日本語の ValueError。"""
+    if field.startswith(EAVE_PREFIX):
+        lo, hi = EAVE_RANGE_MM
+        if not isinstance(to, (int, float)) or not lo <= float(to) <= hi:
+            raise ValueError(f"軒の出は {lo:.0f}〜{hi:.0f}mm の数値で入れてください（外壁の外の面から屋根の先まで、板金・樋を除く）")
+
+
+def _roof_twin(building: dict, target: str) -> dict | None:
+    """大屋根の2つの写し（上の段の roof と roofs の main）のうち、もう片方。
+    平屋の組み立て・要約・平面図は roof を、2階建ての組み立ては roofs を読むので、両方に同じ修正を当てる。"""
+    roofs = building.get("roofs") or []
+    if target == "roof":
+        main = [r for r in roofs if r.get("kind") == "main"] or (roofs if len(roofs) == 1 else [])
+        return main[0] if main else None
+    if target.startswith("Y") and isinstance(building.get("roof"), dict):
+        r = next((x for x in roofs if x.get("id") == target), None)
+        if r is not None and (r.get("kind") == "main" or len(roofs) == 1):
+            return building["roof"]
+    return None
+
+
+def _write(obj: dict, field: str, to) -> None:
+    if field.startswith(EAVE_PREFIX) and isinstance(obj.get("eave_mm"), dict):
+        obj.setdefault("eave_glb_mm", dict(obj["eave_mm"]))   # 直す前の glb の軒の出を控える（組み立てで差を使う）
+    _set_field(obj, field, to)
 
 
 def _same(a, b) -> bool:
@@ -92,17 +147,23 @@ def apply(building: dict, items: list[dict]) -> tuple[dict, list[dict]]:
             results.append({"id": ov["id"], "status": "failed", "reason": f"{ov['target']} が見つからない（作り直しでなくなった可能性）"})
             continue
         if ov["field"] == DELETE:
-            coll = COLLECTIONS.get(ov["target"][:1])
+            coll = COLLECTIONS.get(ov["target"][:1]) if ov["target"][:1] in DELETABLE else None
+            if coll is None:
+                results.append({"id": ov["id"], "status": "failed", "reason": f"{ov['target']} は取り除けない部材"})
+                continue
             b[coll] = [x for x in b[coll] if x.get("id") != ov["target"]]
             if coll == "walls":  # 取り除いた壁にある開口も取り除く
                 b["openings"] = [o for o in b.get("openings", []) if o.get("wall") != ov["target"]]
             results.append({"id": ov["id"], "status": "applied"})
             continue
-        if ov["field"] not in obj:
+        if not has_field(obj, ov["field"]):
             results.append({"id": ov["id"], "status": "failed", "reason": f"{ov['target']} に {ov['field']} という項目がない"})
             continue
-        before = obj[ov["field"]]
-        obj[ov["field"]] = ov["to"]
+        before = get_field(obj, ov["field"])
+        _write(obj, ov["field"], ov["to"])
+        twin = _roof_twin(b, ov["target"])
+        if twin is not None and has_field(twin, ov["field"]):
+            _write(twin, ov["field"], ov["to"])
         _sync_derived(b, obj, ov["field"])
         status = "applied" if ("from" not in ov or _same(before, ov["from"])) else "applied_changed"
         r = {"id": ov["id"], "status": status}
@@ -121,11 +182,15 @@ def add(alias: str, building: dict, target: str, field: str, to, value_source: s
     obj = _find(current, target)
     if obj is None:
         raise KeyError(f"{target} が見つかりません。")
-    if field != DELETE and field not in obj:
+    if field == DELETE and target[:1] not in DELETABLE:
+        raise KeyError(f"{target} は取り除けません。")
+    if field != DELETE and not has_field(obj, field):
         raise KeyError(f"{target} に {field} という項目がありません。")
+    if field != DELETE:
+        check_value(field, to)
     n = max([int(x["id"][2:]) for x in items if x["id"][2:].isdigit()] + [0]) + 1
     ov = {"id": f"OV{n}", "target": target, "field": field,
-          "from": None if field == DELETE else obj[field], "to": None if field == DELETE else to,
+          "from": None if field == DELETE else get_field(obj, field), "to": None if field == DELETE else to,
           "value_source": value_source, "reason": reason, "origin": origin, "approved_by": approved_by,
           "at": dt.datetime.now().astimezone().isoformat(timespec="seconds")}
     items.append(ov)

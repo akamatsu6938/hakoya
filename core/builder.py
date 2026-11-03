@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from manifold3d import CrossSection, FillRule, Manifold, OpType
-from shapely.geometry import Polygon
+from shapely.affinity import translate
+from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
 UPPER_WALL_ABOVE_FL = 1500.0   # 下端がこれより上の壁は「途中から始まる壁」（ポーチの上の垂れ壁など）
@@ -113,6 +114,77 @@ def wall_rect(w: dict, extra: float = 0.0, t0: float | None = None, t1: float | 
 
 def _wall_top(w: dict) -> float | None:
     return None if w["height"] == "to_roof" else float(w["height"])
+
+
+# ---------------------------------------------------------------- 屋根板（軒の出を辺ごとに直す）
+
+SIDE_DIRS = {"W": (-1.0, 0.0), "E": (1.0, 0.0), "S": (0.0, -1.0), "N": (0.0, 1.0)}   # glb の +Y を北とみなす（推定）
+SIDE_JA = {"W": "西", "E": "東", "S": "南", "N": "北"}
+
+
+def eave_deltas(roof: dict) -> dict[str, float]:
+    """人が直した軒の出と、glb の軒の出の差（辺ごと、実寸 mm）。直していなければ空。
+    eave_glb_mm は、修正を当てるときに core/overrides.py が控える（building.json には入れない）。"""
+    glb, now = roof.get("eave_glb_mm"), roof.get("eave_mm") or {}
+    if not glb:
+        return {}
+    out = {}
+    for side in SIDE_DIRS:
+        if side in now and side in glb and abs(float(now[side]) - float(glb[side])) >= 0.5:
+            out[side] = float(now[side]) - float(glb[side])
+    return out
+
+
+def _rings(geom):
+    for g in getattr(geom, "geoms", [geom]):
+        if g.is_empty:
+            continue
+        yield g.exterior
+        yield from g.interiors
+
+
+def _sweep(poly, dx: float, dy: float):
+    """多角形をその向きに掃き出した形（多角形と線分のミンコフスキー和）。その向きを向いた辺だけが動く（L字のへこみの辺も）。"""
+    pieces = [poly, translate(poly, dx, dy)]
+    for ring in _rings(poly):
+        pts = list(ring.coords)
+        for p, q in zip(pts[:-1], pts[1:]):
+            quad = Polygon([p, q, (q[0] + dx, q[1] + dy), (p[0] + dx, p[1] + dy)])
+            if quad.area > 1e-6:
+                pieces.append(quad)
+    return unary_union(pieces)
+
+
+def slab_outline(roof: dict):
+    """屋根板の外形（板金の分を足す前）。軒の出を直していなければ glb の形のまま。
+    伸ばす辺はその向きへ掃き出し、縮める辺は外側を逆向きに掃き出して削る。"""
+    poly = Polygon(roof["footprint"])
+    for side, d in eave_deltas(roof).items():
+        dx, dy = SIDE_DIRS[side]
+        if d > 0:
+            poly = _sweep(poly, dx * d, dy * d)
+        else:
+            pad = box(*poly.bounds).buffer(abs(d) + 10, join_style="mitre")
+            poly = poly.difference(_sweep(pad.difference(poly), dx * d, dy * d))
+    return poly
+
+
+def eave_note(roof: dict, name: str = "屋根") -> str | None:
+    deltas = eave_deltas(roof)
+    if not deltas:
+        return None
+    parts = "・".join(f"{SIDE_JA[s]} {d:+.0f}mm" for s, d in deltas.items())
+    return f"{name}の軒の出を人の修正どおりにした（glb から {parts}）"
+
+
+def slab_solid(poly, rb: dict, rt: dict, zmax: float) -> Manifold:
+    """屋根板の立体：外形の柱を、屋根の上の面と下の面の間で切る。
+    柱の高さは屋根の面から決める（軒を伸ばしても上の面が平らに切られない）。外形が glb のままなら今までと同じ立体。"""
+    x0, y0, x1, y1 = poly.bounds
+    corners = [(x0, y0), (x0, y1), (x1, y0), (x1, y1)]
+    z_lo = min(plane_z(rb, *poly.centroid.coords[0]) - 2000, min(plane_z(rb, x, y) for x, y in corners) - 10)
+    z_hi = max(zmax, max(plane_z(rt, x, y) for x, y in corners) + 10)
+    return keep_above(keep_below(prism(poly, z_lo, z_hi), rt), rb)
 
 
 # ---------------------------------------------------------------- 組み立て
@@ -338,10 +410,13 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     # 屋根のオブジェクト：①屋根板（4辺を板金の分だけ出す）＋ポーチの天井＋ずれ止めの三角
     #                     ②屋根の外壁（天井より上の外壁・ポーチの垂れ壁・屋根まで届く袖壁。ファジースキン）
     overhang = float(m.get("roof_overhang_mm", 0.0)) * scale
-    slab_poly = Polygon(roof["footprint"]).buffer(overhang, join_style="mitre") if overhang else Polygon(roof["footprint"])
-    slab = keep_above(keep_below(prism(slab_poly, plane_z(rb, *slab_poly.centroid.coords[0]) - 2000, roof_zmax), rt), rb)
+    slab_poly = slab_outline(roof)
+    slab_poly = slab_poly.buffer(overhang, join_style="mitre") if overhang else slab_poly
+    slab = slab_solid(slab_poly, rb, rt, roof_zmax)
     if overhang:
         notes["roof"].append(f"屋根板を外壁から4辺とも {m['roof_overhang_mm']}mm（模型）出した（板金の分）")
+    if eave_note(roof):
+        notes["roof"].append(eave_note(roof))
     roof_parts = [slab]
     soffits = b.get("porch_soffits", [])
     soffit_top = max((float(s["z_mm"]) for s in soffits), default=None)

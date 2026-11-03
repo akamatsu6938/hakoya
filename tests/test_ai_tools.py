@@ -100,3 +100,30 @@ def test_building_summary_for_two_storeys():
 def test_plan2_only_for_two_storeys():
     assert "平屋" in call_tool(_ctx(), "render_view", {"view": "plan2"})["error"]
     assert "平屋" in call_tool(_ctx(), "get_elements", {"view": "plan2"})["error"]
+
+
+def _roof_ctx():
+    ctx = _ctx()
+    eave = {"W": 1, "E": 1, "S": 1, "N": 1}
+    roof = {"id": "Y1", "kind": "main", "level": "1F", "pitch": [1.5, 10], "low_side": "W", "eave_mm": dict(eave),
+            "footprint": [[0, 0], [6000, 0], [6000, 4000], [0, 4000]]}
+    ctx.raw["roofs"] = [dict(roof)]
+    ctx.building["roofs"] = [dict(roof, eave_mm=dict(eave, S=300))]        # 人が南を 300 に直した後
+    return ctx
+
+
+def test_roof_eave_proposals_use_only_human_numbers():
+    ctx = _roof_ctx()
+    ctx.human_text = "図面だと軒が４５０ｍｍ出ている"                        # 全角でも読める
+    r = call_tool(ctx, "propose_override", {"target": "Y1", "field": "eave_mm.S", "value_source": "number",
+                                            "number": 450, "reason": "図面の値"})
+    assert (r["proposal"]["from"], r["proposal"]["to"]) == (300, 450.0)
+    r = call_tool(ctx, "propose_override", {"target": "Y1", "field": "eave_mm.N", "value_source": "number",
+                                            "number": 600, "reason": "推測"})
+    assert "人の一言にない" in r["error"]                                    # Claude が作った数値は断る
+    r = call_tool(ctx, "propose_override", {"target": "Y1", "field": "eave_mm.S", "value_source": "glb", "reason": "元に戻す"})
+    assert r["proposal"]["to"] == 1.0
+    assert "eave_mm" in call_tool(ctx, "propose_override", {"target": "Y1", "field": "pitch", "value_source": "glb",
+                                                             "reason": "x"})["error"]
+    items = call_tool(ctx, "get_elements", {"ids": ["Y1"]})["elements"]
+    assert items[0]["eave_mm"]["S"] == 300 and "footprint" not in items[0]

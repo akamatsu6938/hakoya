@@ -152,7 +152,7 @@ def add_override(alias: str, body: OverrideIn):
     raw = json.loads(_building_path(alias).read_text(encoding="utf-8"))
     try:
         item = ov.add(alias, raw, body.target, body.field, body.to, "human:table", body.reason or "表で直した")
-    except KeyError as e:
+    except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e).strip("'\""))
     summary = write_outputs(alias)
     return _safe_json({"override": item, "checks": summary["checks"]})

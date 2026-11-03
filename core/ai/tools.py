@@ -8,13 +8,16 @@ Agent SDK（claude_code 接続）にも Messages API（api_key 接続）にも�
 - "majority:<種類>"   同じ種類の壁（exterior / interior / standalone）の厚みの多数派
 - "rule:<項目>"       会社ルールの値（例：rule:openings.door_top_fl_mm）
 - "glb"              自動で作った元の値（人の修正を外した値）に戻す
-- "number"           人が一言で書いた数値（囲んで直すで「900にしたい」など）。number に入れる
+- "number"           人が一言で書いた数値（囲んで直すで「900にしたい」など）。number に入れる。
+                     囲んで直すでは、その数値が人の一言（と質問への答え）の中にあるかをコードが確かめる
 - "jww:<ID>"         図面の寸法（図面の読み取りはまだ作っていないので、いまは使えない）
 """
 from __future__ import annotations
 
 import collections
 import json
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,7 +28,10 @@ from core.paths import out_dir
 from core.rules import load_rules, rule
 
 VIEWS = ("S", "N", "E", "W", "plan", "plan2")    # plan2 は2階建ての2階の平面（平屋にはない）
-EDITABLE = {"walls": ("thickness_mm",), "openings": ("width_mm", "offset_mm", "sill_fl_mm", "head_fl_mm")}
+EDITABLE = {"walls": ("thickness_mm",), "openings": ("width_mm", "offset_mm", "sill_fl_mm", "head_fl_mm"),
+            # 屋根の軒の出（外壁の外の面から屋根の先まで、板金・樋を除く）。模型は板金の分をさらに外に足す
+            "roofs": tuple(f"eave_mm.{s}" for s in "WESN")}
+ROOF_KEYS = ("id", "kind", "level", "shape", "pitch", "low_side", "thickness_mm", "eave_mm", "eave_with_gutter_mm")
 
 
 class ToolError(ValueError):
@@ -40,6 +46,7 @@ class ToolContext:
     rules: dict
     questions: list[dict] = field(default_factory=list)
     proposals: list[dict] = field(default_factory=list)
+    human_text: str | None = None      # 囲んで直すの人の一言（number の数値はこの中にあるものだけ）。検品では None
 
     @classmethod
     def load(cls, alias: str) -> "ToolContext":
@@ -60,7 +67,7 @@ def _check_view(ctx: ToolContext, view: str) -> None:
 
 
 def _find(b: dict, target: str) -> tuple[str, dict] | tuple[None, None]:
-    for coll in ("walls", "openings"):
+    for coll in ("walls", "openings", "roofs"):
         for x in b.get(coll, []):
             if x["id"] == target:
                 return coll, x
@@ -81,9 +88,11 @@ def get_building(ctx: ToolContext) -> dict:
         "foundation_top_mm": b["ground"]["foundation_top_mm"],
         "outer_size_mm": b.get("wall_stats", {}).get("outer_size_mm"),
         "walls": dict(walls), "openings": dict(ops),
-        "roof": {**{k: r.get(k) for k in ("shape", "pitch", "low_side", "thickness_mm", "eave_mm", "eave_with_gutter_mm")},
+        "roof": {"id": next((x.get("id") for x in b.get("roofs", []) if x.get("kind") == "main"), None),
+                 **{k: r.get(k) for k in ("shape", "pitch", "low_side", "thickness_mm", "eave_mm", "eave_with_gutter_mm")},
                  # ★説明がないと「軒の出が glb（樋込み 146mm）より短い」と誤って指摘された（検品 3回目 F2）
-                 "note": "eave_mm は glb の屋根板の出、eave_with_gutter_mm は軒樋を含めた出。樋・破風・鼻隠しは模型では省く"
+                 "note": "eave_mm は glb の屋根板の出（外壁の外の面から屋根の先まで、板金・樋を除く）、eave_with_gutter_mm は軒樋を含めた出。"
+                         "直すときは target=屋根の id・field=eave_mm.S のように辺を付ける。樋・破風・鼻隠しは模型では省く"
                          f"（include.gutter / fascia）。模型の屋根板は板金の分として4辺を model.roof_overhang_mm"
                          f"（{ctx.rules['model'].get('roof_overhang_mm', 0)}mm）出す。横から見ると軒裏が細い帯に見えるのは正しい"},
         "company_rules": {"walls": ctx.rules["walls"], "openings": ctx.rules["openings"],
@@ -117,13 +126,16 @@ def get_elements(ctx: ToolContext, view: str | None = None, kind: str | None = N
         if p.exists():
             in_view = {e["id"]: e for e in json.loads(p.read_text(encoding="utf-8"))["elements"]}
     out = []
-    for coll in ("walls", "openings"):
+    for coll in ("walls", "openings", "roofs"):
         for x in b.get(coll, []):
             if ids and x["id"] not in ids:
                 continue
             if kind and x["kind"] != kind:
                 continue
             if in_view is not None and x["id"] not in in_view:
+                continue
+            if coll == "roofs":            # 屋根は外形などの長い座標を除いて渡す
+                out.append({k: x.get(k) for k in ROOF_KEYS})
                 continue
             item = {k: x[k] for k in x if k not in ("sources",)}
             if in_view is not None:
@@ -183,12 +195,15 @@ def _value_from_source(ctx: ToolContext, coll: str, obj: dict, fld: str, value_s
     if value_source == "number":
         if number is None:
             raise ToolError('value_source が "number" のときは、人が書いた数値を number に入れてください')
+        if ctx.human_text is not None and not _number_in_text(float(number), ctx.human_text):
+            raise ToolError(f"number（{number:g}）は人の一言にない数値です。number には人が書いた数値だけを使い、"
+                            "なければ ask_question で人に聞いてください")
         return float(number)
     if value_source == "glb":
         _, raw = _find(ctx.raw, obj["id"])
-        if raw is None or fld not in raw:
+        if raw is None or not ov.has_field(raw, fld):
             raise ToolError(f"{obj['id']} の自動の値（{fld}）が見つかりません")
-        return float(raw[fld])
+        return float(ov.get_field(raw, fld))
     if value_source.startswith("majority:"):
         kind = value_source.split(":", 1)[1]
         if coll != "walls" or fld != "thickness_mm":
@@ -207,6 +222,12 @@ def _value_from_source(ctx: ToolContext, coll: str, obj: dict, fld: str, value_s
     raise ToolError(f"value_source「{value_source}」は使えません（majority:種類 / rule:項目 / glb / number）")
 
 
+def _number_in_text(number: float, text: str) -> bool:
+    """人の文章に、その数値が書いてあるか（全角の数字・カンマも扱う）。"""
+    t = unicodedata.normalize("NFKC", text).replace(",", "")
+    return any(abs(float(x) - number) < 1e-6 for x in re.findall(r"\d+(?:\.\d+)?", t))
+
+
 def propose_override(ctx: ToolContext, target: str, field: str, value_source: str, reason: str,
                      number: float | None = None, finding: str | None = None) -> dict:
     """直す案を1件つくる（保存はしない。人が承認したら overrides に入る）。数値はコードが出どころから計算する。"""
@@ -220,9 +241,14 @@ def propose_override(ctx: ToolContext, target: str, field: str, value_source: st
         if field not in EDITABLE.get(coll, ()):
             raise ToolError(f"{target} で直せる項目は {', '.join(EDITABLE.get(coll, ()))} です")
         to = _value_from_source(ctx, coll, obj, field, value_source, number)
-        if abs(to - float(obj[field])) < 0.5:
-            raise ToolError(f"{target} の {field} はすでに {obj[field]} です（直す必要がありません）")
-        prop = {"target": target, "field": field, "from": obj[field], "to": round(to, 1),
+        now = ov.get_field(obj, field)
+        if abs(to - float(now)) < 0.5:
+            raise ToolError(f"{target} の {field} はすでに {now} です（直す必要がありません）")
+        try:
+            ov.check_value(field, to)
+        except ValueError as e:
+            raise ToolError(str(e))
+        prop = {"target": target, "field": field, "from": now, "to": round(to, 1),
                 "value_source": value_source if value_source != "number" else f"human:number:{number:g}",
                 "reason": reason, "finding": finding}
     ctx.proposals.append(prop)
@@ -256,7 +282,7 @@ TOOL_SPECS = {
                                       "bbox_px": {"type": "array", "items": {"type": "integer"}}}, "required": ["view"], "additionalProperties": False}},
     "run_checks": {"fn": run_checks, "description": "コードの検査の結果（閉じた立体・離れた塊・造形範囲・glb との数の差）を返す。",
                    "schema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    "propose_override": {"fn": propose_override, "description": "直す案を1件つくる。数値は書かず、数値の出どころ value_source（majority:種類 / rule:項目 / glb / number）を指定する。数値はコードが計算する。number は人が書いた数値のときだけ。",
+    "propose_override": {"fn": propose_override, "description": "直す案を1件つくる。数値は書かず、数値の出どころ value_source（majority:種類 / rule:項目 / glb / number）を指定する。数値はコードが計算する。number は人が書いた数値のときだけ。屋根の軒の出は target=Y1・field=eave_mm.S のように辺を付ける（外壁の外の面から屋根の先まで、板金・樋を除く）。",
                          "schema": {"type": "object", "properties": {
                              "target": {"type": "string"}, "field": {"type": "string"}, "value_source": {"type": "string"},
                              "reason": {"type": "string"}, "number": {"type": "number"}, "finding": {"type": "string"}},

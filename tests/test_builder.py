@@ -205,3 +205,56 @@ def test_window_frames_can_be_switched_on():
     obj = union_all([p["exterior1"].solid, p["floor1"].solid])
     diff = obj.slice(1000.0).area() - obj.slice(2000.0).area()
     assert abs(diff - (1700 * 160 - 2 * 50 * 80)) < 1.0
+
+
+def test_slab_outline_moves_only_that_side():
+    from shapely.geometry import Polygon, box
+    from core.builder import slab_outline
+    roof = {"footprint": [[0, 0], [6000, 0], [6000, 4000], [0, 4000]], "eave_mm": {"W": 1, "E": 400, "S": 1, "N": 1}}
+    assert slab_outline(roof).equals(Polygon(roof["footprint"]))                   # 直していなければ glb の形のまま
+    glb = dict(roof["eave_mm"])
+    s = slab_outline(dict(roof, eave_glb_mm=glb, eave_mm={**glb, "S": 501}))          # 南を +500
+    assert s.bounds == pytest.approx((0, -500, 6000, 4000))
+    e = slab_outline(dict(roof, eave_glb_mm=glb, eave_mm={**glb, "E": 100}))          # 東を −300
+    assert e.bounds == pytest.approx((0, 0, 5700, 4000))
+    ell = box(0, 0, 10000, 8000).difference(box(0, 5000, 3000, 8000))                # 北西がへこんだ L字
+    lr = {"footprint": [list(p) for p in ell.exterior.coords][:-1], "eave_mm": {"W": 0}, "eave_glb_mm": {"W": 0}}
+    w = slab_outline(dict(lr, eave_mm={"W": 300}))                                    # 西を +300：へこみの西向きの辺も動く
+    assert w.bounds[0] == pytest.approx(-300) and w.area - ell.area == pytest.approx(300 * (5000 + 3000))
+
+
+def test_eave_override_extends_only_that_side_of_the_roof():
+    rules = load_rules("jisha")
+    base = build_model(_tiny_house(), rules)
+    b = _tiny_house()
+    b["roof"]["eave_glb_mm"] = {"W": 0, "E": 0, "S": 0, "N": 0}
+    b["roof"]["eave_mm"] = {"W": 0, "E": 0, "S": 500, "N": 0}
+    parts = build_model(b, rules)
+    lo0, lo1 = np.array(base["roof"].solid.bounding_box()), np.array(parts["roof"].solid.bounding_box())
+    assert lo1[1] == pytest.approx(lo0[1] - 500, abs=0.5)                                # 南だけ 500 伸びる
+    assert np.allclose(np.delete(lo1, [1, 2, 5]), np.delete(lo0, [1, 2, 5]), atol=0.5)  # 西・東・北は同じ
+    for k in ("foundation", "floor1", "exterior1", "roof_ext"):                          # ほかの部品は変わらない
+        assert parts[k].solid.volume() == pytest.approx(base[k].solid.volume(), rel=1e-9)
+    assert any("軒の出" in n for n in parts["roof"].notes)
+
+
+@pytest.mark.realdata
+@pytest.mark.slow
+def test_real_eave_override_moves_only_that_side():
+    """物件A：南の軒を glb の 1mm から 450mm に直すと、屋根の南だけが 449mm 伸びる（修正はメモリの中だけ）。"""
+    from core import overrides as ov
+    from core.paths import load_local_paths, out_dir
+    if "物件A" not in load_local_paths():
+        pytest.skip("data/local_paths.yaml に物件A がありません")
+    raw = json.loads((out_dir("物件A") / "building.json").read_text(encoding="utf-8"))
+    rules = load_rules(raw["source"].get("company_rules", "jisha"))
+    base = build_model(raw, rules)
+    b, res = ov.apply(raw, [{"id": "OV1", "target": "Y1", "field": "eave_mm.S", "to": 450}])
+    assert res[0]["status"] == "applied" and b["roof"]["eave_mm"]["S"] == 450
+    parts = build_model(b, rules)
+    lo0, lo1 = np.array(base["roof"].solid.bounding_box()), np.array(parts["roof"].solid.bounding_box())
+    delta = 450 - raw["roof"]["eave_mm"]["S"]
+    assert lo1[1] == pytest.approx(lo0[1] - delta, abs=0.5)
+    assert np.allclose(np.delete(lo1, [1, 2, 5]), np.delete(lo0, [1, 2, 5]), atol=0.5)
+    for k in ("foundation", "floor1", "exterior1", "roof_ext"):
+        assert parts[k].solid.volume() == pytest.approx(base[k].solid.volume(), rel=1e-9)

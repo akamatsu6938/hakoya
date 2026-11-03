@@ -71,3 +71,40 @@ def test_roof_field(alias):
     ov.add(alias, b, "roof", "pitch", [2.0, 10], "jww:section:dim#3", "断面図の勾配")
     applied, _ = ov.apply(b, ov.load(alias))
     assert applied["roof"]["pitch"] == [2.0, 10]
+
+
+def _roofed():
+    b = _building()
+    main = {"shape": "shed", "pitch": [1.5, 10], "eave_mm": {"W": 1, "E": 1, "S": 1, "N": 1},
+            "footprint": [[0, 0], [6000, 0], [6000, 4000], [0, 4000]]}
+    b["roof"] = main
+    b["roofs"] = [{"id": "Y1", "kind": "main", "level": "1F", **main}]   # 中身（eave_mm）は roof と同じ dict（メモリ上の building と同じ）
+    return b
+
+
+def test_roof_eave_override_mirrors_main_roof_and_keeps_glb(alias):
+    b = _roofed()
+    item = ov.add(alias, b, "Y1", "eave_mm.S", 450, "human:number:450", "図面だと 450")
+    assert (item["from"], item["to"]) == (1, 450)
+    applied, results = ov.apply(b, ov.load(alias))
+    assert results[0]["status"] == "applied"
+    y1 = applied["roofs"][0]
+    assert y1["eave_mm"]["S"] == 450 and y1["eave_glb_mm"]["S"] == 1
+    assert applied["roof"]["eave_mm"]["S"] == 450 and applied["roof"]["eave_glb_mm"]["S"] == 1   # 平屋の組み立てが読む roof にも
+    assert b["roof"]["eave_mm"]["S"] == 1 and b["roofs"][0]["eave_mm"]["S"] == 1                # 元の building は変わらない
+    assert "eave_glb_mm" not in b["roofs"][0]
+    ov.undo(alias, item["id"])
+    applied, _ = ov.apply(b, ov.load(alias))
+    assert applied["roofs"][0]["eave_mm"]["S"] == 1 and "eave_glb_mm" not in applied["roofs"][0]
+
+
+def test_roof_eave_refusals(alias):
+    b = _roofed()
+    with pytest.raises(ValueError):
+        ov.add(alias, b, "Y1", "eave_mm.S", 5000, "human:number:5000", "大きすぎる")
+    with pytest.raises(KeyError):
+        ov.add(alias, b, "Y1", "eave_mm.X", 100, "human:number:100", "そんな辺はない")
+    with pytest.raises(KeyError):
+        ov.add(alias, b, "Y1", "_delete", None, "human", "屋根は取り除けない")
+    _, res = ov.apply(b, [{"id": "OV9", "target": "Y1", "field": "_delete"}])
+    assert res[0]["status"] == "failed"
