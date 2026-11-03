@@ -39,16 +39,27 @@ window.addEventListener('resize', resize);
 (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
 
 const LIFT = { foundation: 0, floor1: 1, exterior1: 1, roof: 3, roof_ext: 3 };
+// 2階建て（基礎・1階・下屋の屋根・2階・大屋根の5段）
+const LIFT_MULTI = { foundation: 0, floor1: 1, exterior1: 1, roof_lower: 2, roof_lower_ext: 2, floor2: 3, exterior2: 3, roof: 4, roof_ext: 4 };
 function applyVisibility() {
   if (!state.root) return;
+  const lift = state.multi ? LIFT_MULTI : LIFT;
   state.root.traverse((o) => {
     if (!o.isMesh) return;
     const cb = document.querySelector(`input[data-part~="${o.name}"]`);   // 1つの切り替えで複数のパーツ（屋根＋屋根の外壁）
     o.visible = cb ? cb.checked : true;
-    o.position.z = state.exploded ? (LIFT[o.name] || 0) * 60 : 0;
+    o.position.z = state.exploded ? (lift[o.name] || 0) * 60 : 0;
   });
 }
-document.querySelectorAll('input[data-part]').forEach((cb) => cb.addEventListener('change', applyVisibility));
+const SINGLE_TOGGLES = $('#part-toggles').innerHTML;   // 平屋の切り替え（今までどおり）
+const MULTI_TOGGLES = [['foundation', '基礎'], ['floor1 exterior1', '1階'], ['roof_lower roof_lower_ext', '下屋の屋根'],
+  ['floor2 exterior2', '2階'], ['roof roof_ext', '大屋根']];
+function renderPartToggles() {
+  $('#part-toggles').innerHTML = state.multi
+    ? MULTI_TOGGLES.map(([k, l]) => `<label><input type="checkbox" data-part="${k}" checked>${l}</label>`).join('') : SINGLE_TOGGLES;
+  document.querySelectorAll('#part-toggles input[data-part]').forEach((cb) => cb.addEventListener('change', applyVisibility));
+}
+renderPartToggles();
 
 function setView(kind) {
   if (!state.root) return;
@@ -160,7 +171,13 @@ async function renderChecks() {
 
 function renderDownloads() {
   const files = [['model_bambu.3mf', '3MF（Bambu Studio 形式・外壁のファジースキン設定済み）おすすめ'], ['model.3mf', '3MF（ふつうの形式・設定は手で）'], ['model.glb', 'GLB（3D 表示用）'], ['foundation.stl', 'STL：基礎'],
-    ['floor1.stl', 'STL：1階（床・内壁）'], ['exterior1.stl', 'STL：1階の外壁'], ['roof.stl', 'STL：屋根（屋根板・ポーチの天井）'], ['roof_ext.stl', 'STL：屋根の外壁']];
+    ['floor1.stl', 'STL：1階（床・内壁）'], ['exterior1.stl', 'STL：1階の外壁']];
+  if (state.multi) {   // 2階建て
+    files.push(['roof_lower.stl', 'STL：下屋の屋根'], ['roof_lower_ext.stl', 'STL：下屋の外壁'], ['floor2.stl', 'STL：2階（床・内壁）'],
+      ['exterior2.stl', 'STL：2階の外壁'], ['roof.stl', 'STL：大屋根'], ['roof_ext.stl', 'STL：大屋根の外壁']);
+  } else {
+    files.push(['roof.stl', 'STL：屋根（屋根板・ポーチの天井）'], ['roof_ext.stl', 'STL：屋根の外壁']);
+  }
   $('#downloads').innerHTML = files.map(([f, label]) => `<li><a href="${api('/api/model/{a}/' + f)}" download>${label}</a></li>`).join('');
 }
 
@@ -370,7 +387,7 @@ $('#plan').addEventListener('pointerup', async () => {
   setLassoMode(false);
   lasso.polygon = lasso.pts.map(([x, y]) => toMm(svg, x, y));
   try {
-    const res = await call('POST', '/api/lasso/{a}/select', { polygon: lasso.polygon });
+    const res = await call('POST', '/api/lasso/{a}/select', { polygon: lasso.polygon, level: state.multi ? $('#plan-level').value : null });
     showPicked(res.selection);
   } catch (e) { setStatus('囲みを読めませんでした：' + e.message, 'err'); clearLasso(); }
 });
@@ -404,7 +421,8 @@ async function askLasso(extra = '') {
   $('#lasso-ask').disabled = true;
   setStatus('Claude が考えています（30秒〜数分）…', 'busy');
   try {
-    const res = await call('POST', '/api/lasso/{a}/ask', { polygon: lasso.polygon, text: text + extra, connection });
+    const res = await call('POST', '/api/lasso/{a}/ask', { polygon: lasso.polygon, text: text + extra, connection,
+      level: state.multi ? $('#plan-level').value : null });
     renderLassoResult(res);
     setStatus(`Claude の答えが届きました${res.cost_usd ? `（費用の目安 $${Number(res.cost_usd).toFixed(2)}）` : ''}`, 'ok');
   } catch (e) { setStatus('頼めませんでした：' + e.message, 'err'); }
@@ -444,12 +462,25 @@ function renderLassoResult(res) {
 }
 
 // ---------------------------------------------------------------- 全体
+async function loadPlan() {   // 平面図（2階建ては選んだ階）
+  const q = state.multi ? `?level=${encodeURIComponent($('#plan-level').value)}` : '';
+  $('#plan').innerHTML = await call('GET', '/api/plan/{a}' + q);
+}
+$('#plan-level').addEventListener('change', async () => {
+  clearLasso();
+  try { await loadPlan(); } catch (e) { setStatus('平面図を読めませんでした：' + e.message, 'err'); }
+});
+
 async function refresh() {
   const data = await call('GET', '/api/building/{a}');
   state.building = data.building;
+  state.multi = (data.building.levels || []).length > 1;          // 2階建てか
+  renderPartToggles();
+  $('#plan-level').hidden = !state.multi;
+  if (!state.multi) $('#plan-level').value = '1F';
   renderTables(data.building);
   await renderHistory(data.override_results);
-  $('#plan').innerHTML = await call('GET', '/api/plan/{a}');
+  await loadPlan();
   await renderChecks(); renderDownloads(); await renderFindings(); await loadModel();
 }
 

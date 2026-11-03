@@ -92,10 +92,11 @@ async def _run_api(ctx: ToolContext, prompt: str, conf: dict, client=None) -> tu
 
 
 async def run_lasso(alias: str, connection: str, points: list[list[float]], text: str, *,
-                    client=None, ctx: ToolContext | None = None) -> dict:
-    """囲み（平面の mm）と一言から、直す案と質問を返す。保存はしない（人が承認したら approve で記録する）。"""
+                    client=None, ctx: ToolContext | None = None, level: str | None = None) -> dict:
+    """囲み（平面の mm）と一言から、直す案と質問を返す。保存はしない（人が承認したら approve で記録する）。
+    level：2階建てで表示している階（その階の部材だけを選ぶ）。"""
     ctx = ctx or ToolContext.load(alias)
-    selection = geo.select(ctx.building, points)
+    selection = geo.select(ctx.building, points, level)
     rows = geo.describe(ctx.building, selection)
     out = {"connection": connection, "selection": rows, "message": "", "proposals": [], "questions": [], "cost_usd": None}
     if connection == "off" or not rows:

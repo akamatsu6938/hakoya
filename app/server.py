@@ -34,7 +34,9 @@ STATIC = Path(__file__).resolve().parent / "static"
 MODEL_FILES = {"model.glb": "model/gltf-binary", "model.3mf": "application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
                "model_bambu.3mf": "application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
                "foundation.stl": "model/stl", "floor1.stl": "model/stl", "exterior1.stl": "model/stl",
-               "roof.stl": "model/stl", "roof_ext.stl": "model/stl", "checks.json": "application/json"}
+               "roof.stl": "model/stl", "roof_ext.stl": "model/stl", "checks.json": "application/json",
+               # 2階建て（core/builder_multi.py）の部品
+               "roof_lower.stl": "model/stl", "roof_lower_ext.stl": "model/stl", "floor2.stl": "model/stl", "exterior2.stl": "model/stl"}
 
 app = FastAPI(title="HAKOYA")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -108,10 +110,13 @@ def building(alias: str):
 
 
 @app.get("/api/plan/{alias}")
-def plan(alias: str):
+def plan(alias: str, level: str | None = None):
+    """平面図。2階建ては level（1F・2F）で階を選ぶ（省くと1階）。"""
     _check_alias(alias)
     b, _ = _effective(alias)
-    svg = render_svg(b, alias)
+    if level is not None and level not in [lv["name"] for lv in b.get("levels", [])]:
+        raise HTTPException(400, "その階はありません")
+    svg = render_svg(b, alias, level)
     assert_clean(svg, "平面図")
     return Response(svg, media_type="image/svg+xml; charset=utf-8")
 
@@ -266,6 +271,7 @@ class LassoIn(BaseModel):
     polygon: list[list[float]]           # 囲み（平面の mm。平面図の画面が座標を直して送る）
     text: str = ""
     connection: str = "off"
+    level: str | None = None             # 2階建て：表示している階（その階の部材だけを選ぶ）
 
 
 @app.post("/api/lasso/{alias}/select")
@@ -275,7 +281,7 @@ def lasso_select(alias: str, body: LassoIn):
     from core import lasso as geo
     b, _ = _effective(alias)
     try:
-        sel = geo.select(b, body.polygon)
+        sel = geo.select(b, body.polygon, body.level)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _safe_json({"selection": geo.describe(b, sel)})
@@ -295,7 +301,7 @@ def lasso_ask(alias: str, body: LassoIn):
         raise HTTPException(409, "この物件はいま検品中です。検品が終わってから頼んでください")
     from core.ai.lasso import run_lasso
     try:
-        res = asyncio.run(run_lasso(alias, body.connection, body.polygon, body.text))
+        res = asyncio.run(run_lasso(alias, body.connection, body.polygon, body.text, level=body.level))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:

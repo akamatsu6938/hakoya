@@ -27,18 +27,21 @@ def lasso_polygon(points: list[list[float]]) -> Polygon:
     return poly
 
 
-def select(building: dict, points: list[list[float]]) -> dict:
-    """囲みの中の部材の番号。{"walls": [...], "openings": [...]}"""
+def select(building: dict, points: list[list[float]], level: str | None = None) -> dict:
+    """囲みの中の部材の番号。{"walls": [...], "openings": [...]}
+    level を渡すと、その階の部材だけ（2階建てで、同じ位置の1階と2階の壁が両方選ばれないように）。"""
     poly = lasso_polygon(points)
     walls = []
-    for w in building.get("walls", []):
+    candidates = [w for w in building.get("walls", []) if level is None or w.get("level") == level]
+    for w in candidates:
         line = LineString([w["start"], w["end"]])
         if line.length <= 0:
             continue
         inside = line.intersection(poly).length
         if inside >= WALL_MIN_INSIDE_RATIO * line.length or inside >= WALL_MIN_INSIDE_MM:
             walls.append(w["id"])
-    openings = [o["id"] for o in building.get("openings", []) if poly.contains(Point(o["center"]))]
+    level_walls = {w["id"] for w in candidates}
+    openings = [o["id"] for o in building.get("openings", []) if o["wall"] in level_walls and poly.contains(Point(o["center"]))]
     return {"walls": walls, "openings": openings}
 
 
