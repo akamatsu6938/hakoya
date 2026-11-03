@@ -37,6 +37,9 @@ th, td { border-bottom: 1px solid var(--line); padding: 4px 4px; text-align: lef
 th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
 td input[type=number] { width: 72px; }
 #roofs td input[type=number] { width: 52px; }   /* 屋根の表は軒の出が4列あるので詰める */
+#roofs td select { font-size: 12px; }
+#roofs td input[data-field="eave_tip_mm"] { width: 64px; }
+#roof-eaves td input[type=number] { width: 60px; }
 tr.changed td { background: var(--edit); }
 tr.approve td { background: var(--edit); }
 tr.approve input[type=text] { width: 100%; }

@@ -13,6 +13,8 @@ field に "_delete" を指定すると、その部材を取り除く（to は使
 階の高さは target "level:1F"・"level:2F"、field "fl_mm"（床の高さ、GL から）・"ceiling_mm"（天井の高さ、床から）。
 床の高さを変えると、その階と上の階の絶対の高さ（壁・窓・部屋・ポーチの天井・屋根）を同じだけずらす。
 基礎・外壁の下端・ポーチはそのまま（家が基礎の上で上下する。(推定) 2026-11-03、作者に確かめる）。
+屋根の形は target "Y1" など、field "pitch"（勾配。10 に対する値）・"low_side"（低い側。片流れだけ）・
+"eave_tip_mm"（軒先の高さ＝屋根の上の面のいちばん低い所）。当てるときにコードが面の式を計算し直す。
 """
 from __future__ import annotations
 
@@ -34,6 +36,10 @@ LEVEL_FIELDS = ("fl_mm", "ceiling_mm")
 CEILING_RANGE_MM = (1800.0, 4000.0)         # 天井の高さ（床から）
 FL_MAX_MM = 3000.0                          # 1階の床の高さ（GL から）の上限
 LEVEL_JA = {"1F": "1階", "2F": "2階"}
+ROOF_GEOM_FIELDS = ("pitch", "low_side", "eave_tip_mm")   # 屋根の形（当てるときに面の式を計算し直す）
+PITCH_RANGE = (0.5, 12.0)                                 # 勾配（10 に対する値）
+SIDES = ("S", "N", "E", "W")
+REACH_ROOF_MM = 150.0                                     # 屋根の下の面からこれ以内に上端がある壁は「屋根まで届いている」
 
 
 def overrides_path(alias: str) -> Path:
@@ -63,8 +69,14 @@ def _find(building: dict, target: str) -> dict | None:
     return next((x for x in building.get(coll, []) if x.get("id") == target), None)
 
 
+def _is_roof(obj: dict) -> bool:
+    return isinstance(obj, dict) and isinstance(obj.get("top_plane"), dict) and isinstance(obj.get("top_z_range_mm"), list)
+
+
 def has_field(obj: dict, field: str) -> bool:
-    """項目があるか。"eave_mm.S" のような1段の入れ子も見る。"""
+    """項目があるか。"eave_mm.S" のような1段の入れ子も見る。屋根の形（勾配・低い側・軒先の高さ）は計算で出す。"""
+    if field in ROOF_GEOM_FIELDS and _is_roof(obj):
+        return True                     # 向きを変えられない屋根（切妻・寄棟など）は、当てるときに理由つきで断る
     head, _, tail = field.partition(".")
     if not tail:
         return field in obj
@@ -72,6 +84,12 @@ def has_field(obj: dict, field: str) -> bool:
 
 
 def get_field(obj: dict, field: str):
+    if field in ROOF_GEOM_FIELDS and _is_roof(obj):
+        if field == "pitch":
+            return float(obj["pitch"][0]) if isinstance(obj.get("pitch"), list) else obj.get("pitch")
+        if field == "eave_tip_mm":
+            return float(obj["top_z_range_mm"][0])
+        return obj.get("low_side")
     head, _, tail = field.partition(".")
     return obj[head][tail] if tail else obj[field]
 
@@ -102,6 +120,18 @@ def check_value(field: str, to, target: str = "") -> None:
                 raise ValueError(f"天井の高さは {lo:.0f}〜{hi:.0f}mm（床から）で入れてください")
         elif not 0 < float(to) <= FL_MAX_MM * 3:
             raise ValueError("床の高さは GL からの mm で入れてください")
+
+
+def check_roof_value(field: str, to) -> None:
+    """屋根の形（勾配・低い側・軒先の高さ）の値の範囲。面の式を持つ屋根に当てるときだけ使う。"""
+    if field == "pitch":
+        lo, hi = PITCH_RANGE
+        if not isinstance(to, (int, float)) or isinstance(to, bool) or not lo <= float(to) <= hi:
+            raise ValueError(f"勾配は 10 に対する値で、{lo}〜{hi} の数値で入れてください（例：1.5 は 1.5/10）")
+    if field == "low_side" and to not in SIDES:
+        raise ValueError("低い側は 南・北・東・西（S・N・E・W）のどれかです")
+    if field == "eave_tip_mm" and (not isinstance(to, (int, float)) or isinstance(to, bool) or not 500 <= float(to) <= 20000):
+        raise ValueError("軒先の高さは GL からの mm（500〜20000）で入れてください")
 
 
 def _num(v: float):
@@ -209,6 +239,137 @@ def _roof_bottom_min(roof: dict) -> float | None:
     return bottom_min(roof)
 
 
+def _plane_at(surface, x: float, y: float) -> float:
+    if isinstance(surface, dict):
+        return float(surface["a"]) * x + float(surface["b"]) * y + float(surface["c"])
+    return surface.z(x, y)
+
+
+def _all_planes(roof: dict) -> list[dict]:
+    """屋根の上の面の式（面が複数なら面ごと）。"""
+    pl = roof.get("planes") or []
+    return [p["top_plane"] for p in pl] if len(pl) > 1 else [roof["top_plane"]]
+
+
+def _thickness_perp(roof: dict) -> float:
+    t = roof.get("thickness_mm")
+    if isinstance(t, (int, float)) and t > 0:
+        return float(t)
+    tp, bp = roof["top_plane"], roof.get("bottom_plane") or roof["top_plane"]
+    s = (tp["a"] ** 2 + tp["b"] ** 2) ** 0.5
+    return (float(tp["c"]) - float(bp["c"])) / (1 + s * s) ** 0.5 or 100.0
+
+
+def _with_bottom(top: dict, t_perp: float) -> tuple[dict, dict]:
+    s = (top["a"] ** 2 + top["b"] ** 2) ** 0.5
+    top = {"a": round(top["a"], 6), "b": round(top["b"], 6), "c": round(top["c"], 2)}
+    return top, {"a": top["a"], "b": top["b"], "c": round(top["c"] - t_perp * (1 + s * s) ** 0.5, 2)}
+
+
+def _footprint_pts(roof: dict) -> list[tuple[float, float]]:
+    pts = [tuple(map(float, q)) for q in roof.get("footprint") or []]
+    for p in roof.get("planes") or []:
+        pts += [tuple(map(float, q)) for q in p.get("footprint") or []]
+    return pts
+
+
+def _side_of(a: float, b: float) -> str | None:
+    """下る向き (-a, -b) → 低い側（東西南北。斜めは None）。"""
+    import math
+    ang = math.degrees(math.atan2(-b, -a)) % 360
+    for name, center in (("E", 0), ("N", 90), ("W", 180), ("S", 270)):
+        if min(abs(ang - center), 360 - abs(ang - center)) <= 10:
+            return name
+    return None
+
+
+def _reshape_roof(roof: dict, field: str, to) -> None:
+    """屋根の形を直す（面の式・高さの範囲・名札を計算し直す。入れ子は作り直す）。外れたら日本語の ValueError。"""
+    t_perp = _thickness_perp(roof)
+    z_low, z_high = float(roof["top_z_range_mm"][0]), float(roof["top_z_range_mm"][1])
+    planes = roof.get("planes") or []
+    multi = len(planes) > 1
+    if field == "eave_tip_mm":
+        _shift_roof(roof, float(to) - z_low)
+        return
+    if field == "pitch":
+        slopes = [(p["a"] ** 2 + p["b"] ** 2) ** 0.5 for p in _all_planes(roof)]
+        if min(slopes) < 1e-4:
+            raise ValueError("平らな面がある屋根は、表では勾配を変えられません")
+        if max(slopes) - min(slopes) > 0.005:
+            raise ValueError("面ごとに勾配が違う屋根は、表では勾配を変えられません（囲んで直すか、glb を直してください）")
+        k = float(to) / 10.0 / slopes[0]
+        def scaled(tp: dict) -> dict:    # 軒先（いちばん低い所）の高さを固定して、高さを比例で伸ばす（棟・隅棟の平面の位置は変わらない）
+            return {"a": tp["a"] * k, "b": tp["b"] * k, "c": z_low + k * (float(tp["c"]) - z_low)}
+        roof["top_plane"], roof["bottom_plane"] = _with_bottom(scaled(roof["top_plane"]), t_perp)
+        if multi:
+            new = []
+            for pl in planes:
+                top, bottom = _with_bottom(scaled(pl["top_plane"]), t_perp)
+                new.append({**pl, "top_plane": top, "bottom_plane": bottom, "pitch": [round(float(to), 2), 10]})
+            roof["planes"] = new
+        roof["top_z_range_mm"] = [_num(z_low), _num(round(z_low + k * (z_high - z_low)))]
+        roof["pitch"] = [round(float(to), 2), 10]
+        roof["slope"] = round(float(to) / 10.0, 4)
+        return
+    if field == "low_side":
+        if multi:
+            raise ValueError("面が複数の屋根（切妻・寄棟など）は、表では向きを変えられません")
+        s = (roof["top_plane"]["a"] ** 2 + roof["top_plane"]["b"] ** 2) ** 0.5
+        if s < 1e-4:
+            raise ValueError("平らな屋根には低い側がありません")
+        xs = [x for x, _ in _footprint_pts(roof)]
+        ys = [y for _, y in _footprint_pts(roof)]
+        x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+        top = {"S": {"a": 0.0, "b": s, "c": z_low - s * y0}, "N": {"a": 0.0, "b": -s, "c": z_low + s * y1},
+               "W": {"a": s, "b": 0.0, "c": z_low - s * x0}, "E": {"a": -s, "b": 0.0, "c": z_low + s * x1}}[to]
+        roof["top_plane"], roof["bottom_plane"] = _with_bottom(top, t_perp)
+        zs = [_plane_at(roof["top_plane"], x, y) for x, y in _footprint_pts(roof)]
+        roof["top_z_range_mm"] = [_num(round(min(zs))), _num(round(max(zs)))]
+        roof["low_side"] = to
+        roof.pop("low_side_assumption", None)
+        roof.pop("eave_with_gutter_mm", None)              # 樋の位置（どの辺にあったか）は向きを変えると合わなくなる
+        roof.pop("gutter_note", None)
+
+
+def _follow_roof(building: dict, roof: dict, old_bottom, new_bottom) -> None:
+    """屋根まで届いていた壁の上端を、屋根の下の面の動きに合わせる（数値の高さの外壁・単独の壁、屋根までの壁の glb の上端）。"""
+    from shapely.geometry import Point, Polygon
+    fp = roof.get("footprint")
+    area = Polygon(fp).buffer(300) if fp else None
+    for w in building.get("walls", []):
+        if w.get("kind") not in ("exterior", "standalone") or "start" not in w:
+            continue
+        if roof.get("level") and w.get("level") and w["level"] != roof["level"]:
+            continue
+        mx, my = (float(w["start"][0]) + float(w["end"][0])) / 2, (float(w["start"][1]) + float(w["end"][1])) / 2
+        if area is not None and not area.contains(Point(mx, my)):
+            continue
+        ob, nb = _plane_at(old_bottom, mx, my), _plane_at(new_bottom, mx, my)
+        h = w.get("height")
+        if isinstance(h, (int, float)) and not isinstance(h, bool) and float(h) >= ob - REACH_ROOF_MM:
+            w["height"] = _num(round(float(h) + nb - ob))
+        if h == "to_roof" and isinstance(w.get("top_glb_mm"), (int, float)):
+            w["top_glb_mm"] = _num(round(float(w["top_glb_mm"]) + nb - ob))
+
+
+def _apply_roof_geom(b: dict, obj: dict, ov: dict) -> dict:
+    """屋根の形の修正を当てる（屋根とその写しの両方。屋根まで届いていた壁もついてくる）。"""
+    from core.roof_geom import surfaces
+    check_roof_value(ov["field"], ov["to"])
+    before = get_field(obj, ov["field"])
+    old_bottom = surfaces(obj)[0]
+    twin = _roof_twin(b, ov["target"])
+    for r in [obj] + ([twin] if twin is not None and twin is not obj else []):
+        _reshape_roof(r, ov["field"], ov["to"])
+    _follow_roof(b, obj, old_bottom, surfaces(obj)[0])
+    status = "applied" if ("from" not in ov or _same(before, ov["from"])) else "applied_changed"
+    r = {"id": ov["id"], "status": status}
+    if status == "applied_changed":
+        r["reason"] = f"自動の値が前回（{ov['from']}）から {before} に変わっていた"
+    return r
+
+
 def level_problems(building: dict, rules: dict) -> dict[tuple, str]:
     """階の高さが組み立てられる範囲か、家全体を見て調べる。{(階, 種類): 日本語の説明}。
     修正を足すときは、足す前になかった問題だけを断る（もともとある食い違いで直せなくならないように）。"""
@@ -301,8 +462,8 @@ def apply(building: dict, items: list[dict]) -> tuple[dict, list[dict]]:
     b = copy.deepcopy(building)
     results = []
     for ov in items:
-        if ov.get("target", "").startswith(LEVEL_PREFIX):
-            # 階の高さはたくさんの値をずらすので、途中で失敗しても家が半端に残らないように写しで当てる
+        if ov.get("target", "").startswith(LEVEL_PREFIX) or ov.get("field") in ROOF_GEOM_FIELDS:
+            # 階の高さ・屋根の形はたくさんの値を計算し直すので、途中で失敗しても家が半端に残らないように写しで当てる
             trial = copy.deepcopy(b)
             try:
                 r = _apply_one(trial, ov)
@@ -335,6 +496,8 @@ def _apply_one(b: dict, ov: dict) -> dict:
         return {"id": ov["id"], "status": "applied"}
     if not has_field(obj, ov["field"]):
         return {"id": ov["id"], "status": "failed", "reason": f"{ov['target']} に {ov['field']} という項目がない"}
+    if ov["field"] in ROOF_GEOM_FIELDS and _is_roof(obj):
+        return _apply_roof_geom(b, obj, ov)
     if ov["target"].startswith(LEVEL_PREFIX):
         if ov["field"] not in LEVEL_FIELDS:
             return {"id": ov["id"], "status": "failed", "reason": f"階の {ov['field']} は直せない（直せるのは床の高さと天井の高さ）"}
@@ -376,6 +539,8 @@ def add(alias: str, building: dict, target: str, field: str, to, value_source: s
         raise KeyError(f"階の {field} は直せません（直せるのは床の高さ fl_mm と天井の高さ ceiling_mm）。")
     if field != DELETE:
         check_value(field, to, target)
+    if field in ROOF_GEOM_FIELDS and _is_roof(obj):
+        check_roof_value(field, to)
     n = max([int(x["id"][2:]) for x in items if x["id"][2:].isdigit()] + [0]) + 1
     ov = {"id": f"OV{n}", "target": target, "field": field,
           "from": None if field == DELETE else get_field(obj, field), "to": None if field == DELETE else to,
@@ -384,7 +549,7 @@ def add(alias: str, building: dict, target: str, field: str, to, value_source: s
     trial, results = apply(building, items + [ov])
     if results[-1]["status"] == "failed":
         raise ValueError(results[-1].get("reason", "当てられない修正です"))
-    if target.startswith(LEVEL_PREFIX):
+    if target.startswith(LEVEL_PREFIX) or (field in ROOF_GEOM_FIELDS and _is_roof(obj)):
         rules = rules or _company_rules(building)
         before = level_problems(current, rules)
         new = [msg for key, msg in level_problems(trial, rules).items() if key not in before]

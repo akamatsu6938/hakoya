@@ -106,17 +106,21 @@ function editableRow(cells, onApprove) {
   const inputs = [];
   for (const c of cells) {
     const td = document.createElement('td');
-    if (c.field) {
-      const inp = document.createElement('input'); inp.type = 'number'; inp.step = '1'; inp.value = num(c.value);
-      inp.dataset.field = c.field; inp.dataset.orig = num(c.value); inputs.push(inp); td.appendChild(inp);
+    if (c.field && c.options) {                     // 選ぶ欄（例：屋根の低い側）
+      const sel = document.createElement('select');
+      sel.innerHTML = c.options.map(([v, label]) => `<option value="${v}">${label}</option>`).join('');
+      sel.value = c.value; sel.dataset.field = c.field; sel.dataset.orig = c.value; inputs.push(sel); td.appendChild(sel);
+    } else if (c.field) {
+      const inp = document.createElement('input'); inp.type = 'number'; inp.step = c.step || '1'; inp.value = c.step ? c.value : num(c.value);
+      inp.dataset.field = c.field; inp.dataset.orig = inp.value; inputs.push(inp); td.appendChild(inp);
     } else td.textContent = c.text;
     tr.appendChild(td);
   }
   const approve = document.createElement('tr'); approve.className = 'approve'; approve.hidden = true;
   approve.innerHTML = `<td colspan="${cells.length}"><div class="approve-box"><input type="text" placeholder="直す理由（例：立面図の窓の上端に合わせる）"> <button class="primary">承認</button> <button>やめる</button></div></td>`;
   const [reason, ok, cancel] = approve.querySelectorAll('input, button');
-  const changed = () => inputs.filter((i) => Number(i.value) !== Number(i.dataset.orig));
-  inputs.forEach((i) => i.addEventListener('input', () => { const ch = changed().length > 0; tr.classList.toggle('changed', ch); approve.hidden = !ch; }));
+  const changed = () => inputs.filter((i) => (i.tagName === 'SELECT' ? i.value !== i.dataset.orig : Number(i.value) !== Number(i.dataset.orig)));
+  inputs.forEach((i) => i.addEventListener(i.tagName === 'SELECT' ? 'change' : 'input', () => { const ch = changed().length > 0; tr.classList.toggle('changed', ch); approve.hidden = !ch; }));
   cancel.addEventListener('click', () => { inputs.forEach((i) => { i.value = i.dataset.orig; }); tr.classList.remove('changed'); approve.hidden = true; });
   ok.addEventListener('click', () => onApprove(changed(), reason.value));
   return [tr, approve];
@@ -125,7 +129,7 @@ function editableRow(cells, onApprove) {
 async function approveChanges(target, inputs, reason) {
   try {
     setStatus('修正を記録して、模型を組み直しています…', 'busy');
-    for (const i of inputs) await call('POST', '/api/overrides/{a}', { target, field: i.dataset.field, to: Number(i.value), reason });
+    for (const i of inputs) await call('POST', '/api/overrides/{a}', { target, field: i.dataset.field, to: i.tagName === 'SELECT' ? i.value : Number(i.value), reason });
     await refresh(); setStatus(`${target} を直しました（修正の履歴から取り消せます）`, 'ok');
   } catch (e) { setStatus('直せませんでした：' + e.message, 'err'); }
 }
@@ -190,16 +194,20 @@ function renderTables(b) {
     rows[0].lastChild.appendChild(del);
     rows.forEach((r) => wt.appendChild(r));
   }
-  // 屋根：番号・種類・勾配・低い側は表示だけ。軒の出（西・東・南・北）を直せる
-  const rt = $('#roofs');
-  const r2 = (h) => h.replace(/<th>/g, '<th rowspan="2">');   // 見出しは2段（軒の出の下に西・東・南・北）
-  rt.innerHTML = `<tr>${r2(`<th>番号</th>${lvHead}<th>種類</th><th>勾配</th><th>低い側</th>`)}<th colspan="4">軒の出（mm）</th></tr>`
-    + `<tr>${[...'WESN'].map((s) => `<th>${SIDE[s]}</th>`).join('')}</tr>`;
+  // 屋根：勾配（10 に対する値）・低い側（片流れだけ）・軒先の高さ・軒の出（西・東・南・北）を直せる。面の式はサーバーが計算し直す
+  // 表は2つ：屋根の形（勾配・低い側・軒先の高さ）と軒の出（西・東・南・北）。1つにすると右の欄からはみ出すため
+  const rt = $('#roofs'), et = $('#roof-eaves');
+  rt.innerHTML = `<tr><th>番号</th>${lvHead}<th>種類</th><th>勾配 /10</th><th>低い側</th><th>軒先の高さ</th></tr>`;
+  et.innerHTML = `<tr><th>番号</th>${[...'WESN'].map((s) => `<th>${SIDE[s]}</th>`).join('')}</tr>`;
   for (const r of b.roofs || []) {
+    const shed = !(r.planes && r.planes.length > 1) && r.low_side && SIDE[r.low_side];
+    const pitch = r.top_plane && r.pitch ? { field: 'pitch', value: r.pitch[0], step: '0.1' } : { text: (r.pitch || []).join('/') };
+    const low = shed ? { field: 'low_side', value: r.low_side, options: [...'SNEW'].map((s) => [s, SIDE[s]]) } : { text: '' };
+    const tip = r.top_z_range_mm ? { field: 'eave_tip_mm', value: r.top_z_range_mm[0] } : { text: '' };
+    editableRow([{ text: r.id }, ...lvCell(r), { text: roofKind(r) }, pitch, low, tip],
+      (inputs, reason) => approveChanges(r.id, inputs, reason)).forEach((x) => rt.appendChild(x));
     const eaves = [...'WESN'].map((s) => (r.eave_mm && s in r.eave_mm ? { field: `eave_mm.${s}`, value: r.eave_mm[s] } : { text: '' }));
-    const rows = editableRow([{ text: r.id }, ...lvCell(r), { text: roofKind(r) }, { text: (r.pitch || []).join('/') },
-      { text: SIDE[r.low_side] || r.low_side || '' }, ...eaves], (inputs, reason) => approveChanges(r.id, inputs, reason));
-    rows.forEach((x) => rt.appendChild(x));
+    editableRow([{ text: r.id }, ...eaves], (inputs, reason) => approveChanges(r.id, inputs, reason)).forEach((x) => et.appendChild(x));
   }
 }
 
@@ -257,7 +265,7 @@ const VIEW_OF = { S: 'S', N: 'N', E: 'E', W: 'W', plan: 'plan', plan2: 'plan2', 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const FIELD = { thickness_mm: '厚み', width_mm: '幅', offset_mm: '壁の端からの位置', sill_fl_mm: '下端 FL+', head_fl_mm: '上端 FL+',
-  fl_mm: '床の高さ', ceiling_mm: '天井の高さ' };
+  fl_mm: '床の高さ', ceiling_mm: '天井の高さ', pitch: '勾配（10 に対して）', low_side: '低い側', eave_tip_mm: '軒先の高さ' };
 const LEVEL_JA = { '1F': '1階', '2F': '2階' };
 for (const s of 'WESN') FIELD[`eave_mm.${s}`] = `軒の出（${SIDE[s]}）`;
 
