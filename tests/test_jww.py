@@ -189,3 +189,22 @@ def test_real_b_upper_floor_aligns_with_hint():
     assert rows["plan"]["aligned"] and rows["plan_2f"]["aligned"]
     assert rows["plan_2f"]["matched"] == rows["plan_2f"]["notes"] == 4 and not rows["plan_2f"]["mismatches"]
     assert rows["plan"]["same"] == rows["plan"]["matched"] >= 10
+
+
+@pytest.mark.realdata
+def test_real_a_drawing_region_and_jww_value_source():
+    """検品の道具：平面の図面の画像（模型の図と同じ大きさ）と寸法・注記の番号。注記の番号で直す案の数値をコードが読む。"""
+    from PIL import Image
+    from core.ai.tools import ToolContext, call_tool
+    ctx = ToolContext.load("物件A")
+    r = call_tool(ctx, "get_drawing_region", {"view": "plan"})
+    assert r["available"] and len(r["dims"]) > 20 and len(r["notes"]) == 11
+    model_png = ctx.inspect_dir / "plan_model.png"
+    assert Image.open(r["image_path"]).size == Image.open(model_png).size          # 模型の図と同じ大きさ・縮尺
+    note = next(n for n in r["notes"] if n["head_fl_mm"] == 2000)
+    p = call_tool(ctx, "propose_override", {"target": "O6", "field": "head_fl_mm", "value_source": f"jww:plan:{note['id']}",
+                                            "reason": "平面図の注記に合わせる（試験）"})
+    assert "error" in p and "すでに" in p["error"]                                    # O6 はもう FL+2000（同じ値なので案にならない）
+    q = call_tool(ctx, "propose_override", {"target": "O6", "field": "sill_fl_mm", "value_source": "jww:plan:T99999", "reason": "x"})
+    assert "見つかりません" in q["error"]
+    assert call_tool(ctx, "get_drawing_region", {"view": "S"})["available"] is False   # 立面はまだ

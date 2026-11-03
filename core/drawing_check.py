@@ -101,3 +101,114 @@ def findings(alias: str, b: dict) -> list[dict]:
                                    f"近く（{MATCH_MAX_MM / 1000:.1f}m 以内）に模型の開口がない。図面だけにある窓か、注記が離れて書かれているか（要確認）",
                         "targets": [], "evidence": [f"jww:{row['kind']}:{n['note_id']}"], "source": "code"})
     return out
+
+
+# ---------------------------------------------------------------- 図面の画像（検品・囲んで直すの Claude に見せる）
+
+VIEW_KIND = {"plan": "plan", "plan2": "plan_2f"}
+_CACHE: dict[tuple, tuple] = {}
+
+
+def _aligned(alias: str, b: dict, kind: str):
+    """（図面, 変換）。位置合わせは数秒かかるので、building・修正・図面の更新時刻が同じなら使い回す。"""
+    from core import overrides as ov
+    from core.jww import align_property, read_property
+    from core.paths import out_dir, property_files
+    f = property_files(alias).jww.get(kind)
+    stamp = tuple(p.stat().st_mtime if p is not None and p.exists() else 0
+                  for p in (out_dir(alias) / "building.json", ov.overrides_path(alias), f))
+    key = (alias, kind)
+    hit = _CACHE.get(key)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    d = read_property(alias, kind)
+    al = align_property(alias, b).get(kind) if d is not None else None
+    _CACHE[key] = (stamp, (d, al))
+    return d, al
+
+
+def item_value(alias: str, b: dict, kind: str, item_id: str) -> float | None:
+    """図面の寸法（D番号）か注記（T番号）の数値。注記は FL+ の値（窓の上端）、なければ文字の中の数値1つ。"""
+    if kind not in VIEW_KIND.values():
+        return None
+    d, _ = _aligned(alias, b, kind)
+    if d is None:
+        return None
+    for x in d.dims:
+        if x["id"] == item_id:
+            return float(x["value"])
+    for t in d.texts:
+        if t["id"] == item_id:
+            m = NOTE_RE.search(t["text"]) or re.search(r"FL\s*[+＋]\s*(\d+)", t["text"])
+            if m:
+                return float(m.group(m.lastindex))
+            nums = re.findall(r"\d+(?:\.\d+)?", t["text"].replace(",", ""))
+            return float(nums[0]) if len(nums) == 1 else None
+    return None
+
+
+def drawing_view(alias: str, b: dict, view: str, canvas: dict, dst, bbox_px: list[int] | None = None) -> dict:
+    """面（plan / plan2）の図面の画像を、検品の模型の図と同じ縮尺・同じ位置で描き、寸法と注記の一覧を返す。
+    描くのは図面の本体の線と、寸法（D番号）と窓の注記（T番号。品番と FL+）だけ（表題欄は読み捨て済み）。"""
+    from PIL import Image, ImageDraw
+
+    from core.jww import to_model
+    from core.render import _font
+    kind = VIEW_KIND.get(view)
+    if kind is None:
+        return {"available": False, "note": "立面・断面の図面はまだ読めません（平面図だけ）。立面の判断は glb と模型の見比べで"}
+    d, al = _aligned(alias, b, kind)
+    if d is None:
+        return {"available": False, "note": "この面の平面図（jww）が登録されていません"}
+    if al is None:
+        return {"available": False, "note": "平面図を模型に位置合わせできなかったので、図面は使えません（推測で合わせない）"}
+    lo, hi, k = canvas["uv_lo"], canvas["uv_hi"], float(canvas["px_per_mm"])
+    w, h = canvas["size_px"]
+    margin = (w - (hi[0] - lo[0]) * k) / 2
+
+    def px(x: float, y: float) -> tuple[float, float]:
+        mx, my = to_model(al, x, y)
+        return ((mx - lo[0]) * k + margin, (hi[1] - my) * k + margin)
+
+    img = Image.new("RGB", (int(w), int(h)), "white")
+    dr = ImageDraw.Draw(img)
+    for x0, y0, x1, y1 in d.lines:
+        dr.line([px(x0, y0), px(x1, y1)], fill=(60, 60, 60), width=1)
+    font = _font(11)
+    region = bbox_px
+    title = f"{alias}　図面（jww の平面図。表題欄は除く）　模型の図と同じ縮尺・位置"
+    dr.text((10, 8), title, fill=(0, 0, 0), font=_font(14))
+    placed = [dr.textbbox((10, 8), title, font=_font(14))]
+
+    def label(x: float, y: float, text: str, color) -> None:
+        """文字を画像の中に収め、ほかの文字と重ならない所（下へずらす）に置く。"""
+        bw, bh = dr.textbbox((0, 0), text, font=font)[2:]
+        x = min(max(x, 2), w - bw - 2)
+        y = min(max(y, 2), h - bh - 2)
+        for _ in range(12):
+            box = (x, y, x + bw, y + bh)
+            if not any(box[0] < q[2] and q[0] < box[2] and box[1] < q[3] and q[1] < box[3] for q in placed):
+                break
+            y = y + bh + 1 if y + 2 * bh + 3 < h else y - bh - 1
+        placed.append((x, y, x + bw, y + bh))
+        dr.text((x, y), text, fill=color, font=font)
+
+    dims, notes = [], []
+    for n in window_notes(d):                      # 注記を先に置く（窓の上端の根拠になるので見やすく）
+        p = px(n["x"], n["y"])
+        if region and not (region[0] <= p[0] <= region[2] and region[1] <= p[1] <= region[3]):
+            continue
+        label(p[0] + 2, p[1] - 12, f"{n['note_id']} {n['code']} FL+{n['head_fl_mm']}", (200, 0, 0))
+        notes.append({"id": n["note_id"], "code": n["code"], "head_fl_mm": n["head_fl_mm"], "at_px": [round(p[0]), round(p[1])]})
+    for x in d.dims:
+        a, c = px(x["x0"], x["y0"]), px(x["x1"], x["y1"])
+        mid = ((a[0] + c[0]) / 2, (a[1] + c[1]) / 2)
+        if region and not (region[0] <= mid[0] <= region[2] and region[1] <= mid[1] <= region[3]):
+            continue
+        label(mid[0] + 2, mid[1] + 2, f"{x['id']} {x['text']}", (0, 90, 200))
+        dims.append({"id": x["id"], "value_mm": x["value"], "text": x["text"], "at_px": [round(mid[0]), round(mid[1])]})
+    img.save(dst)
+    return {"available": True, "image_path": str(dst), "kind": kind, "align_score": al["score"],
+            "dims": dims, "notes": notes,
+            "note": "寸法は D番号、窓・テラスドアの注記は T番号（品番と上端 FL+）。直す案の数値に使うときは "
+                    f"value_source=\"jww:{kind}:<番号>\"（数値はコードが図面から読む）。図面の線は位置合わせした結果で、数 cm ずれることがある"}

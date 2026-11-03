@@ -396,6 +396,7 @@ def render_all(alias: str) -> dict:
         img_m.save(dst / f"{view}_model.png")
         img_g.save(dst / f"{view}_glb.png")
         info = {"view": view, "label": label, "px_per_mm": canvas.k, "size_px": [canvas.w, canvas.h],
+                "uv_lo": [float(v) for v in canvas.lo], "uv_hi": [float(v) for v in canvas.hi],
                 "elements": elems, "direction_assumption": "glb の +Y を北とした（推定）"}
         if level is not None:
             info["level"] = level

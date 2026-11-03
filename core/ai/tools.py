@@ -10,7 +10,8 @@ Agent SDK（claude_code 接続）にも Messages API（api_key 接続）にも�
 - "glb"              自動で作った元の値（人の修正を外した値）に戻す
 - "number"           人が一言で書いた数値（囲んで直すで「900にしたい」など）。number に入れる。
                      囲んで直すでは、その数値が人の一言（と質問への答え）の中にあるかをコードが確かめる
-- "jww:<ID>"         図面の寸法（図面の読み取りはまだ作っていないので、いまは使えない）
+- "jww:<図面>:<番号>" 図面の寸法（D番号）か窓の注記（T番号。上端の FL+）。例 jww:plan:D3。平面図（plan・plan_2f）だけ。
+                     番号は get_drawing_region が返す。数値はコードが図面から読む
 """
 from __future__ import annotations
 
@@ -184,9 +185,20 @@ def render_view(ctx: ToolContext, view: str, highlight: list[str] | None = None,
 
 
 def get_drawing_region(ctx: ToolContext, view: str, bbox_px: list[int] | None = None) -> dict:
-    """図面（jww）の同じ面の画像と寸法・注記。図面の読み取りはまだ作っていない。"""
-    return {"available": False, "note": "図面（jww）の読み取りはまだ作っていません。glb と模型の見比べだけで判断し、"
-                                        "図面が要る判断は ask_question で人に聞いてください。"}
+    """図面（jww）の同じ面の画像と寸法・注記（平面図だけ。表題欄は除く）。模型の図と同じ縮尺・位置で描く。
+    bbox_px（模型の図の上の範囲）を渡すと、その範囲の寸法・注記だけを一覧にする。"""
+    _check_view(ctx, view)
+    from core.drawing_check import drawing_view
+    info_p = ctx.inspect_dir / f"{view}.json"
+    if not info_p.exists() or "uv_lo" not in json.loads(info_p.read_text(encoding="utf-8")):
+        from core.render import render_all
+        render_all(ctx.alias)
+    try:
+        return drawing_view(ctx.alias, ctx.building, view, json.loads(info_p.read_text(encoding="utf-8")),
+                            ctx.inspect_dir / f"{view}_drawing.png", bbox_px)
+    except Exception as e:  # noqa: BLE001  図面が読めないときは、図面なしで判断できるように理由だけ返す
+        return {"available": False, "note": f"図面を読めませんでした（{type(e).__name__}）。glb と模型の見比べで判断し、"
+                                            "図面が要る判断は ask_question で人に聞いてください"}
 
 
 def run_checks(ctx: ToolContext) -> dict:
@@ -229,8 +241,15 @@ def _value_from_source(ctx: ToolContext, coll: str, obj: dict, fld: str, value_s
         except KeyError as e:
             raise ToolError(str(e).strip("'\""))
     if value_source.startswith("jww:"):
-        raise ToolError("図面（jww）の寸法はまだ使えません。ask_question で人に聞いてください")
-    raise ToolError(f"value_source「{value_source}」は使えません（majority:種類 / rule:項目 / glb / number）")
+        from core.drawing_check import item_value
+        parts = value_source.split(":")
+        if len(parts) != 3:
+            raise ToolError('図面の数値は value_source="jww:<図面>:<番号>"（例 jww:plan:D3）で指定してください')
+        v = item_value(ctx.alias, ctx.building, parts[1], parts[2])
+        if v is None:
+            raise ToolError(f"{value_source} の数値が図面に見つかりません（get_drawing_region が返した番号を使ってください。平面図だけ）")
+        return v
+    raise ToolError(f"value_source「{value_source}」は使えません（majority:種類 / rule:項目 / glb / number / jww:図面:番号）")
 
 
 def _number_in_text(number: float, text: str) -> bool:
@@ -288,12 +307,12 @@ TOOL_SPECS = {
                     "schema": {"type": "object", "properties": {
                         "view": {"type": "string", "enum": list(VIEWS), "description": "plan2 は2階建ての2階の平面"}, "source": {"type": "string", "enum": ["model", "glb"]},
                         "highlight": {"type": "array", "items": {"type": "string"}}}, "required": ["view"], "additionalProperties": False}},
-    "get_drawing_region": {"fn": get_drawing_region, "description": "図面（jww）の同じ面の画像と寸法・注記を返す（いまは未対応）。",
+    "get_drawing_region": {"fn": get_drawing_region, "description": "図面（jww）の同じ面の画像と、寸法（D番号）・窓の注記（T番号、品番と上端 FL+）の一覧を返す。平面（plan・plan2）だけ。模型の図と同じ縮尺・位置で描く（表題欄は除く）。",
                            "schema": {"type": "object", "properties": {"view": {"type": "string", "enum": list(VIEWS)},
                                       "bbox_px": {"type": "array", "items": {"type": "integer"}}}, "required": ["view"], "additionalProperties": False}},
     "run_checks": {"fn": run_checks, "description": "コードの検査の結果（閉じた立体・離れた塊・造形範囲・glb との数の差）を返す。",
                    "schema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    "propose_override": {"fn": propose_override, "description": "直す案を1件つくる。数値は書かず、数値の出どころ value_source（majority:種類 / rule:項目 / glb / number）を指定する。数値はコードが計算する。number は人が書いた数値のときだけ。屋根の軒の出は target=Y1・field=eave_mm.S のように辺を付ける（外壁の外の面から屋根の先まで、板金・樋を除く）。",
+    "propose_override": {"fn": propose_override, "description": "直す案を1件つくる。数値は書かず、数値の出どころ value_source（majority:種類 / rule:項目 / glb / number）を指定する。数値はコードが計算する。number は人が書いた数値のときだけ。図面の寸法・注記は jww:plan:D3 のように番号で（get_drawing_region が返す）。屋根の軒の出は target=Y1・field=eave_mm.S のように辺を付ける（外壁の外の面から屋根の先まで、板金・樋を除く）。",
                          "schema": {"type": "object", "properties": {
                              "target": {"type": "string"}, "field": {"type": "string"}, "value_source": {"type": "string"},
                              "reason": {"type": "string"}, "number": {"type": "number"}, "finding": {"type": "string"}},
