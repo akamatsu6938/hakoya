@@ -189,7 +189,7 @@ def _wall_faces(b: dict, level: str | None) -> np.ndarray:
 
 
 class _Raster:
-    def __init__(self, segs: np.ndarray, margin: float = 3000.0):
+    def __init__(self, segs: np.ndarray, margin: float = 3000.0, near_cells: int | None = None):
         pts = _sample(segs, ALIGN_CELL_MM / 2)
         self.x0, self.y0 = pts.min(axis=0) - margin
         x1, y1 = pts.max(axis=0) + margin
@@ -197,7 +197,7 @@ class _Raster:
         grid = np.zeros((self.ny, self.nx), bool)
         ix, iy = self._idx(pts)
         grid[iy, ix] = True
-        k = ALIGN_NEAR_CELLS
+        k = ALIGN_NEAR_CELLS if near_cells is None else near_cells
         near = grid.copy()
         for dx in range(-k, k + 1):
             for dy in range(-k, k + 1):
@@ -270,7 +270,8 @@ def align_plan(d: Drawing, b: dict, level: str | None = "1F", hint: dict | None 
                         best = (s, t)
             # 「乗っている」とみなす幅（40mm）の中では点数が同じになるので、いちばん良い点数の所の真ん中を取る
             top_ts = [t for s, t in tried if s >= best[0] - 1e-9]
-            best = (best[0], np.mean(top_ts, axis=0))
+            if top_ts:
+                best = (best[0], np.mean(top_ts, axis=0))
         results.append({"rot": theta, "tx": float(best[1][0]), "ty": float(best[1][1]), "score": round(best[0], 3)})
     results.sort(key=lambda r: -r["score"])
     top = results[0]

@@ -248,10 +248,18 @@ async function renderChecks() {
       for (const r of dw.levels) {
         const name = LEVEL_JA[r.level] || r.level;
         if (!r.aligned) { ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">${esc(name)}</span>${esc(r.note)}</li>`); continue; }
-        ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${esc(name)}</span>注記 ${r.notes} 件のうち ${r.matched} 件を開口に結び、${r.same} 件が一致`
+        ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${esc(name)}</span>注記 ${r.notes} 件のうち ${r.matched} 件を開口に結び、${r.same} 件が一致（上端・幅・高さ）`
           + (r.unmatched ? `。近くに開口がない注記 ${r.unmatched} 件` : '') + '</li>');
-        for (const m of r.mismatches) ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">図面と違う</span>${esc(m.opening)}：模型 FL+${Math.round(m.model_head_fl_mm)}、図面の注記 FL+${m.head_fl_mm}（品番 ${esc(m.code)}）</li>`);
+        for (const m of r.mismatches) ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">図面と違う</span>${esc(m.message)}</li>`);
         for (const n of r.unmatched_notes) ul.insertAdjacentHTML('beforeend', `<li class="lv-低"><span class="tag">要確認</span>図面に注記（品番 ${esc(n.code)}、FL+${n.head_fl_mm}）があるが、近くに模型の開口がない</li>`);
+      }
+      const VJ = { S: '南', N: '北', E: '東', W: '西' };
+      for (const r of dw.elevations || []) {   // 立面図：面ごとに位置を合わせ、見えている窓・ドアの4辺に図面の線があるか
+        const name = `${VJ[r.view]}の立面`;
+        if (!r.aligned) { ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${name}</span>立面図を位置合わせできなかったので、照合していません</li>`); continue; }
+        if (r.note) { ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${name}</span>${esc(r.note)}</li>`); continue; }
+        ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${name}</span>見えている窓・ドア ${r.windows} か所のうち ${r.same} か所が立面図と合う</li>`);
+        for (const m of r.mismatches) ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">図面と違う</span>${esc(m.opening)} の${esc(m.edges.join('・'))}が立面図の線と合わない</li>`);
       }
     }
   } catch (e) { /* 図面がない・読めないときは出さない */ }

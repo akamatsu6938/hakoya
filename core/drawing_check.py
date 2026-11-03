@@ -16,6 +16,10 @@ import numpy as np
 NOTE_RE = re.compile(r"[〇●○◯]+\s*(\d{5})[^()（）]*?(?:[\(（][LR][\)）])?\s*[\(（]FL\s*[+＋]\s*(\d+)\s*[\)）]")
 MATCH_MAX_MM = 1800.0       # 注記と開口の真ん中の距離の上限（注記は壁の外側、窓の近くに書かれる）
 SAME_MM = 25.0              # これ以内の差は同じとみなす（模型で 0.5mm）
+# 品番（例 16503）の頭3桁は幅の呼び寸法（1650）、下2桁は高さの呼び寸法（300）。
+# ★物件A・B の 27 か所で、模型の幅は「呼び寸法＋10〜70mm」、高さは呼び寸法とほぼ同じだった（11/3）
+CODE_WIDTH_ADD_MM = 40.0
+SIZE_TOL_MM = 100.0
 PLAN_KIND = {0: "plan", 1: "plan_2f"}
 VIEW_OF = {"plan": "plan", "plan_2f": "plan2"}
 
@@ -76,13 +80,29 @@ def summary(alias: str, b: dict) -> dict:
         for m in matched:
             o = ops[m["opening"]]
             if abs(float(o["head_fl_mm"]) - m["head_fl_mm"]) > SAME_MM:
-                mism.append({**m, "model_head_fl_mm": o["head_fl_mm"]})
+                mism.append({**m, "what": "head", "model_head_fl_mm": o["head_fl_mm"],
+                             "message": f"{m['opening']} の上端：模型 FL+{float(o['head_fl_mm']):.0f}、図面の注記 FL+{m['head_fl_mm']}（品番 {m['code']}）"})
+            width_est = int(m["code"][:3]) * 10 + CODE_WIDTH_ADD_MM
+            if abs(float(o["width_mm"]) - width_est) > SIZE_TOL_MM:
+                mism.append({**m, "what": "width", "model_head_fl_mm": o["head_fl_mm"],
+                             "message": f"{m['opening']} の幅：模型 {float(o['width_mm']):.0f}mm、図面の品番 {m['code']} の幅の目安 {width_est:.0f}mm"})
+            height_est = int(m["code"][3:5]) * 100
+            height = float(o["head_fl_mm"]) - float(o["sill_fl_mm"])
+            if o.get("kind") == "window" and abs(height - height_est) > SIZE_TOL_MM:
+                mism.append({**m, "what": "height", "model_head_fl_mm": o["head_fl_mm"],
+                             "message": f"{m['opening']} の高さ（下端〜上端）：模型 {height:.0f}mm、図面の品番 {m['code']} の高さの目安 {height_est}mm"})
         row.update(score=al["score"], notes=len(notes), matched=len(matched), unmatched=len(unmatched),
-                   same=len(matched) - len(mism), mismatches=mism,
+                   same=len(matched) - len({x["opening"] for x in mism}), mismatches=mism,
                    unmatched_notes=[{k: n[k] for k in ("note_id", "code", "head_fl_mm")} for n in unmatched],
                    pairs=[{"opening": m["opening"], "code": m["code"], "head_fl_mm": m["head_fl_mm"]} for m in matched])
         levels.append(row)
-    return {"available": True, "levels": levels}
+    out = {"available": True, "levels": levels}
+    if "elevation" in files.jww and files.jww["elevation"].exists():
+        try:
+            out["elevations"] = elevation_windows(alias, b)
+        except Exception as e:  # noqa: BLE001  立面図が読めなくても、平面図の結果は返す
+            out["elevations_note"] = f"立面図を照合できませんでした（{type(e).__name__}）"
+    return out
 
 
 def findings(alias: str, b: dict) -> list[dict]:
@@ -91,18 +111,27 @@ def findings(alias: str, b: dict) -> list[dict]:
     out = []
     for row in s.get("levels", []):
         for m in row.get("mismatches", []):
-            out.append({"view": VIEW_OF.get(row["kind"], "plan"), "kind": "opening", "severity": "中",
-                        "message": f"{m['opening']} の上端が図面の注記と違う：模型 FL+{m['model_head_fl_mm']:.0f}、"
-                                   f"平面図の注記 FL+{m['head_fl_mm']}（品番 {m['code']}）",
-                        "targets": [m["opening"]], "evidence": [f"jww:{row['kind']}:{m['note_id']}"], "source": "code",
-                        "proposal": {"target": m["opening"], "field": "head_fl_mm", "from": m["model_head_fl_mm"],
-                                     "to": m["head_fl_mm"], "value_source": f"jww:{row['kind']}:{m['note_id']}",
-                                     "reason": f"平面図の注記（品番 {m['code']}）の上端 FL+{m['head_fl_mm']} に合わせる"}})
-        for n in row.get("unmatched_notes", []):
+            f = {"view": VIEW_OF.get(row["kind"], "plan"), "kind": "opening", "severity": "中",
+                 "message": f"図面の注記と違う：{m['message']}",
+                 "targets": [m["opening"]], "evidence": [f"jww:{row['kind']}:{m['note_id']}"], "source": "code"}
+            if m.get("what") == "head":       # 上端は注記の数値そのもの（コードが読む）で直せる。幅・高さは目安なので案にしない
+                f["proposal"] = {"target": m["opening"], "field": "head_fl_mm", "from": m["model_head_fl_mm"],
+                                 "to": m["head_fl_mm"], "value_source": f"jww:{row['kind']}:{m['note_id']}",
+                                 "reason": f"平面図の注記（品番 {m['code']}）の上端 FL+{m['head_fl_mm']} に合わせる"}
+            out.append(f)
+        for n in row.get("unmatched_notes", []):  # noqa: B007
             out.append({"view": VIEW_OF.get(row["kind"], "plan"), "kind": "opening", "severity": "低",
                         "message": f"平面図に窓・テラスドアの注記（品番 {n['code']}、FL+{n['head_fl_mm']}）があるが、"
                                    f"近く（{MATCH_MAX_MM / 1000:.1f}m 以内）に模型の開口がない。図面だけにある窓か、注記が離れて書かれているか（要確認）",
                         "targets": [], "evidence": [f"jww:{row['kind']}:{n['note_id']}"], "source": "code"})
+    for row in s.get("elevations", []):
+        for m in row.get("mismatches", []):
+            # 1/100 の立面図は平面図ほど正確でないことがあるので「低」（★物件A の東の窓 O6 は立面図で 11〜18cm 高く描かれていた）
+            out.append({"view": row["view"], "kind": "opening", "severity": "低",
+                        "message": f"{m['opening']} の{'・'.join(m['edges'])}が、立面図（{VIEW_JA[row['view']]}）の窓・ドアの線と合わない"
+                                   f"（{ELEV_WINDOW_TOL_CELLS * 20}mm より離れている）。図面と glb のどちらが正しいか確かめる",
+                        "targets": [m["opening"]], "evidence": [f"jww:elevation（{VIEW_JA[row['view']]}の面、位置合わせの点数 {row['score']}）"],
+                        "source": "code"})
     return out
 
 
@@ -421,7 +450,9 @@ def _fit(model_pts: np.ndarray, lines: np.ndarray) -> tuple[float, np.ndarray]:
                 tried.append((s, t))
                 if s > best[0]:
                     best = (s, t)
-        best = (best[0], np.mean([t for s, t in tried if s >= best[0] - 1e-9], axis=0))
+        top_ts = [t for s, t in tried if s >= best[0] - 1e-9]
+        if top_ts:
+            best = (best[0], np.mean(top_ts, axis=0))
     there = raster.score(dp + best[1])
     back = _Raster(lines + np.concatenate([best[1], best[1]])).score(model_pts)
     return (2 * there * back / (there + back) if there + back else 0.0), best[1]
@@ -519,3 +550,67 @@ def elevation_view(alias: str, b: dict, view: str, canvas: dict, dst) -> dict | 
             "dims": dims,
             "note": "立面図のこの面を、模型の図と同じ縮尺・位置に合わせて描いた（位置合わせした結果で、数 cm ずれることがある）。"
                     "寸法の数値で直すときは value_source=\"jww:elevation:D番号\"（数値はコードが図面から読む）"}
+
+
+# ---------------------------------------------------------------- 立面図の窓と模型の窓の照合
+
+ELEV_WINDOW_TOL_CELLS = 6      # 窓の辺と図面の線の許す差（20mm × 6 ＝ 120mm。1/100 の立面図はサッシの外形で描かれ、数 cm ずれる）
+ELEV_EDGE_MIN = 0.6            # 辺の長さのうち、この割合に図面の線があれば「合う」
+EDGE_JA = ("下端", "横の端", "上端", "横の端")
+VIEW_JA = {"S": "南", "N": "北", "E": "東", "W": "西"}
+
+
+def _opening_rect(b: dict, o: dict, view: str) -> tuple[float, float, float, float] | None:
+    """模型の開口の、その面の立面での四角（u0, v0, u1, v1。mm）。"""
+    from core.render import _wall_frame, project
+    w = next((x for x in b.get("walls", []) if x["id"] == o.get("wall")), None)
+    if w is None:
+        return None
+    s, d, n = _wall_frame(w)
+    t = w["thickness_mm"] / 2
+    a0, a1 = o["offset_mm"], o["offset_mm"] + o["width_mm"]
+    pts = [[*(s + n * sgn * t + d * a), z] for sgn in (-1, 1) for a in (a0, a1) for z in (o["sill_mm"], o["head_mm"])]
+    uv, _ = project(view, np.asarray(pts, float))
+    return float(uv[:, 0].min()), float(uv[:, 1].min()), float(uv[:, 0].max()), float(uv[:, 1].max())
+
+
+def elevation_windows(alias: str, b: dict) -> list[dict]:
+    """面ごとに、模型で見えている窓・ドアの四角の4辺に、位置を合わせた立面図の線があるかを調べる。
+    見えているかどうかは検品の図（inspect/面.json）の記録を使う（なければ照合しない＝外れを出さない）。"""
+    from core.jww import _Raster
+    from core.paths import out_dir
+    al = _elevations(alias, b)
+    rows = []
+    for view in ELEV_VIEWS:
+        a = al.get(view)
+        info_p = out_dir(alias) / "inspect" / f"{view}.json"
+        if not a:
+            rows.append({"view": view, "aligned": False})
+            continue
+        if not info_p.exists():
+            rows.append({"view": view, "aligned": True, "note": "検品の図がまだないので、窓は照合していません"})
+            continue
+        info = json.loads(info_p.read_text(encoding="utf-8"))
+        visible = {e["id"] for e in info.get("elements", []) if e.get("type") == "opening" and not e.get("hidden")}
+        lines = al["_groups"][a["group"]] + np.array([a["tx"], a["ty"], a["tx"], a["ty"]])
+        raster = _Raster(lines, near_cells=ELEV_WINDOW_TOL_CELLS)
+        checked, mism = 0, []
+        for o in b.get("openings", []):
+            if o["id"] not in visible:
+                continue
+            r = _opening_rect(b, o, view)
+            if r is None:
+                continue
+            u0, v0, u1, v1 = r
+            covs = []
+            for pa, pb in (((u0, v0), (u1, v0)), ((u1, v0), (u1, v1)), ((u1, v1), (u0, v1)), ((u0, v1), (u0, v0))):
+                n = max(int(np.hypot(pb[0] - pa[0], pb[1] - pa[1]) / 20.0), 1)
+                tt = np.linspace(0.05, 0.95, n)[:, None]
+                covs.append(raster.score(np.array(pa) + (np.array(pb) - np.array(pa)) * tt))
+            checked += 1
+            bad = sorted({EDGE_JA[i] for i, c in enumerate(covs) if c < ELEV_EDGE_MIN})
+            if bad:
+                mism.append({"opening": o["id"], "edges": bad, "coverage": [round(c, 2) for c in covs]})
+        rows.append({"view": view, "aligned": True, "score": a["score"], "windows": checked,
+                     "same": checked - len(mism), "mismatches": mism})
+    return rows

@@ -248,3 +248,27 @@ def test_real_elevations_align_each_face(alias):
         r = call_tool(ctx, "get_drawing_region", {"view": v})
         assert r["available"] and r.get("aligned") and r["align_score"] >= 0.4, (alias, v, r.get("note"))
         assert Image.open(r["image_path"]).size == Image.open(ctx.inspect_dir / f"{v}_model.png").size
+
+
+@pytest.mark.realdata
+def test_real_drawing_checks_catch_seeded_errors_without_ai():
+    """図面との照合（平面図の注記の上端・幅・高さ、立面図の窓、結べない注記）で、試験と同じ間違いの多くを
+    コードだけ（AI なし）で見つける。間違いを入れていない物件A・B では、平面図の照合は全部一致。"""
+    from core import overrides as ov
+    from core.ai.tools import ToolContext
+    from core.drawing_check import _CACHE, elevation_windows, findings, summary
+    from tools.seeded_inspection import load_dataset, seeded_overrides
+    b_rows = {r["view"]: r for r in elevation_windows("物件B", ToolContext.load("物件B").building)}
+    assert all(r["aligned"] and r["same"] == r["windows"] > 0 for r in b_rows.values())
+    ctx = ToolContext.load("物件A")
+    plain = summary("物件A", ctx.building)
+    assert plain["levels"][0]["same"] == 11 and not plain["levels"][0]["mismatches"]
+    moved, _ = ov.apply(ctx.raw, seeded_overrides(load_dataset(), ctx.raw))
+    _CACHE.clear()
+    try:
+        fs = findings("物件A", moved)
+    finally:
+        _CACHE.clear()
+    targets = {t for f in fs for t in f["targets"]}
+    assert {"O3", "O5", "O6", "O9", "O11"} <= targets                                  # E01〜E05
+    assert any("06011" in f["message"] and not f["targets"] for f in fs)               # E06：消した窓 O7 の注記が余る
