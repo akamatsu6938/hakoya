@@ -167,8 +167,22 @@ def add_override(alias: str, body: OverrideIn):
         item = ov.add(alias, raw, body.target, body.field, body.to, "human:table", body.reason or "表で直した")
     except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e).strip("'\""))
-    summary = write_outputs(alias)
+    summary = _rebuild_or_undo(alias, item["id"])
     return _safe_json({"override": item, "checks": summary["checks"]})
+
+
+def _rebuild_or_undo(alias: str, override_id: str | None) -> dict:
+    """組み直す。組み立てられなければ、足したばかりの修正を取り消して元の模型に戻し、400 を返す
+    （壊れた修正が残って画面が開けなくならないように）。"""
+    try:
+        return write_outputs(alias)
+    except Exception as e:                                   # 形の計算などの失敗。種類だけ伝える
+        if not override_id:
+            raise
+        ov.undo(alias, override_id)
+        fd.revert_override(alias, override_id)
+        write_outputs(alias)
+        raise HTTPException(400, f"この値では模型を組み立てられませんでした。修正は取り消しました（{type(e).__name__}）")
 
 
 @app.delete("/api/overrides/{alias}/{override_id}")
@@ -262,7 +276,7 @@ def decide_finding(alias: str, fid: str, body: DecisionIn):
     except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e).strip("'\""))
     if body.action == "approve":
-        write_outputs(alias)
+        _rebuild_or_undo(alias, f.get("override"))
     return _safe_json({"finding": f})
 
 
@@ -361,7 +375,7 @@ def lasso_approve(alias: str, body: LassoApproveIn):
         item = approve(alias, body.model_dump())
     except ValueError as e:
         raise HTTPException(400, str(e))
-    summary = write_outputs(alias)
+    summary = _rebuild_or_undo(alias, item["id"])
     return _safe_json({"override": item, "checks": summary["checks"]})
 
 

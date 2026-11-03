@@ -40,6 +40,8 @@ td input[type=number] { width: 72px; }
 tr.changed td { background: var(--edit); }
 tr.approve td { background: var(--edit); }
 tr.approve input[type=text] { width: 100%; }
+tr.approve .approve-box { display: flex; gap: 6px; align-items: center; }   /* 理由の欄が縮んで、承認のボタンがはみ出さない */
+tr.approve .approve-box input[type=text] { flex: 1; min-width: 0; width: auto; }
 .list { list-style: none; padding: 0; margin: 0; }
 .list li { padding: 6px 2px; border-bottom: 1px solid var(--line); line-height: 1.5; }
 .lv-高 { color: var(--bad); font-weight: 600; } .lv-中 { color: var(--warn); } .lv-情報 { color: var(--muted); }

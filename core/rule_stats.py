@@ -232,7 +232,8 @@ def _corrections(items: list[tuple[str, dict]], overrides_of: dict[str, list] | 
                 ovs = []
         kinds = {x["id"]: x.get("kind", "") for coll in ("walls", "openings", "roofs") for x in b.get(coll, [])}
         for o in ovs:
-            key = f"{kinds.get(o['target'], o['target'][:1])}.{o['field']}"
+            kind = "level" if str(o["target"]).startswith("level:") else kinds.get(o["target"], o["target"][:1])
+            key = f"{kind}.{o['field']}"
             if alias not in out[key]:
                 out[key].append(alias)
     return out

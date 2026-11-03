@@ -111,7 +111,7 @@ function editableRow(cells, onApprove) {
     tr.appendChild(td);
   }
   const approve = document.createElement('tr'); approve.className = 'approve'; approve.hidden = true;
-  approve.innerHTML = `<td colspan="${cells.length}"><input type="text" placeholder="直す理由（例：立面図の窓の上端に合わせる）"> <button class="primary">承認</button> <button>やめる</button></td>`;
+  approve.innerHTML = `<td colspan="${cells.length}"><div class="approve-box"><input type="text" placeholder="直す理由（例：立面図の窓の上端に合わせる）"> <button class="primary">承認</button> <button>やめる</button></div></td>`;
   const [reason, ok, cancel] = approve.querySelectorAll('input, button');
   const changed = () => inputs.filter((i) => Number(i.value) !== Number(i.dataset.orig));
   inputs.forEach((i) => i.addEventListener('input', () => { const ch = changed().length > 0; tr.classList.toggle('changed', ch); approve.hidden = !ch; }));
@@ -128,7 +128,42 @@ async function approveChanges(target, inputs, reason) {
   } catch (e) { setStatus('直せませんでした：' + e.message, 'err'); }
 }
 
+async function approveLevels(inputs, reason, fl1) {
+  // 階高は「2階の床の高さ − 1階の床の高さ」。記録は 2階の床の高さ（fl_mm）で残す
+  try {
+    setStatus('階の高さを直して、上のもの（壁・窓・屋根）をずらしています…', 'busy');
+    let base = fl1;
+    for (const i of inputs) {
+      const v = Number(i.value);
+      if (i.dataset.field === 'story_mm') {
+        await call('POST', '/api/overrides/{a}', { target: 'level:2F', field: 'fl_mm', to: base + v, reason });
+      } else {
+        await call('POST', '/api/overrides/{a}', { target: i.dataset.target, field: i.dataset.field, to: v, reason });
+        if (i.dataset.target === 'level:1F' && i.dataset.field === 'fl_mm') base = v;
+      }
+    }
+    await refresh(); setStatus('階の高さを直しました（修正の履歴から取り消せます）', 'ok');
+  } catch (e) { setStatus('直せませんでした：' + e.message, 'err'); }
+}
+
+function renderLevels(b) {
+  const lt = $('#levels'); if (!lt) return;
+  const lv = b.levels || [];
+  lt.innerHTML = '<tr><th>階</th><th>床の高さ（GL から）</th><th>階高</th><th>天井の高さ（床から）</th></tr>';
+  lv.forEach((l, k) => {
+    const next = lv[k + 1];
+    const cells = [{ text: LEVEL_JA[l.name] || l.name },
+      k === 0 ? { field: 'fl_mm', value: l.fl_mm } : { text: l.fl_mm },
+      next ? { field: 'story_mm', value: next.fl_mm - l.fl_mm } : { text: '' },
+      { field: 'ceiling_mm', value: l.ceiling_mm }];
+    const rows = editableRow(cells, (inputs, reason) => approveLevels(inputs, reason, lv[0].fl_mm));
+    rows[0].querySelectorAll('input').forEach((i) => { i.dataset.target = `level:${l.name}`; });
+    rows.forEach((r) => lt.appendChild(r));
+  });
+}
+
 function renderTables(b) {
+  renderLevels(b);
   // 2階建てのときだけ「階」の列を足す（平屋の表は今までどおり）
   const lvHead = state.multi ? '<th>階</th>' : '';
   const lvCell = (x) => (state.multi ? [{ text: x.level || '' }] : []);
@@ -174,7 +209,8 @@ async function renderHistory(results) {
   for (const it of items.slice().reverse()) {
     const li = document.createElement('li'); const st = status[it.id];
     const what = it.field === '_delete' ? '取り除く' : `${FIELD[it.field] || it.field}：${it.from} → ${it.to}`;
-    li.innerHTML = `<span class="tag">${it.id}</span><b>${it.target}</b> ${what}<br><span class="hint">${it.reason}（${it.value_source}・${it.at.slice(0, 16).replace('T', ' ')}）${st ? '・' + label[st.status] : ''}</span> `;
+    const tgt = String(it.target).startsWith('level:') ? (LEVEL_JA[it.target.slice(6)] || it.target) : it.target;
+    li.innerHTML = `<span class="tag">${it.id}</span><b>${tgt}</b> ${what}<br><span class="hint">${it.reason}（${it.value_source}・${it.at.slice(0, 16).replace('T', ' ')}）${st ? '・' + label[st.status] : ''}</span> `;
     const undo = document.createElement('button'); undo.textContent = '取り消す';
     undo.addEventListener('click', async () => {
       try { setStatus('取り消して組み直しています…', 'busy'); await call('DELETE', `/api/overrides/{a}/${it.id}`); await refresh(); setStatus(`${it.id} を取り消しました`, 'ok'); }
@@ -218,7 +254,9 @@ function renderDownloads() {
 const VIEW_OF = { S: 'S', N: 'N', E: 'E', W: 'W', plan: 'plan', plan2: 'plan2', print: 'plan' };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const FIELD = { thickness_mm: '厚み', width_mm: '幅', offset_mm: '壁の端からの位置', sill_fl_mm: '下端 FL+', head_fl_mm: '上端 FL+' };
+const FIELD = { thickness_mm: '厚み', width_mm: '幅', offset_mm: '壁の端からの位置', sill_fl_mm: '下端 FL+', head_fl_mm: '上端 FL+',
+  fl_mm: '床の高さ', ceiling_mm: '天井の高さ' };
+const LEVEL_JA = { '1F': '1階', '2F': '2階' };
 for (const s of 'WESN') FIELD[`eave_mm.${s}`] = `軒の出（${SIDE[s]}）`;
 
 function sourceText(vs) {   // 数値の出どころを日本語にする（例：majority:exterior → 外壁の多数派）
