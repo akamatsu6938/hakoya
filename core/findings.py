@@ -39,6 +39,17 @@ def code_findings(alias: str) -> list[dict]:
         out.append({"view": "plan", "kind": "shape", "severity": "低",
                     "message": f"glb の例外（{labels.get(e['kind'], e['kind'])}）：{e['note']}",
                     "targets": [e["wall"]] if e.get("wall") else [], "evidence": [e.get("source") or "glb"], "source": "code"})
+    try:   # glb にありえない形（見つけるだけ。直し方は 作者と決める：docs/proposal-glb-consistency.md）
+        from core.consistency import find_all
+        applied = ov.apply(b, ov.load(alias))[0]
+        levels = {x["id"]: x.get("level") for x in applied.get("walls", []) + applied.get("openings", [])}
+        upper = [lv["name"] for lv in applied.get("levels", [])[1:]]
+        for c in find_all(applied):
+            out.append({"view": "plan2" if levels.get(c["targets"][0]) in upper else "plan", "kind": "shape", "severity": "低",
+                        "message": f"glb の整合性（要確認）：{c['message']}", "targets": c["targets"],
+                        "evidence": ["コードの検査（glb の整合性）"], "source": "code"})
+    except Exception:  # noqa: BLE001  整合性の検査の失敗で、ほかの指摘を止めない
+        pass
     for u in b.get("unresolved", []):
         out.append({"view": "plan", "kind": "shape", "severity": "中", "message": f"未解決の所 {u['id']}：{u['note']}",
                     "targets": [], "evidence": ["壁の作り直し（unresolved）"], "source": "code"})
