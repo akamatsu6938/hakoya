@@ -110,8 +110,9 @@ def test_repeated_human_corrections_are_counted():
 
 @pytest.mark.realdata
 def test_real_properties_oracle():
-    """物件A（平屋）・物件B（2階建て）の答え合わせ（2026-11-03 に確かめた値）。"""
-    s = _by_id(rs.collect("jisha"))
+    """物件A（平屋）・物件B（2階建て）の答え合わせ（2026-11-03 に確かめた値）。
+    ★物件C〜F（11/3 夜に追加）も組み立てると数に入るので、物件A・B だけで集計する。"""
+    s = _by_id(rs.compute([e for e in rs.entries("jisha") if e[0] in ("物件A", "物件B")], load_rules("jisha")))
     for sid in ("levels.foundation_top", "levels.fl1", "levels.ceiling", "walls.exterior_measured",
                 "openings.door_head", "roofs.shape", "roofs.thickness"):
         assert s[sid]["status"] == "same", sid
