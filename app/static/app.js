@@ -836,4 +836,5 @@ async function applyEdition() {
   sel.innerHTML = props.map((p) => `<option value="${p.alias}" data-built="${p.built}">${p.alias}${p.has_glb ? '' : '（glb なし）'}</option>`).join('');
   sel.addEventListener('change', () => selectAlias(sel.value, sel.selectedOptions[0].dataset.built === 'true'));
   if (props.length) selectAlias(props[0].alias, props[0].built);
+  else setStatus('物件が登録されていません。HAKOYA の隣の data フォルダの local_paths.yaml に、物件の仮名と glb の場所を書いてください（README の手順5）', 'err');
 })();

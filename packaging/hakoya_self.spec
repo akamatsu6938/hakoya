@@ -20,7 +20,7 @@ hiddenimports = [
     "uvicorn.protocols.websockets.auto", "uvicorn.lifespan.on",
 ]
 # anthropic：api_key 接続（Messages API）。keyring：API キーを資格情報マネージャーに保存する（仕組みの選び方を同梱する）
-for pkg in ("manifold3d", "shapely", "trimesh", "pygltflib", "claude_agent_sdk", "anthropic", "keyring"):
+for pkg in ("manifold3d", "shapely", "trimesh", "pygltflib", "claude_agent_sdk", "anthropic", "keyring", "ezjww"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

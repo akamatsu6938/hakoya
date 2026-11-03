@@ -53,8 +53,12 @@ async def same_origin_only(request: Request, call_next):
 
 
 def _aliases() -> list[str]:
+    """登録してある物件の仮名。data/local_paths.yaml がまだなければ空（★exe を初めて起動した PC で一覧がエラーになった）。"""
     from core.paths import aliases
-    return aliases()
+    try:
+        return aliases()
+    except FileNotFoundError:
+        return []
 
 
 def _check_alias(alias: str) -> None:

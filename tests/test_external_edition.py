@@ -63,3 +63,17 @@ def test_build_check_finds_forbidden_things(tmp_path):
     for word in ("claude_agent_sdk", "Claude Code 本体", "data フォルダ", "API キーらしい文字", "external でない"):
         assert word in problems, word
     assert fake_key not in problems                                           # 見つけた中身は出さない
+
+
+def test_properties_empty_when_no_local_paths(monkeypatch):
+    """exe を初めて起動した PC（data/local_paths.yaml がない）でも、物件の一覧はエラーにならず空になる。"""
+    from fastapi.testclient import TestClient
+    import core.paths
+    from app.server import app
+
+    def missing():
+        raise FileNotFoundError("data/local_paths.yaml がありません")
+    monkeypatch.setattr(core.paths, "aliases", missing)
+    c = TestClient(app)
+    assert c.get("/api/properties").json() == []
+    assert c.post("/api/inspect/x?connection=off").status_code == 404
