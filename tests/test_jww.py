@@ -296,8 +296,8 @@ def test_one_code_can_describe_a_row_or_a_stack_of_openings():
         return {"id": f"O{i}", "wall": "W1", "offset_mm": off, "width_mm": w, "sill_fl_mm": sill, "head_fl_mm": head}
     row = [op(1, 0, 840, 0, 2400), op(2, 815, 1790, 0, 2400), op(3, 2580, 840, 0, 2400), op(4, 5000, 840, 0, 2400)]
     units = opening_units(row[1], row)
-    assert units[0] == (1790, 0, 2400) and (3420, 0, 2400) in units          # 遠い O4 は入らない
+    assert units == {"own": (1790, 0, 2400), "row": (3420, 0, 2400), "stack": None}   # 遠い O4 は入らない
     stack = [op(8, 0, 795, 20, 920), op(9, 0, 795, 1030, 2400)]
-    assert (795, 20, 2400) in opening_units(stack[0], stack)
+    assert opening_units(stack[0], stack)["stack"] == (795, 20, 2400)
     alone = [op(5, 0, 790, 900, 2000)]
-    assert opening_units(alone[0], alone) == [(790, 900, 2000)]
+    assert opening_units(alone[0], alone) == {"own": (790, 900, 2000), "row": None, "stack": None}
