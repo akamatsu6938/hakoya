@@ -244,7 +244,7 @@ async function renderChecks() {
   try {   // 図面（jww）と比べた結果：平面図の窓・テラスドアの注記（品番と上端）と模型の開口
     const dw = await call('GET', '/api/drawing/{a}');
     if (dw.available) {
-      ul.insertAdjacentHTML('beforeend', '<li class="lv-情報"><b>図面（jww）と比べた結果</b>（平面図の窓・テラスドアの注記の上端 FL+ と、模型の開口の上端）</li>');
+      ul.insertAdjacentHTML('beforeend', '<li class="lv-情報"><b>図面（jww）と比べた結果</b>（平面図の窓・テラスドアの注記の上端 FL+ と品番の幅・高さ、立面図の窓の位置を、模型の窓と比べる）</li>');
       for (const r of dw.levels) {
         const name = LEVEL_JA[r.level] || r.level;
         if (!r.aligned) { ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">${esc(name)}</span>${esc(r.note)}</li>`); continue; }
