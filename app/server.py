@@ -110,6 +110,16 @@ def building(alias: str):
     return _safe_json({"building": b, "override_results": results})
 
 
+@app.get("/api/rulecheck/{alias}")
+def rule_check(alias: str):
+    """予防：この物件を会社ルール（学んだルールを含む）と比べた結果。家ごとに変わる値は比べない。"""
+    _check_alias(alias)
+    from core.rule_check import check_property
+    from core.rules import load_rules
+    b, _ = _effective(alias)
+    return _safe_json({"rows": check_property(b, load_rules(b["source"].get("company_rules", "jisha")))})
+
+
 @app.get("/api/plan/{alias}")
 def plan(alias: str, level: str | None = None):
     """平面図。2階建ては level（1F・2F）で階を選ぶ（省くと1階）。"""

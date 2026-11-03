@@ -773,6 +773,11 @@ def _print_summary(alias: str, b: dict) -> None:
     for c in b["rule_checks"]:
         mark = "一致" if c["match"] else "★食い違い"
         print(f"    {c['item']}: glb {c['glb_mm']} / ルール {c['rule_mm']} → {mark}" + (f"（{c['note']}）" if c.get("note") else ""))
+    from core.rule_check import check_property
+    rows = check_property(b, load_rules(b["source"].get("company_rules", "jisha")))
+    print("  会社ルールと比べた結果（壁の厚み・ドアの上端なども。家ごとに変わる値は比べない）:")
+    for r in rows:
+        print(f"    {r['label']}: " + ("一致" if r["match"] else f"★{r['message']}"))
     s = b.get("wall_stats")
     if s:
         print(f"  壁: {s['count']}  外形 {s['outer_size_mm'][0]}×{s['outer_size_mm'][1]}mm")

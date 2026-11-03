@@ -42,6 +42,12 @@ def code_findings(alias: str) -> list[dict]:
     for u in b.get("unresolved", []):
         out.append({"view": "plan", "kind": "shape", "severity": "中", "message": f"未解決の所 {u['id']}：{u['note']}",
                     "targets": [], "evidence": ["壁の作り直し（unresolved）"], "source": "code"})
+    # 予防：会社ルールと比べて「いつもと違う」所（会社ルールの言語化。家ごとに変わる値は比べない）
+    from core.rule_check import differences
+    from core.rules import load_rules
+    for d in differences(b, load_rules(b.get("source", {}).get("company_rules", "jisha"))):
+        out.append({"view": "plan", "kind": "rule", "severity": "中", "message": d["message"],
+                    "targets": [], "evidence": [f"会社ルール {d['rule_key']}"], "source": "code"})
     for s in b.get("skipped", []):
         if "見つからない" in s.get("reason", ""):
             out.append({"view": "plan", "kind": "opening", "severity": "中", "message": f"{s['source']}：{s['reason']}",

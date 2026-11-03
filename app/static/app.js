@@ -185,6 +185,15 @@ async function renderHistory(results) {
 
 async function renderChecks() {
   const ul = $('#checks'); ul.innerHTML = '';
+  try {   // 予防：会社ルールと比べた結果（家ごとに変わる値は比べない）
+    const rc = await call('GET', '/api/rulecheck/{a}');
+    ul.insertAdjacentHTML('beforeend', '<li class="lv-情報"><b>会社ルールと比べた結果</b>（家ごとに変わる窓の高さ・屋根の勾配などは比べません）</li>');
+    for (const r of rc.rows) {
+      ul.insertAdjacentHTML('beforeend', r.match
+        ? `<li class="lv-情報"><span class="tag">一致</span>${esc(r.label)}：会社ルール ${esc(r.rule_text)}</li>`
+        : `<li class="lv-中"><span class="tag">いつもと違う</span>${esc(r.message)}</li>`);
+    }
+  } catch (e) { /* 組み立て前は出さない */ }
   try {
     const s = await call('GET', '/api/model/{a}/checks.json');
     for (const [k, p] of Object.entries(s.parts)) for (const n of p.notes) ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${p.label}</span>${n}</li>`);

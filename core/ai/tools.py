@@ -102,6 +102,11 @@ def get_building(ctx: ToolContext) -> dict:
         "skipped": b.get("skipped", []),
         "direction_note": "東西南北は glb の +Y を北とみなしている（推定）",
     }
+    # 予防：会社ルール（学んだルールを含む）と比べて「いつもと違う」所。家ごとに変わる値（窓の上端・勾配など）は比べない
+    from core.rule_check import differences
+    diffs = differences(b, ctx.rules)
+    out["company_rule_check"] = [d["message"] for d in diffs] or \
+        ["会社ルールと比べて、いつもと違う所はない（家ごとに変わる値は比べていない）"]
     if len(b["levels"]) > 1:
         out["by_level"] = {lv["name"]: {
             "walls": dict(collections.Counter(w["kind"] for w in b["walls"] if w.get("level") == lv["name"])),
