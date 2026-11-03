@@ -101,6 +101,7 @@ def snap_hanging_doors(items: list[dict], fl: float, low: float = 100.0, high: f
             continue
         old = o["sill_fl_mm"]
         o.setdefault("assumptions", []).append(f"door_from_floor: glb では FL+{old:.0f} から始まる戸。床からのドアにした")
+        o.setdefault("glb_original", {})["sill_fl_mm"] = round(old)   # そろえる前の glb の値（会社ルールの集計に使う）
         o["sill_fl_mm"], o["sill_mm"] = 0.0, fl
         exceptions.append({"kind": "door_above_floor", "opening": o, "source": o["source"],
                            "note": f"glb では室内の戸が FL+{old:.0f} から始まっていた（下は壁の面）。床からのドアにした"})
@@ -120,6 +121,7 @@ def snap_door_heads(items: list[dict], fl: float, door_top_fl: float, tol: float
         if 0 < abs(diff) <= tol:
             o.setdefault("assumptions", []).append(
                 f"door_top: glb の上端 FL+{o['head_fl_mm']:.0f} を、会社ルール openings.door_top_fl_mm（FL+{door_top_fl:.0f}）にそろえた")
+            o.setdefault("glb_original", {})["head_fl_mm"] = round(o["head_fl_mm"])   # そろえる前の glb の値
             o["head_fl_mm"] = door_top_fl
             o["head_mm"] = fl + door_top_fl
 

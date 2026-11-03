@@ -581,6 +581,7 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
                               "sill_fl_mm": round(o["sill_fl_mm"]), "head_fl_mm": round(o["head_fl_mm"]),
                               "center": _xy(o["center"]), "source": o["source"], "level": names[i],
                               **({"sources": o["sources"]} if o.get("sources") else {}),
+                              **({"glb_original": o["glb_original"]} if o.get("glb_original") else {}),
                               **({"assumption": o["assumptions"]} if o.get("assumptions") else {})})
     exceptions_json = []
     for i, r in enumerate(recs):
