@@ -75,3 +75,28 @@ def test_summary_and_unknown_tool():
     assert s["walls"] == {"interior": 3, "exterior": 1} and s["company_rules"]["walls"]["interior_thickness_mm"] == 130
     assert "error" in call_tool(ctx, "make_numbers", {})
     assert "error" in call_tool(ctx, "get_elements", {"view": "top"})
+
+
+def _multi_ctx():
+    ctx = _ctx()
+    b = ctx.building
+    b["levels"].append({"name": "2F", "fl_mm": 3624, "ceiling_mm": 2400,
+                        "floor_openings": [{"id": "H1", "kind": "stairwell", "area_m2": 3.44, "polygon": [[0, 0], [1, 0], [1, 1]]}]})
+    b["walls"].append({"id": "W5", "kind": "exterior", "thickness_mm": 162, "level": "2F"})
+    b["roofs"] = [{"id": "Y1", "kind": "lean_to", "level": "1F", "low_side": "S"},
+                  {"id": "Y2", "kind": "main", "level": "2F", "low_side": "E"}]
+    return ctx
+
+
+def test_building_summary_for_two_storeys():
+    single = call_tool(_ctx(), "get_building", {})
+    assert "by_level" not in single and "roofs" not in single          # 平屋は今までどおり
+    s = call_tool(_multi_ctx(), "get_building", {})
+    assert s["by_level"]["1F"]["walls"] == {"interior": 3, "exterior": 1} and s["by_level"]["2F"]["walls"] == {"exterior": 1}
+    assert s["by_level"]["2F"]["floor_openings"] == [{"id": "H1", "kind": "stairwell", "area_m2": 3.44}]
+    assert [(r["id"], r["kind"], r["level"]) for r in s["roofs"]] == [("Y1", "lean_to", "1F"), ("Y2", "main", "2F")]
+
+
+def test_plan2_only_for_two_storeys():
+    assert "平屋" in call_tool(_ctx(), "render_view", {"view": "plan2"})["error"]
+    assert "平屋" in call_tool(_ctx(), "get_elements", {"view": "plan2"})["error"]

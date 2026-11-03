@@ -178,3 +178,14 @@ def test_schema_for_structured_output():
     walk(s)
     number = s["properties"]["findings"]["items"]["properties"]["proposal"]["anyOf"][1]["properties"]["number"]
     assert number == {"anyOf": [{"type": "number"}, {"type": "null"}]}
+
+
+def test_face_prompt_and_findings_for_two_storeys():
+    """2階建てでは、平面の担当が1階（plan）と2階（plan2）の両方を見る。平屋の指摘に plan2 が来たら plan に直す。"""
+    assert "plan2" not in ar.face_prompt("plan") and "plan2" in ar.face_prompt("plan", multi=True)
+    assert "plan2" not in ar.face_prompt("S", multi=True)
+    assert "plan2" in FINDINGS_SCHEMA["properties"]["findings"]["items"]["properties"]["view"]["enum"]
+    from core.ai.agent import finalize
+    f = finalize(_ctx(), [{"view": "plan2", "kind": "shape", "severity": "低", "message": "x", "targets": [], "evidence": [],
+                           "confidence": "低"}])
+    assert f[0]["view"] == "plan"

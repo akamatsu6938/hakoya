@@ -24,7 +24,7 @@ from core import overrides as ov
 from core.paths import out_dir
 from core.rules import load_rules, rule
 
-VIEWS = ("S", "N", "E", "W", "plan")
+VIEWS = ("S", "N", "E", "W", "plan", "plan2")    # plan2 は2階建ての2階の平面（平屋にはない）
 EDITABLE = {"walls": ("thickness_mm",), "openings": ("width_mm", "offset_mm", "sill_fl_mm", "head_fl_mm")}
 
 
@@ -52,6 +52,13 @@ class ToolContext:
         return out_dir(self.alias) / "inspect"
 
 
+def _check_view(ctx: ToolContext, view: str) -> None:
+    if view not in VIEWS:
+        raise ToolError(f"view は {', '.join(VIEWS)} のどれかです")
+    if view == "plan2" and len(ctx.building.get("levels", [])) < 2:
+        raise ToolError("この家は平屋なので、plan2（2階の平面）はありません。平面は plan です")
+
+
 def _find(b: dict, target: str) -> tuple[str, dict] | tuple[None, None]:
     for coll in ("walls", "openings"):
         for x in b.get(coll, []):
@@ -68,7 +75,7 @@ def get_building(ctx: ToolContext) -> dict:
     walls = collections.Counter(w["kind"] for w in b["walls"])
     ops = collections.Counter(o["kind"] for o in b.get("openings", []))
     r = b.get("roof", {})
-    return {
+    out = {
         "property": ctx.alias,
         "levels": [{k: lv[k] for k in ("name", "fl_mm", "ceiling_mm") if k in lv} for lv in b["levels"]],
         "foundation_top_mm": b["ground"]["foundation_top_mm"],
@@ -86,15 +93,26 @@ def get_building(ctx: ToolContext) -> dict:
         "skipped": b.get("skipped", []),
         "direction_note": "東西南北は glb の +Y を北とみなしている（推定）",
     }
+    if len(b["levels"]) > 1:
+        out["by_level"] = {lv["name"]: {
+            "walls": dict(collections.Counter(w["kind"] for w in b["walls"] if w.get("level") == lv["name"])),
+            "openings": dict(collections.Counter(o["kind"] for o in b.get("openings", []) if o.get("level") == lv["name"])),
+            "outer_size_mm": b.get("wall_stats_by_level", {}).get(lv["name"], {}).get("outer_size_mm"),
+            "floor_openings": [{"id": h.get("id"), "kind": h.get("kind"), "area_m2": h.get("area_m2")}
+                               for h in lv.get("floor_openings", [])]} for lv in b["levels"]}
+        out["roofs"] = [{k: x.get(k) for k in ("id", "kind", "level", "shape", "pitch", "low_side", "thickness_mm",
+                                               "eave_mm", "eave_with_gutter_mm")} for x in b.get("roofs", [])]
+        out["multi_note"] = ("2階建て。roof は大屋根（2階の上）、roofs は全部の屋根（下屋 lean_to を含む）。"
+                             "部品は5つ（基礎・1階・下屋の屋根・2階・大屋根）。平面の図は1階が plan、2階が plan2")
+    return out
 
 
 def get_elements(ctx: ToolContext, view: str | None = None, kind: str | None = None, ids: list[str] | None = None) -> dict:
-    """部材の一覧。view（S/N/E/W/plan）を渡すと、その面の図に写っている部材だけ。kind・ids でも絞れる。"""
+    """部材の一覧。view（S/N/E/W/plan/plan2）を渡すと、その面の図に写っている部材だけ。kind・ids でも絞れる。"""
     b = ctx.building
     in_view = None
     if view:
-        if view not in VIEWS:
-            raise ToolError(f"view は {', '.join(VIEWS)} のどれかです")
+        _check_view(ctx, view)
         p = ctx.inspect_dir / f"{view}.json"
         if p.exists():
             in_view = {e["id"]: e for e in json.loads(p.read_text(encoding="utf-8"))["elements"]}
@@ -116,8 +134,7 @@ def get_elements(ctx: ToolContext, view: str | None = None, kind: str | None = N
 
 def render_view(ctx: ToolContext, view: str, highlight: list[str] | None = None, source: str = "model") -> dict:
     """面の画像（PNG のパス）。source="model" は模型、"glb" は元の形。highlight の部材を赤い枠で強調する。"""
-    if view not in VIEWS:
-        raise ToolError(f"view は {', '.join(VIEWS)} のどれかです")
+    _check_view(ctx, view)
     if source not in ("model", "glb"):
         raise ToolError('source は "model" か "glb" です')
     src = ctx.inspect_dir / f"{view}_{source}.png"
@@ -228,11 +245,11 @@ TOOL_SPECS = {
                      "schema": {"type": "object", "properties": {}, "additionalProperties": False}},
     "get_elements": {"fn": get_elements, "description": "部材（壁・開口）の一覧を返す。view を渡すとその面の図に写る部材だけ（画像上の範囲 bbox_px 付き）。",
                      "schema": {"type": "object", "properties": {
-                         "view": {"type": "string", "enum": list(VIEWS)}, "kind": {"type": "string"},
+                         "view": {"type": "string", "enum": list(VIEWS), "description": "plan2 は2階建ての2階の平面"}, "kind": {"type": "string"},
                          "ids": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": False}},
     "render_view": {"fn": render_view, "description": "面の画像を返す。source=model は模型、glb は元の形。highlight の部材を赤枠で強調する。",
                     "schema": {"type": "object", "properties": {
-                        "view": {"type": "string", "enum": list(VIEWS)}, "source": {"type": "string", "enum": ["model", "glb"]},
+                        "view": {"type": "string", "enum": list(VIEWS), "description": "plan2 は2階建ての2階の平面"}, "source": {"type": "string", "enum": ["model", "glb"]},
                         "highlight": {"type": "array", "items": {"type": "string"}}}, "required": ["view"], "additionalProperties": False}},
     "get_drawing_region": {"fn": get_drawing_region, "description": "図面（jww）の同じ面の画像と寸法・注記を返す（いまは未対応）。",
                            "schema": {"type": "object", "properties": {"view": {"type": "string", "enum": list(VIEWS)},

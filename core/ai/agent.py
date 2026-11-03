@@ -31,6 +31,16 @@ SERVER = "hakoya"
 FACES = {"S": "南の立面", "N": "北の立面", "E": "東の立面", "W": "西の立面", "plan": "平面（屋根を外して上から）",
          "print": "印刷（閉じた立体・細すぎる所・橋渡し・三角・造形範囲）"}
 SKILLS_DIR = REPO_ROOT / "skills"
+# 2階建て：平面の担当が1階（plan）と2階（plan2）の両方を見る。指摘の view には plan2 も使える
+PLAN2 = "plan2"
+MULTI_PLAN_LABEL = "平面（1階は plan、2階は plan2。屋根・2階を外して上から）"
+MULTI_PLAN_HOW = ("2階建てなので、1階の平面（view=plan：2階と屋根を外した図）と2階の平面（view=plan2：大屋根を外した図）の両方で、"
+                  "模型の図と glb の図を render_view で見比べ、get_elements（view=plan / plan2）で部材の番号を確かめる。"
+                  "2階の指摘の view は plan2 にする。")
+
+
+def face_label(face: str, multi: bool = False) -> str:
+    return MULTI_PLAN_LABEL if multi and face == "plan" else FACES[face]
 
 FINDINGS_SCHEMA = {
     "type": "object",
@@ -38,7 +48,7 @@ FINDINGS_SCHEMA = {
         "findings": {"type": "array", "items": {
             "type": "object",
             "properties": {
-                "view": {"type": "string", "enum": list(FACES)},
+                "view": {"type": "string", "enum": list(FACES) + [PLAN2]},
                 "kind": {"type": "string", "enum": ["shape", "opening", "roof", "outline", "rule", "print"]},
                 "severity": {"type": "string", "enum": ["高", "中", "低"]},
                 "message": {"type": "string"},
@@ -107,13 +117,14 @@ def prepare_workdir(alias: str, company: str) -> Path:
     return work
 
 
-def face_agents(models: dict) -> dict:
+def face_agents(models: dict, multi: bool = False) -> dict:
     from claude_agent_sdk import AgentDefinition
     m = models["inspect_face"]
     out = {}
-    for face, label in FACES.items():
+    for face in FACES:
+        label = face_label(face, multi)
         how = ("run_checks の結果と、各面の模型の図（render_view source=model）を見て、印刷と組み立ての問題を探す。"
-               if face == "print" else
+               if face == "print" else MULTI_PLAN_HOW if multi and face == "plan" else
                f"面 {face}（{label}）の模型の図と glb の図を render_view で両方見比べ、get_elements（view={face}）で部材の番号を確かめる。")
         out[f"inspect-{face}"] = AgentDefinition(
             description=f"模型の検品担当：{label}",
@@ -166,7 +177,7 @@ def build_options(ctx: ToolContext, connection: str = "claude_code"):
         tools=list(BUILTIN_ALLOWED),
         allowed_tools=list(BUILTIN_ALLOWED) + tool_names(),
         permission_mode="dontAsk",
-        agents=face_agents(models),
+        agents=face_agents(models, multi=len(ctx.building.get("levels", [])) > 1),
         hooks=deny_non_app_tools(),
         cwd=str(work), setting_sources=["project"], skills=["inspection", "model-rules", f"company-{company}"],
         output_format={"type": "json_schema", "schema": FINDINGS_SCHEMA},
@@ -177,9 +188,12 @@ def build_options(ctx: ToolContext, connection: str = "claude_code"):
 def finalize(ctx: ToolContext, raw_findings: list[dict]) -> list[dict]:
     """指摘に番号を振り、直す案の数値をコードで計算し直す（出どころが使えない案は質問に回す）。"""
     out = []
+    multi = len(ctx.building.get("levels", [])) > 1
     for i, f in enumerate(raw_findings, 1):
         f = dict(f)
         f["id"] = f"F{i}"
+        if f.get("view") == PLAN2 and not multi:     # 平屋に2階の平面はない
+            f["view"] = "plan"
         f["status"] = "未確認"
         p = f.get("proposal")
         if p:

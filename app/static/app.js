@@ -119,16 +119,19 @@ async function approveChanges(target, inputs, reason) {
 }
 
 function renderTables(b) {
-  const ot = $('#openings'); ot.innerHTML = '<tr><th>番号</th><th>種類</th><th>壁</th><th>幅</th><th>下端 FL+</th><th>上端 FL+</th></tr>';
+  // 2階建てのときだけ「階」の列を足す（平屋の表は今までどおり）
+  const lvHead = state.multi ? '<th>階</th>' : '';
+  const lvCell = (x) => (state.multi ? [{ text: x.level || '' }] : []);
+  const ot = $('#openings'); ot.innerHTML = `<tr><th>番号</th>${lvHead}<th>種類</th><th>壁</th><th>幅</th><th>下端 FL+</th><th>上端 FL+</th></tr>`;
   for (const o of b.openings || []) {
-    const rows = editableRow([{ text: o.id }, { text: KIND[o.kind] || o.kind }, { text: o.wall },
+    const rows = editableRow([{ text: o.id }, ...lvCell(o), { text: KIND[o.kind] || o.kind }, { text: o.wall },
       { field: 'width_mm', value: o.width_mm }, { field: 'sill_fl_mm', value: o.sill_fl_mm }, { field: 'head_fl_mm', value: o.head_fl_mm }],
       (inputs, reason) => approveChanges(o.id, inputs, reason));
     rows.forEach((r) => ot.appendChild(r));
   }
-  const wt = $('#walls'); wt.innerHTML = '<tr><th>番号</th><th>種類</th><th>厚み</th><th>下端</th><th>高さ</th><th></th></tr>';
+  const wt = $('#walls'); wt.innerHTML = `<tr><th>番号</th>${lvHead}<th>種類</th><th>厚み</th><th>下端</th><th>高さ</th><th></th></tr>`;
   for (const w of b.walls || []) {
-    const rows = editableRow([{ text: w.id }, { text: KIND[w.kind] || w.kind }, { field: 'thickness_mm', value: w.thickness_mm },
+    const rows = editableRow([{ text: w.id }, ...lvCell(w), { text: KIND[w.kind] || w.kind }, { field: 'thickness_mm', value: w.thickness_mm },
       { text: w.bottom_mm }, { text: w.height === 'to_roof' ? '屋根まで' : w.height }, { text: '' }],
       (inputs, reason) => approveChanges(w.id, inputs, reason));
     const del = document.createElement('button'); del.textContent = '取り除く';
@@ -182,7 +185,7 @@ function renderDownloads() {
 }
 
 // ---------------------------------------------------------------- 検品（SPEC §9-2・§10）
-const VIEW_OF = { S: 'S', N: 'N', E: 'E', W: 'W', plan: 'plan', print: 'plan' };
+const VIEW_OF = { S: 'S', N: 'N', E: 'E', W: 'W', plan: 'plan', plan2: 'plan2', print: 'plan' };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const FIELD = { thickness_mm: '厚み', width_mm: '幅', offset_mm: '壁の端からの位置', sill_fl_mm: '下端 FL+', head_fl_mm: '上端 FL+' };

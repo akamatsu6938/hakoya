@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core.ai.agent import FACES, FINDINGS_SCHEMA, SKILLS_DIR, finalize, load_ai_models
+from core.ai.agent import FACES, FINDINGS_SCHEMA, MULTI_PLAN_HOW, SKILLS_DIR, face_label, finalize, load_ai_models
 from core.ai.tools import TOOL_SPECS, ToolContext, call_tool
 from core.findings import code_findings
 from core.paths import out_dir
@@ -148,10 +148,12 @@ def api_tools() -> list[dict]:
     return [{"name": n, "description": s["description"], "input_schema": s["schema"]} for n, s in TOOL_SPECS.items()]
 
 
-def face_prompt(face: str) -> str:
-    label = FACES[face]
+def face_prompt(face: str, multi: bool = False) -> str:
+    label = face_label(face, multi)
     if face == "print":
         how = "run_checks の結果と、各面の模型の図（render_view source=model）を見て、印刷と組み立ての問題を探してください。"
+    elif multi and face == "plan":
+        how = MULTI_PLAN_HOW
     else:
         how = (f"render_view で面 {face}（{label}）の模型の図（source=model）と glb の図（source=glb）を両方見比べ、"
                f"get_elements（view={face}）で部材の番号を確かめてください。")
@@ -221,7 +223,7 @@ async def run_face(client, ctx: ToolContext, face: str, *, model: str, effort: s
     log({"type": "FaceStarted", "face": face})
     try:
         text, stop, turns = await tool_loop(
-            client, ctx, face_prompt(face), model=model, effort=effort, system=system, tools=tools, meter=meter,
+            client, ctx, face_prompt(face, len(ctx.building.get("levels", [])) > 1), model=model, effort=effort, system=system, tools=tools, meter=meter,
             max_turns=max_turns,
             on_turn=lambda turn, resp, cost: log({"type": "FaceTurn", "face": face, "turn": turn, "stop_reason": resp.stop_reason,
                                                   "cost_usd": round(cost, 4), "content": _blocks(resp.content)}),
