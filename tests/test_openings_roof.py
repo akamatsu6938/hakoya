@@ -46,6 +46,19 @@ def test_fixed_window_ignores_top_kuri():
     assert assign_wall(fp, sill, head, [wall]) is wall
 
 
+def test_crossing_wall_is_not_used_and_hanging_wall_above_is():
+    """★11/4（デモの家・物件C〜M）：戸の枠の奥行き（176mm）を幅として、直角に交わる壁に入れない。高さの重なる壁がなければ、
+    真上の下がり壁（下端＝戸の上端）を選ぶ（開口の所に壁はないので、穴は開けない）。"""
+    fp = box(0, -88, 790, 88)                                                     # x 向きの戸（幅 790・奥行き 176）
+    crossing = Wall(start=np.array([850.0, -1000.0]), end=np.array([850.0, 1000.0]), thickness=130, kind="interior",
+                    bottom=624, top=3024)                                         # 戸の端に重なる、直角の壁
+    hanging = Wall(start=np.array([0.0, 0.0]), end=np.array([850.0, 0.0]), thickness=130, kind="interior", bottom=2624, top=3024)
+    assert assign_wall(fp, 624, 2624, [crossing]) is None
+    assert assign_wall(fp, 624, 2624, [crossing, hanging]) is hanging
+    full = Wall(start=np.array([0.0, 0.0]), end=np.array([850.0, 0.0]), thickness=130, kind="interior", bottom=624, top=3024)
+    assert assign_wall(fp, 624, 2624, [crossing, hanging, full]) is full          # 高さの重なる壁があれば、そちら
+
+
 def test_sliding_window_style():
     p = Part(node=4, name="typeETate", type_code="typeETate", primitives=[
         _box_prim("TATE_MADO", 0, 395, 0, 160, 2274, 2624), _box_prim("TATE_MADO", 395, 790, 0, 160, 2294, 2604),

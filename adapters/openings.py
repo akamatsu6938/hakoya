@@ -126,17 +126,40 @@ def snap_door_heads(items: list[dict], fl: float, door_top_fl: float, tol: float
             o["head_mm"] = fl + door_top_fl
 
 
+TOUCH_MM = 5.0          # 開口の上端と壁の下端の差がこれ以内なら「真上の壁」（下がり壁の下の開口）
+
+
+def _extents(fp: Polygon, d: np.ndarray) -> tuple[float, float]:
+    """平面の形の、向き d に沿った長さと、それに直角な長さ。"""
+    pts = np.array(fp.exterior.coords)
+    n = np.array([-d[1], d[0]])
+    return float(np.ptp(pts @ d)), float(np.ptp(pts @ n))
+
+
 def assign_wall(fp: Polygon, sill: float, head: float, walls: list[Wall]) -> Wall | None:
     """穴の平面の形といちばん重なり、高さも重なる壁。"""
-    best, best_area = None, 0.0
+    return _assign(fp, sill, head, walls)[0]
+
+
+def _assign(fp: Polygon, sill: float, head: float, walls: list[Wall]) -> tuple[Wall | None, bool]:
+    """（壁, 下がり壁の下か）。★11/4（デモの家・物件C〜M）：開口の向きと直角な壁は選ばない（戸の枠の奥行き 145〜216mm を
+    幅として拾い、交わる壁に床から戸の高さまでの切り欠きができていた）。高さの重なる壁がなければ、真上の下がり壁
+    （下端が開口の上端と同じ）を選ぶ（開口の所には壁がないので、穴は開けない）。"""
+    best, best_area, above, above_area = None, 0.0, None, 0.0
     for w in walls:
-        top = w.top if w.top is not None else float("inf")
-        if min(head, top) - max(sill, w.bottom) <= 0:
-            continue
+        along, across = _extents(fp, w.direction)
+        if along < 0.5 * max(along, across):
+            continue                                   # 開口の向きと直角な壁
         a = fp.intersection(w.rect()).area
-        if a > best_area:
-            best, best_area = w, a
-    return best
+        if a <= 0:
+            continue
+        top = w.top if w.top is not None else float("inf")
+        if min(head, top) - max(sill, w.bottom) > 0:
+            if a > best_area:
+                best, best_area = w, a
+        elif abs(w.bottom - head) <= TOUCH_MM and a > above_area:
+            above, above_area = w, a
+    return (best, False) if best is not None else (above, above is not None)
 
 
 def openings(tate: list[Part], walls: list[Wall], fl: float) -> tuple[list[dict], list[dict]]:
@@ -151,7 +174,7 @@ def openings(tate: list[Part], walls: list[Wall], fl: float) -> tuple[list[dict]
         else:   # 上下2段の窓などは1つの穴にまとめる
             fp = bbox_polygon(np.vstack([np.array(h[1].exterior.coords) for h in g]))
             kind, style = _classify([_suffix(pr.code) for p in parts for pr in p.primitives], sill, fl)
-        w = assign_wall(fp, sill, head, walls)
+        w, under = _assign(fp, sill, head, walls)
         if w is None:
             orphans += [{"source": p.source, "reason": "この建具が入る壁が見つからない"} for p in parts]
             continue
@@ -161,6 +184,8 @@ def openings(tate: list[Part], walls: list[Wall], fl: float) -> tuple[list[dict]
         a0, a1 = float(proj.min()), float(proj.max())
         center = np.asarray(fp.centroid.coords[0])
         notes = [f"stacked: 上下に重なる建具 {len(g)} 個を1つの穴にまとめた"] if len(g) > 1 else []
+        if under:
+            notes.append("under_hanging_wall: 下がり壁の下の開口（壁は開口の上端より上だけ）。穴は開けない")
         # ★引き込み戸（物件B の O17）：建具の箱は戸袋まで含む。戸袋は戸を隠す壁なので、穴は通れる所だけにする
         pocket = [pr.vertices[:, :2] for p in parts for pr in p.primitives if _suffix(pr.code) == POCKET and len(pr.vertices)]
         if pocket:

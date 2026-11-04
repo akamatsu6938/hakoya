@@ -466,6 +466,8 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         cuts = []
         for o in openings_by_wall.get(w["id"], []):
             sill, head = float(o["sill_mm"]), float(o["head_mm"])
+            if head <= z0 + 1.0:                                     # 下がり壁の下の開口：開口の所に壁はない（★11/4）
+                continue
             if sill - z0 < min_feat:                                 # 下に残る壁が細すぎる → 下まで抜く
                 sill = z0 - 1
             wall_top_here = z1 if top is not None else plane_z(rb, *o["center"])

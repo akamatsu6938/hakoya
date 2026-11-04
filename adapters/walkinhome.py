@@ -337,6 +337,9 @@ def _measure_exterior_thickness(ext_planes: list[wl.Plane], finish_planes: list[
     return float(collections.Counter(dists).most_common(1)[0][0]) if dists else None
 
 
+DOOR_WALL_NEAR_MM = 450.0     # 戸のまわりに足した壁の近く：ここに端がある壁だけ、もう一度伸ばしてつなぐ
+
+
 def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, None),
                 parts: dict | None = None, lower_roofs: list[dict] | None = None) -> dict:
     """1つの階の壁と部屋を作り直す。
@@ -351,12 +354,13 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
 
     # 開口（建具の穴）とドア（床まで届く建具）。穴の形は openings.hole（吊り戸のレール・取っ手は除く）
     tate = sel.get("tate", model.by_type("typeETate"))
-    opening_fps, door_fps = [], []
+    opening_fps, door_fps, doors = [], [], []
     for p in tate:
-        fp, sill, _ = op.hole(p)
+        fp, sill, head = op.hole(p)
         opening_fps.append(fp)
         if sill <= fl + 100:
             door_fps.append(fp)
+            doors.append((fp, sill, head, p.source))
 
     # 手順1：外壁、手順4：単独の壁
     ext_tris = []
@@ -414,6 +418,16 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
     for _ in range(2):  # つないだ後にもう一度：つながった壁の端も、ぶつかる壁まで伸ばす
         wl.extend_to_junctions(interior, outer + interior, zone=zone)
         interior = wl.merge_collinear(interior, region)
+    # ★11/4 デモの家・物件C〜M：床から天井までの戸の所に壁の面がなく、つないでも壁ごと抜けていた → 戸の枠に合わせて壁を足し、
+    # もう一度つなぐ（ふだんどおりつながった戸には足さない）
+    added = wl.door_walls(doors, outer + interior, _filled(exterior_fp), t_int, fl, ceiling_abs)
+    if added:
+        interior += added
+        near = unary_union([w.rect().buffer(DOOR_WALL_NEAR_MM) for w in added])
+        for _ in range(2):   # 伸ばすのは、足した壁と、その近くに端がある壁だけ（ほかの壁は1回目のまま）
+            movers = [w for w in interior if near.contains(Point(w.start)) or near.contains(Point(w.end))]
+            wl.extend_to_junctions(movers, outer + interior, zone=zone)
+            interior = wl.merge_collinear(interior, region)
     kept = wl.drop_covered(outer + interior, keep_kinds=("exterior", "standalone"), ratio=0.5)
     interior = [w for w in kept if w.kind == "interior"]
     # 背中合わせから作った壁は後回し：向かい合う仕上げ面から作った内壁で覆われていれば、そちらを使う。
@@ -448,6 +462,12 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
                            "note": f"glb では背中合わせの外壁の面（間 {getattr(b, '_back_to_back_gap', 0):.0f}mm）。{how}"})
         if merged_into is not b:
             merged_into.assumptions.append("back_to_back: glb で背中合わせの外壁の面として入っていた壁を、この内壁にまとめた")
+
+    for w in interior:   # 戸のまわりに足した壁（door_walls）は、検品で確かめられるように例外に残す
+        for a in w.assumptions:
+            if a.startswith("door_wall: "):
+                exceptions.append({"kind": "door_without_wall", "start": w.start, "end": w.end, "wall": w,
+                                   "note": a.split(": ", 1)[1]})
 
     unresolved = wl.unresolved_regions(region, interior, t_int, door_fps)
     # 上がり框の位置の隙間：壁はない（物件Aで 作者確認）。未解決にせず、例外として記録だけ残す

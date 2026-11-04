@@ -37,6 +37,23 @@ def test_ids_survive_reordering_and_small_moves():
     assert out["id_changes"]["new"] == ["W4"] and out["id_changes"]["removed"] == []
 
 
+def test_exceptions_follow_the_new_numbers():
+    """★11/4 デモの家：glb の例外（FL+400 から始まる戸など）が指す開口・壁の番号も、引き継いだ番号に付け直す。"""
+    prev = _prev()
+    prev["openings"].append({"id": "O2", "wall": "W3", "kind": "door", "center": [1500, 2000], "source": "glb:typeETate#7"})
+    new = {"walls": [_wall("W1", "interior", [0, 2000], [3000, 2000]), _wall("W2", "interior", [3000, 0], [3000, 4000]),
+                     _wall("W3", "exterior", [0, 0], [6000, 0], 480)],
+           "openings": [{"id": "O1", "wall": "W1", "kind": "door", "center": [1500, 2000], "source": "glb:typeETate#7"},
+                        {"id": "O2", "wall": "W2", "kind": "door", "center": [3000, 1000], "source": "glb:typeETate#5"}],
+           "rooms": [], "assumptions": [],
+           "glb_exceptions": [{"kind": "door_above_floor", "opening": "O1", "source": "glb:typeETate#7", "note": "x"},
+                              {"kind": "back_to_back_exterior_faces", "wall": "W1", "note": "y"}]}
+    out = stabilize(new, prev)
+    ex = out["glb_exceptions"]
+    assert ex[0]["opening"] == "O2" and next(o for o in out["openings"] if o["id"] == "O2")["source"] == "glb:typeETate#7"
+    assert ex[1]["wall"] == "W3"
+
+
 def test_removed_wall_is_reported():
     prev = _prev()
     new = {"walls": [_wall("W1", "exterior", [0, 0], [6000, 0], 480), _wall("W2", "interior", [3000, 0], [3000, 4000])],

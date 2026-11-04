@@ -97,6 +97,8 @@ def stabilize(building: dict, previous: dict | None) -> dict:
     for e in building.get("glb_exceptions", []):
         if e.get("wall"):
             e["wall"] = wmap.get(e["wall"], e["wall"])
+        if e.get("opening"):    # ★11/4 デモの家：開口の例外（FL+400 から始まる戸）の番号を付け直していなかった（O12 が O19 と出た）
+            e["opening"] = omap.get(e["opening"], e["opening"])
     all_map = {**wmap, **omap}
     for a in building.get("assumptions", []):
         a["field"] = re.sub(r"\[(\w+)\]", lambda m: f"[{all_map.get(m.group(1), m.group(1))}]", a["field"])

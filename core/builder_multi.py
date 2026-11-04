@@ -114,6 +114,8 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
         cuts = []
         for o in ops_by.get(w["id"], []):
             sill, head = float(o["sill_mm"]), float(o["head_mm"])
+            if head <= z0 + 1.0:                                         # 下がり壁の下の開口：開口の所に壁はない（★11/4）
+                continue
             if sill - z0 < min_feat:
                 sill = z0 - 1
             cx, cy = o["center"]

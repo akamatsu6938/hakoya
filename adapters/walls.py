@@ -659,6 +659,66 @@ def extend_to_junctions(walls: list[Wall], targets: list[Wall], zone: Polygon | 
                 break
 
 
+def _union_length(spans: list[tuple[float, float]]) -> float:
+    total, cur = 0.0, None
+    for lo, hi in sorted(spans):
+        if cur is None or lo > cur[1]:
+            if cur is not None:
+                total += cur[1] - cur[0]
+            cur = [lo, hi]
+        else:
+            cur[1] = max(cur[1], hi)
+    return total + (cur[1] - cur[0] if cur is not None else 0.0)
+
+
+def door_walls(doors: list[tuple[Polygon, float, float, str]], walls: list[Wall], house: Polygon, thickness: float,
+               fl: float, ceiling: float, cover_ratio: float = 0.5, head_tol: float = 50.0, edge_mm: float = 250.0) -> list[Wall]:
+    """床から天井までの戸の所に、戸の向きの壁がなければ、戸の枠に合わせて壁を足す（★11/4 デモの家・物件C〜M）。
+
+    床から天井までの戸の上には壁の面がない。戸が並んだり、戸の間に T 字の壁がぶつかったりすると、向かい合う面の組が
+    できず、壁ごと抜けていた（戸は「壁が見つからない」か、直角の壁に入っていた）。戸は壁の中にしか付かないので、
+    戸があることを壁がある証拠にする（足した壁には door_wall の注記を付け、glb の例外として検品に回す）。
+    doors：（平面の形, 下端, 上端, 出どころ）。戸の向き＝平面の形の長い方。戸の幅のうち、同じ向きで戸を通る壁に
+    覆われている長さが cover_ratio 未満なら足す。線・厚み・高さは、戸を通る同じ向きの内壁のうち、いちばん近い壁に合わせる。
+    外壁の戸（掃き出し窓・テラス戸。家の外形の線から edge_mm 以内）には足さない（この時点の外壁は開口の所で切れているため、
+    壁がないように見える。★物件B で、足した壁に向かって内壁 W33 が 70mm 伸びた）。"""
+    out: list[Wall] = []
+    for fp, sill, head, src in doors:
+        if sill > fl + 100 or head < ceiling - head_tol or fp.area <= 0 or not house.contains(fp.centroid):
+            continue
+        if house.exterior.distance(fp.centroid) < edge_mm:
+            continue                                   # 外壁の戸
+        c = np.array(fp.minimum_rotated_rectangle.exterior.coords)[:4]
+        e1, e2 = c[1] - c[0], c[2] - c[1]
+        d = e1 if np.linalg.norm(e1) >= np.linalg.norm(e2) else e2
+        d = d / np.linalg.norm(d)
+        if d[0] < -1e-9 or (abs(d[0]) <= 1e-9 and d[1] < 0):
+            d = -d                                     # 向きをそろえる（壁の始まりが左・下になるように）
+        n = np.array([-d[1], d[0]])
+        pts = np.array(fp.exterior.coords)
+        a0, a1 = float((pts @ d).min()), float((pts @ d).max())
+        b0, b1 = float((pts @ n).min()), float((pts @ n).max())
+        through = [w for w in walls + out if abs(float(np.dot(w.direction, d))) > 0.999
+                   and b0 - 1.0 <= float(np.dot(w.start, n)) <= b1 + 1.0]
+
+        def span(w: Wall) -> tuple[float, float]:
+            return tuple(sorted((float(np.dot(w.start, d)), float(np.dot(w.end, d)))))  # type: ignore[return-value]
+        covered = _union_length([(max(s0, a0), min(s1, a1)) for s0, s1 in map(span, through) if min(s1, a1) > max(s0, a0)])
+        if covered >= cover_ratio * (a1 - a0):
+            continue
+        inner = [w for w in through if w.kind == "interior"]
+        ref = min(inner, key=lambda w: max(span(w)[0] - a1, a0 - span(w)[1], 0.0)) if inner else None
+        off = float(np.dot(ref.start, n)) if ref is not None else (b0 + b1) / 2
+        w = Wall(start=n * off + d * a0, end=n * off + d * a1, thickness=ref.thickness if ref is not None else thickness,
+                 kind="interior", bottom=ref.bottom if ref is not None else fl,
+                 top=ref.top if ref is not None else ceiling, sources=[src],
+                 assumptions=[f"door_wall: 床から天井までの戸（{src}）の所に壁の面がない（glb）。戸の枠に合わせて壁を足した"])
+        if ref is not None and getattr(ref, "_gap", None) is not None:
+            w._gap = ref._gap  # type: ignore[attr-defined]
+        out.append(w)
+    return out
+
+
 def unresolved_regions(region: Polygon, walls: list[Wall], thickness: float, door_fps: list[Polygon] | None = None,
                        min_area_mm2: float = 60_000.0) -> list[Wall]:
     """向かい合う面から作れなかった内壁の範囲を、囲む長方形で返す。

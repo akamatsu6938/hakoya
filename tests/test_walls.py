@@ -14,6 +14,25 @@ from shapely.geometry import Polygon, box
 
 from adapters import walls as wl
 
+
+def test_door_walls_fill_floor_to_ceiling_doors_without_a_wall():
+    """★11/4 デモの家：床から天井までの戸が並び、戸の間に T 字の壁がぶつかると、向かい合う面の組ができず、戸の所の壁ごと
+    抜けていた → 戸の枠に合わせて壁を足す（線・厚み・高さは、戸を通る近い内壁に合わせる）。"""
+    a = wl.Wall(start=np.array([0.0, 0.0]), end=np.array([0.0, 1000.0]), thickness=130, kind="interior", bottom=684, top=3024)
+    b = wl.Wall(start=np.array([0.0, 3000.0]), end=np.array([0.0, 4000.0]), thickness=130, kind="interior", bottom=684, top=3024)
+    house = box(-3000, -1000, 3000, 5000)
+    doors = [(box(-88, 1000, 88, 1790), 624, 3024, "glb:typeETate#1"),          # 床から天井まで・壁なし → 足す
+             (box(-88, 2100, 88, 2890), 624, 2624, "glb:typeETate#2"),          # 天井まで届かない戸 → 足さない
+             (box(-88, 100, 88, 890), 624, 3024, "glb:typeETate#3"),            # 壁 a の中の戸 → 足さない
+             (box(2830, 1000, 3006, 1790), 624, 3024, "glb:typeETate#4")]       # 外壁の戸（家の外形の線の近く）→ 足さない
+    out = wl.door_walls(doors, [a, b], house, 120.0, 624.0, 3024.0)
+    assert len(out) == 1
+    w = out[0]
+    assert np.allclose(w.start, [0, 1000]) and np.allclose(w.end, [0, 1790]) and w.thickness == 130
+    assert (w.bottom, w.top, w.sources) == (684, 3024, ["glb:typeETate#1"]) and w.assumptions[0].startswith("door_wall: ")
+    lone = wl.door_walls([(box(-1088, 1000, -912, 1790), 624, 3024, "glb:typeETate#5")], [], house, 120.0, 624.0, 3024.0)
+    assert np.allclose([lone[0].start[0], lone[0].end[0]], [-1000, -1000]) and lone[0].thickness == 120   # 壁がなければ戸の真ん中
+
 T_EXT, FIN, H0, H1 = 160.0, 70.0, 0.0, 2400.0
 
 

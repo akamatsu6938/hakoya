@@ -35,11 +35,14 @@ def code_findings(alias: str) -> list[dict]:
     b = json.loads((out_dir(alias) / "building.json").read_text(encoding="utf-8"))
     out = []
     labels = {"back_to_back_exterior_faces": "背中合わせの外壁の面", "agari_kamachi": "上がり框の位置",
-              "extra_roofs": "模型にしなかった屋根の部材", "upper_floor_overhang": "2階のはね出し"}
+              "extra_roofs": "模型にしなかった屋根の部材", "upper_floor_overhang": "2階のはね出し",
+              "door_above_floor": "床より高い所から始まる戸", "stairs_area": "階段の所", "eave_soffit": "軒天",
+              "door_without_wall": "戸のまわりに壁の面がない所"}
     for e in b.get("glb_exceptions", []):
         out.append({"view": "plan", "kind": "shape", "severity": "低",
                     "message": f"glb の例外（{labels.get(e['kind'], e['kind'])}）：{e['note']}",
-                    "targets": [e["wall"]] if e.get("wall") else [], "evidence": [e.get("source") or "glb"], "source": "code"})
+                    "targets": [x for x in (e.get("wall"), e.get("opening")) if x],   # 開口の例外は開口を指す（★11/4）
+                    "evidence": [e.get("source") or "glb"], "source": "code"})
     try:   # glb にありえない形（見つけるだけ。直し方は 作者と決める：docs/proposal-glb-consistency.md）
         from core.consistency import find_all
         applied = ov.apply(b, ov.load(alias))[0]
