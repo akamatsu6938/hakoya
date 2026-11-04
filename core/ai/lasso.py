@@ -40,7 +40,8 @@ ROOF_GUIDE = ("屋根の軒の出は propose_override（target=屋根の番号�
 
 def lasso_prompt(rows: list[dict], text: str, view: str | None = None) -> str:
     """view を渡すと 3D の画面で囲んだときの言い方（どちらから見た画面か）。"""
-    listing = "\n".join(f"- {r['id']}（{r['label']}）：{r['text']}" for r in rows) or "- （なし）"
+    listing = "\n".join(f"- {r['id']}（{r['label']}）：{r['text']}" + ("　※囲みに一部だけかかった部材" if r.get("partial") else "")
+                        for r in rows) or "- （なし）"
     ids = ",".join(r["id"] for r in rows if r["id"][:1] in "WO")
     where = f"{VIEW_JA.get(view, view)}から見た 3D の画面で" if view else "平面図で"
     look = (f"必要なら render_view（view={view if view in VIEW_JA else 'plan'}、highlight={ids}）で図を見て、"
@@ -49,6 +50,8 @@ def lasso_prompt(rows: list[dict], text: str, view: str | None = None) -> str:
     roof = ROOF_GUIDE if any(r["kind"] in ("eave", "roof") for r in rows) else ""
     return (f"人が{where}部材を囲み、こう書きました：「{text}」\n\n"
             f"囲みの中の部材（コードが決めたもの）：\n{listing}\n\n"
+            + ("「一部だけかかった部材」は、囲みの縁がかすっただけのこともあります。一言から外れていれば直さないでください。\n\n"
+               if any(r.get("partial") for r in rows) else "") +
             "この一言に合う直す案を propose_override で作ってください（1つの部材の1つの値ごとに1件）。"
             f"決まらないときは ask_question で質問してください。{roof}{look}"
             "最後に、何をしたかを日本語で1〜2文で書いてください。")
@@ -107,7 +110,8 @@ async def _run_api(ctx: ToolContext, prompt: str, conf: dict, client=None) -> tu
 
 async def run_lasso(alias: str, connection: str, points: list[list[float]] | None, text: str, *,
                     client=None, ctx: ToolContext | None = None, level: str | None = None,
-                    hits: list[dict] | None = None, mask_px: int = 0, view: str | None = None) -> dict:
+                    hits: list[dict] | None = None, mask_px: int = 0, view: str | None = None,
+                    keep: list[str] | None = None) -> dict:
     """囲み（平面の mm）か 3D の画素の数（hits）と一言から、直す案と質問を返す。保存はしない（人が承認したら approve で記録する）。
     level：2階建てで表示している階（平面図の囲みで、その階の部材だけを選ぶ）。view：3D の画面をどちらから見ていたか。"""
     ctx = ctx or ToolContext.load(alias)
@@ -117,6 +121,7 @@ async def run_lasso(alias: str, connection: str, points: list[list[float]] | Non
         selection = geo.select(ctx.building, points, level)
     else:
         raise ValueError("囲みがありません。もう一度囲んでください")
+    selection = geo.keep_only(selection, keep)            # 画面で札の × を押して外した部材を除く
     rows = geo.describe(ctx.building, selection)
     out = {"connection": connection, "selection": rows, "message": "", "proposals": [], "questions": [], "cost_usd": None}
     if connection == "off" or not rows:

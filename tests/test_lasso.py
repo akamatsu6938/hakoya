@@ -40,18 +40,33 @@ def box(x0, y0, x1, y1):
 
 # ---------------------------------------------------------------- 囲みの中の部材（コードが決める）
 
-def test_part_of_a_long_wall_is_picked_but_touching_walls_are_not():
-    # W3 の 3,000mm 分を囲む。直交する W4・W5 は囲みの縁に 300mm かかるだけなので選ばない
-    assert geo.select(_building(), box(2700, 500, 3300, 3500)) == {"walls": ["W3"], "openings": []}
+def test_touching_walls_are_picked_as_partial():
+    """★11/4 作者「一部だけ囲んだ部材が選ばれない。触れるだけじゃダメ？」→ 少しでもかかれば選び、一部だけの印を付ける。
+    W3 の 3,000mm 分を囲むと、縁に 300mm かかる直交の W4・W5 も選ばれる（要らなければ画面の × で外す）。"""
+    assert geo.select(_building(), box(2700, 500, 3300, 3500)) == {
+        "walls": ["W3", "W4", "W5"], "openings": [], "partial": ["W3", "W4", "W5"]}
 
 
-def test_opening_by_its_center():
-    # 窓 O1 だけを囲む（その壁 W1 は 700mm しか入らないので選ばない）
-    assert geo.select(_building(), box(1000, -300, 1700, 300)) == {"walls": [], "openings": ["O1"]}
+def test_wall_fully_inside_is_not_partial():
+    sel = geo.select(_building(), box(-200, 1800, 3100, 2200))      # W4（0〜3000）を丸ごと囲む
+    assert "W4" in sel["walls"] and "W4" not in sel["partial"]
 
 
-def test_corner_only_picks_nothing():
-    assert geo.select(_building(), box(5800, -200, 6200, 200)) == {"walls": [], "openings": []}
+def test_part_of_an_opening_picks_it_and_its_wall():
+    # 窓 O1 の一部を囲む → O1 と、その壁 W1 の一部
+    assert geo.select(_building(), box(1000, -300, 1700, 300)) == {"walls": ["W1"], "openings": ["O1"], "partial": ["W1", "O1"]}
+
+
+def test_corner_picks_both_walls_and_a_graze_picks_nothing():
+    assert geo.select(_building(), box(5800, -200, 6200, 200))["walls"] == ["W1", "W2"]
+    # 囲みの線が壁をかすっただけ（重なり 1,000mm² 未満）は選ばない
+    assert geo.select(_building(), [[4000, 78], [4000, 300], [4200, 300], [4200, 78]])["walls"] == []   # W1 と 3×200mm だけ重なる
+
+
+def test_removed_chips_are_not_sent():
+    sel = geo.select(_building(), box(2700, 500, 3300, 3500))
+    kept = geo.keep_only(sel, ["W3", "W99"])                       # 囲みにない番号（W99）は足さない
+    assert kept["walls"] == ["W3"] and kept["openings"] == []
 
 
 def test_bad_lassos():
@@ -64,9 +79,9 @@ def test_bad_lassos():
 
 
 def test_describe_rows():
-    rows = geo.describe(_building(), {"walls": ["W3"], "openings": ["O1"]})
-    assert rows[0]["id"] == "W3" and rows[0]["label"] == "内壁" and "厚み 145mm" in rows[0]["text"]
-    assert rows[1]["label"] == "窓" and "FL+900〜FL+2000" in rows[1]["text"]
+    rows = geo.describe(_building(), {"walls": ["W3"], "openings": ["O1"], "partial": ["O1"]})
+    assert rows[0]["id"] == "W3" and rows[0]["label"] == "内壁" and "厚み 145mm" in rows[0]["text"] and not rows[0]["partial"]
+    assert rows[1]["label"] == "窓" and "FL+900〜FL+2000" in rows[1]["text"] and rows[1]["partial"]
 
 
 # ---------------------------------------------------------------- Claude に頼む（偽の相手）
@@ -98,16 +113,17 @@ def out(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _ask(client, connection="api_key", points=None, text=TEXT):
+def _ask(client, connection="api_key", points=None, text=TEXT, keep=None):
     return asyncio.run(al.run_lasso("物件T", connection, points or box(2700, 500, 3300, 3500), text,
-                                    client=client, ctx=_ctx()))
+                                    client=client, ctx=_ctx(), keep=keep))
 
 
 def test_proposal_numbers_come_from_code(out):
     client = FakeClient("propose_override", {"target": "W3", "field": "thickness_mm", "value_source": "majority:interior",
                                              "reason": "ほかの内壁にそろえる"})
-    res = _ask(client)
+    res = _ask(client, keep=["W3"])                                # 縁にかかった W4・W5 は画面の × で外した
     assert [r["id"] for r in res["selection"]] == ["W3"]
+    assert "一部だけかかった部材" in client.calls[0]["messages"][0]["content"]          # W3 も全部は入っていない
     p = res["proposals"][0]
     assert (p["from"], p["to"], p["value_source"]) == (145, 130, "majority:interior")   # 130 は内壁の多数派（コードが計算）
     first = client.calls[0]
@@ -120,7 +136,7 @@ def test_proposal_numbers_come_from_code(out):
 
 def test_question_when_unclear(out):
     client = FakeClient("ask_question", {"question": "壁が2枚囲まれています。どちらですか？", "options": ["W4", "W5"]})
-    res = _ask(client, points=box(500, 1700, 5500, 2300))         # 縦の W3 は 600mm しか入らないので選ばない
+    res = _ask(client, points=box(500, 1700, 5500, 2300), keep=["W4", "W5"])   # 縦の W3 は縁にかかっただけなので × で外した
     assert {r["id"] for r in res["selection"]} == {"W4", "W5"}
     assert res["questions"][0]["options"] == ["W4", "W5"] and res["proposals"] == []
 
@@ -129,7 +145,7 @@ def test_off_and_empty_do_not_call_claude(out):
     client = FakeClient("get_building", {})
     res = _ask(client, connection="off")
     assert res["message"].startswith("AI なし") and res["proposals"] == [] and client.calls == []
-    res = _ask(client, points=box(5800, -200, 6200, 200))
+    res = _ask(client, points=box(4000, 500, 5000, 1500))         # 部屋の中だけ（壁にかからない）
     assert res["selection"] == [] and "部材がありません" in res["message"] and client.calls == []
     with pytest.raises(ValueError, match="一言"):
         _ask(client, text="  ")

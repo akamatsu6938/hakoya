@@ -397,6 +397,7 @@ class LassoIn(BaseModel):
     text: str = ""
     connection: str = "off"
     level: str | None = None             # 2階建て：表示している階（平面図の囲みで、その階の部材だけを選ぶ）
+    keep: list[str] | None = None        # 画面で札の × を押さずに残した部材（囲みから選ばれた部材の中だけが効く）
 
 
 def _lasso_selection(b: dict, body: LassoIn) -> dict:
@@ -447,7 +448,7 @@ def lasso_ask(alias: str, body: LassoIn):
     from core.ai.lasso import run_lasso
     try:
         res = asyncio.run(run_lasso(alias, body.connection, body.polygon, body.text, level=body.level,
-                                    hits=body.hits, mask_px=body.mask_px, view=body.view))
+                                    hits=body.hits, mask_px=body.mask_px, view=body.view, keep=body.keep))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:

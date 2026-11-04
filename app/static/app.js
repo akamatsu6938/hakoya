@@ -692,12 +692,25 @@ overlay.addEventListener('pointerup', async () => {
   } catch (e) { setStatus('囲みを読めませんでした：' + e.message, 'err'); clearLasso(); }
 });
 
+// 囲みに少しでもかかった部材を並べる（★11/4 作者「一部だけ囲んだ部材が選ばれない」）。
+// 一部だけかかった部材は薄く出し、要らない部材は × で外せる。Claude に頼むときは残した部材だけを送る
 function showPicked(rows) {
   lasso.selection = rows;
+  document.querySelectorAll('#plan [data-id].picked').forEach((el) => el.classList.remove('picked'));
   for (const r of rows) document.querySelectorAll(`#plan [data-id="${CSS.escape(r.id)}"]`).forEach((el) => el.classList.add('picked'));
-  $('#lasso-picked').innerHTML = rows.length
-    ? '<b>囲んだ部材</b>' + rows.map((r) => `<div><span class="tag">${esc(r.id)}</span>${esc(r.label)}　${esc(r.text)}</div>`).join('')
-    : '<span class="hint">囲みの中に部材がありません。壁や窓、軒をぐるっと囲んでください。</span>';
+  const box = $('#lasso-picked'); box.innerHTML = '';
+  if (rows.length) {
+    box.insertAdjacentHTML('beforeend', '<b>囲んだ部材</b>' + (rows.some((r) => r.partial) ? '<span class="hint">（薄いのは一部だけかかった部材。要らなければ × で外す）</span>' : ''));
+    for (const r of rows) {
+      const div = document.createElement('div'); div.className = 'pick-row' + (r.partial ? ' partial' : '');
+      div.innerHTML = `<span class="tag">${esc(r.id)}</span>${esc(r.label)}　${esc(r.text)}`;
+      const x = document.createElement('button'); x.className = 'unpick'; x.textContent = '×'; x.title = `${r.id} を外す`;
+      x.addEventListener('click', () => showPicked(lasso.selection.filter((q) => q.id !== r.id)));
+      div.prepend(x); box.appendChild(div);
+    }
+  } else {
+    box.innerHTML = '<span class="hint">囲みの中に部材がありません。壁や窓、軒をぐるっと囲んでください。</span>';
+  }
   $('#lasso-panel').hidden = false; $('#lasso-result').innerHTML = '';
   $('#lasso-ask').disabled = !rows.length; $('#lasso-table').disabled = !rows.length;
   resize();                                                // 欄が開いた分、3D の画面の大きさを合わせ直す
@@ -730,7 +743,8 @@ async function askLasso(extra = '') {
   try {
     const where = lasso.source === '3d' ? { hits: lasso.hits, mask_px: lasso.maskPx, view: lasso.view }
       : { polygon: lasso.polygon, level: state.multi ? $('#plan-level').value : null };
-    const res = await call('POST', '/api/lasso/{a}/ask', { ...where, text: text + extra, connection });
+    const keep = lasso.selection.map((r) => r.id);          // × で外した部材は送らない
+    const res = await call('POST', '/api/lasso/{a}/ask', { ...where, text: text + extra, connection, keep });
     renderLassoResult(res);
     setStatus(`Claude の答えが届きました${res.cost_usd ? `（費用の目安 $${Number(res.cost_usd).toFixed(2)}）` : ''}`, 'ok');
   } catch (e) { setStatus('頼めませんでした：' + e.message, 'err'); }

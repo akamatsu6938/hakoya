@@ -1,19 +1,19 @@
 """囲んで直す（SPEC §9-3）の「囲みの中の部材」をコードで決める（Claude は使わない）。
 
-平面図（select）：人が描いた囲み（平面の mm の多角形）と、壁・開口の重なりで決める。
-- 壁：中心線のうち囲みの中にある長さが、壁の長さの半分以上か 1,000mm 以上（長い壁の一部だけを囲んでも選べる。
-  囲みの縁にかかっただけの、直交する壁は選ばない）。
-- 開口（窓・ドア）：中心が囲みの中。
+平面図（select）：人が描いた囲み（平面の mm の多角形）と、壁・開口の形の重なりで決める。
+- ★11/4 作者「一部だけ囲んだ部材が選ばれない。触れるだけじゃダメ？」→ **少しでもかかった部材を選ぶ**
+  （壁は厚みのある形、窓・ドアは幅×壁の厚みの形が、囲みと TOUCH_MM2 以上重なれば）。
+  全部が囲みに入っていない部材は partial（一部だけ）として返す。要らない部材は画面の札の × で外す。
 3D（select_hits）：画面が部材ごとの当たり判定用の形（core/pick.py）を色で塗り、「囲みの中に見えている画素の数」を送る。
-- 囲みの中に 30 画素以上見えていて、見えている部分の半分以上が囲みの中か、囲みの広さの 2割以上を占める部材を選ぶ。
+- 囲みの中に 30 画素以上見えている部材を選ぶ。見えている部分の半分未満しか囲みに入っていなければ partial。
 - 屋根は辺ごとの軒（Y1:S など）と屋根全体（Y1）。軒が選ばれたら、その屋根全体は外す。
 """
 from __future__ import annotations
 
 from shapely.geometry import LineString, Point, Polygon
 
-WALL_MIN_INSIDE_MM = 1000
-WALL_MIN_INSIDE_RATIO = 0.5
+TOUCH_MM2 = 1000.0          # これ以上重なれば「かかった」とみなす（約 30×30mm。囲みの線がかすっただけは選ばない）
+FULL_SHARE = 0.99           # 形のこの割合以上が囲みの中なら「全部入っている」
 KINDS = {"exterior": "外壁", "interior": "内壁", "standalone": "単独の壁",
          "window": "窓", "door": "ドア", "entrance_door": "玄関ドア", "eave": "軒", "roof": "屋根全体"}
 SIDE_JA = {"W": "西", "E": "東", "S": "南", "N": "北"}
@@ -35,22 +35,63 @@ def lasso_polygon(points: list[list[float]]) -> Polygon:
     return poly
 
 
+def _wall_shape(w: dict):
+    line = LineString([w["start"], w["end"]])
+    return line, line.buffer(float(w["thickness_mm"]) / 2, cap_style="flat")
+
+
+def _opening_shape(o: dict, w: dict):
+    """窓・ドアの平面の形：壁の上の幅の区間 × 壁の厚み（平面図の札と同じく、厚みに少し足す）。"""
+    line = LineString([w["start"], w["end"]])
+    if line.length <= 0:
+        return Point(o["center"]).buffer(50)
+    a = line.interpolate(float(o["offset_mm"]))
+    b = line.interpolate(min(float(o["offset_mm"]) + float(o["width_mm"]), line.length))
+    return LineString([a, b]).buffer((float(w["thickness_mm"]) + 40) / 2, cap_style="flat")
+
+
+def _touch(shape, poly) -> tuple[bool, bool]:
+    """（かかっているか, 一部だけか）。"""
+    if shape.is_empty or shape.area <= 0:
+        return False, False
+    inside = shape.intersection(poly).area
+    return inside >= min(TOUCH_MM2, 0.5 * shape.area), inside < FULL_SHARE * shape.area
+
+
 def select(building: dict, points: list[list[float]], level: str | None = None) -> dict:
-    """囲みの中の部材の番号。{"walls": [...], "openings": [...]}
+    """囲みにかかった部材の番号。{"walls": [...], "openings": [...], "partial": [一部だけの番号]}
     level を渡すと、その階の部材だけ（2階建てで、同じ位置の1階と2階の壁が両方選ばれないように）。"""
     poly = lasso_polygon(points)
-    walls = []
+    walls, openings, partial = [], [], []
     candidates = [w for w in building.get("walls", []) if level is None or w.get("level") == level]
     for w in candidates:
-        line = LineString([w["start"], w["end"]])
+        line, shape = _wall_shape(w)
         if line.length <= 0:
             continue
-        inside = line.intersection(poly).length
-        if inside >= WALL_MIN_INSIDE_RATIO * line.length or inside >= WALL_MIN_INSIDE_MM:
+        hit, part = _touch(shape, poly)
+        if hit:
             walls.append(w["id"])
-    level_walls = {w["id"] for w in candidates}
-    openings = [o["id"] for o in building.get("openings", []) if o["wall"] in level_walls and poly.contains(Point(o["center"]))]
-    return {"walls": walls, "openings": openings}
+            if part:
+                partial.append(w["id"])
+    by_id = {w["id"]: w for w in candidates}
+    for o in building.get("openings", []):
+        w = by_id.get(o["wall"])
+        if w is None:
+            continue
+        hit, part = _touch(_opening_shape(o, w), poly)
+        if hit or poly.contains(Point(o["center"])):
+            openings.append(o["id"])
+            if part:
+                partial.append(o["id"])
+    return {"walls": walls, "openings": openings, "partial": partial}
+
+
+def keep_only(selection: dict, keep: list[str] | None) -> dict:
+    """画面で札の × を押して外した部材を除く。囲みから選ばれた部材の中にない番号は足さない（決めるのはコード）。"""
+    if keep is None:
+        return selection
+    k = set(keep)
+    return {g: ([x for x in v if x in k] if isinstance(v, list) else v) for g, v in selection.items()}
 
 
 def _roof_kind(building: dict, r: dict) -> str:
@@ -80,6 +121,7 @@ def select_hits(building: dict, hits: list[dict], mask_px: int) -> dict:
     """3D の囲みの中の部材の番号。hits は部材ごとの {id, inside（囲みの中に見えている画素）, total（画面全体で見えている画素）}。"""
     groups = member_groups(building)
     out = {"walls": [], "openings": [], "roof_edges": [], "roofs": []}
+    partial = []
     for h in hits:
         mid = str(h.get("id", ""))
         if mid not in groups:
@@ -87,8 +129,9 @@ def select_hits(building: dict, hits: list[dict], mask_px: int) -> dict:
         inside, total = int(h.get("inside", 0)), max(int(h.get("total", 0)), 1)
         if inside < HIT_MIN_PX:
             continue
-        if inside / total >= HIT_VISIBLE_SHARE or (mask_px > 0 and inside / mask_px >= HIT_LASSO_SHARE):
-            out[groups[mid]].append(mid)
+        out[groups[mid]].append(mid)                       # ★11/4：少しでも見えて囲みにかかれば選ぶ（要らなければ札の × で外す）
+        if inside / total < HIT_VISIBLE_SHARE and not (mask_px > 0 and inside / mask_px >= HIT_LASSO_SHARE):
+            partial.append(mid)
     # 同じ屋根の軒のうち、いちばん多く写っている軒の 1/4 に満たない軒は外す
     # （正面から南の軒を囲むと、東・西の軒の端だけが囲みに入って選ばれてしまうため。斜めから角を囲めば両方残る）
     inside_of = {str(h.get("id")): int(h.get("inside", 0)) for h in hits}
@@ -99,12 +142,16 @@ def select_hits(building: dict, hits: list[dict], mask_px: int) -> dict:
     out["roof_edges"] = [e for e in out["roof_edges"] if inside_of.get(e, 0) >= EDGE_MINOR_SHARE * best[e.split(":")[0]]]
     with_edges = {e.split(":")[0] for e in out["roof_edges"]}
     out["roofs"] = [r for r in out["roofs"] if r not in with_edges]
-    return {k: sorted(set(v), key=_natural) for k, v in out.items()}
+    res = {k: sorted(set(v), key=_natural) for k, v in out.items()}
+    chosen = {x for v in res.values() for x in v}
+    res["partial"] = sorted({x for x in partial if x in chosen}, key=_natural)
+    return res
 
 
 def describe(building: dict, selection: dict) -> list[dict]:
     """囲んだ部材の一覧（画面と Claude への説明に使う）。値は building のまま。"""
     rows = []
+    part = set(selection.get("partial") or [])
     walls = {w["id"]: w for w in building.get("walls", [])}
     for wid in selection.get("walls", []):
         w = walls[wid]
@@ -133,4 +180,6 @@ def describe(building: dict, selection: dict) -> list[dict]:
         rows.append({"id": rid, "kind": "roof", "label": KINDS["roof"],
                      "text": f"{_roof_kind(building, r)}・勾配 {'/'.join(f'{x:g}' for x in r.get('pitch', []))}・"
                              f"低い側 {SIDE_JA.get(r.get('low_side'), r.get('low_side'))}・軒の出（mm）{eaves}"})
+    for r in rows:
+        r["partial"] = r["id"] in part                     # 囲みに一部だけかかった部材（画面では薄く、Claude には印を付ける）
     return rows

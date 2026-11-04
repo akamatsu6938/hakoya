@@ -69,13 +69,13 @@ def test_proxies_follow_eave_override():
 
 def test_select_hits_rules():
     hits = [{"id": "W1", "inside": 400, "total": 500},       # 見えている所の 8割が囲みの中 → 選ぶ
-            {"id": "W2", "inside": 100, "total": 1000},      # 1割だけ・囲みの 2% → 選ばない
-            {"id": "W3", "inside": 1200, "total": 5000},     # 長い壁の一部：囲みの 3割を占める → 選ぶ
+            {"id": "W2", "inside": 100, "total": 1000},      # 1割だけ・囲みの 2%：★11/4 からは選ぶ（一部だけの印）
+            {"id": "W3", "inside": 1200, "total": 5000},     # 長い壁の一部：囲みの 3割を占める → 選ぶ（一部だけではない扱い）
             {"id": "O1", "inside": 20, "total": 20},         # 30 画素未満 → 選ばない
             {"id": "Y1", "inside": 500, "total": 600},       # 軒が選ばれたので屋根全体は外す
             {"id": "Y1:S", "inside": 300, "total": 400}]
-    assert geo.select_hits(_house(), hits, mask_px=4000) == {"walls": ["W1", "W3"], "openings": [],
-                                                             "roof_edges": ["Y1:S"], "roofs": []}
+    assert geo.select_hits(_house(), hits, mask_px=4000) == {"walls": ["W1", "W2", "W3"], "openings": [],
+                                                             "roof_edges": ["Y1:S"], "roofs": [], "partial": ["W2"]}
     with pytest.raises(ValueError, match="読み込み直して"):
         geo.select_hits(_house(), [{"id": "W99", "inside": 100, "total": 100}], 4000)
 
