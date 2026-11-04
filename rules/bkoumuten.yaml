@@ -1,0 +1,52 @@
+company: b-koumuten
+name_ja: B工務店（架空）
+# ★架空の会社（デモ用。SPEC §5「自社を標準で同梱し、デモ用に架空の B工務店も作る」）。
+#   切り替えると同じ家が違う模型に作り直され、検査・検品の指摘も変わる場面を見せるため、自社との違いが模型と検品に出る値にした。
+#   値はどれも架空（実在の会社の値ではない）。項目は自社（rules/jisha.yaml）とすべて同じにそろえる（足りないとコードが止まる）。
+walls:
+  exterior_thickness_mm: 190       # 外張り断熱＋通気層＋サイディングで厚い（架空）。模型で 3.8mm
+  interior_thickness_mm: 150       # 4寸柱（120）＋石膏ボード 12.5×2（架空）。模型で 3.0mm
+levels:
+  gl_to_foundation_top_mm: 450     # 基礎の高さ（架空）
+  gl_to_1fl_mm: 600                # 1階の床の高さ（架空）
+  story_height_mm: 2900            # 階高（架空）。模型は glb の値で作る。この値は glb に2階の床がないときの予備
+  story_height_choices_mm: [2900]
+  ceiling_height_mm: 2400
+roof:
+  default_shape: gable             # 切妻が基本（架空）
+  eave: from_glb                   # 軒の出は家ごとに glb から読む。B工務店の家は 600mm 前後が多い（判断の仕方は skills/company-bkoumuten）
+  pitch: from_glb                  # 4/10〜5/10 が多い（架空）
+  build_up_mm: 100
+openings:
+  door_top_fl_mm: 2000             # 室内ドアは標準の高さ（ハイドアではない。架空）
+  window_top_default_fl_mm: 2000   # 窓の上端の標準（架空）
+model:
+  scale: 50
+  min_feature_mm: 1.0
+  joint: corner_blocks
+  corner_block_leg_mm: 8
+  corner_block_height_mm: 3
+  fit_clearance_mm: 0.2
+  floor_block_height_mm: 1.5
+  foundation_band_mm: 150
+  upper_floor_plate_mm: 3.0
+  plate_thickness_mm: 2.0
+  roof_overhang_mm: 2.0            # 屋根板を外壁から4辺とも出す量（模型寸法）。破風・鼻隠しの分を厚めに見せる（架空。自社は 1.0）
+  roof_print: face_down
+  print_bed_margin_mm: 5.0
+  roof_cut_smooth_mm: 1.5
+  window_frames: false
+  split_at_ceiling: true
+  floor_joint: lower_blocks
+  interior_wall_top: ceiling
+  exterior_finish: none            # 外壁はサイディング：ざらざら（ファジースキン）にしない（架空。自社は塗り壁）
+  fuzzy_skin_thickness_mm: 0.2
+  fuzzy_skin_point_distance_mm: 0.5
+  fuzzy_skin_band_mm: 1.2
+  fuzzy_skin_opening_margin_mm: 1.5
+  include:
+    porch_soffit: true
+    window_hood: false
+    gutter: false
+    fascia: false
+    furniture: false

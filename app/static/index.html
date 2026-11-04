@@ -131,6 +131,9 @@
         <label>出してはいけない言葉（施主名・住所など。1行に1つ。姓だけ・名前だけも1行ずつ。数字だけ（番地だけ）は入れない）<textarea id="reg-ng" rows="2" spellcheck="false"></textarea></label>
         <div><button id="reg-submit" class="primary">登録する</button> <span id="reg-msg"></span></div>
       </div>
+      <h3>会社ルール</h3>
+      <select id="company"></select>
+      <p class="hint">「読み込んで組み立てる」で使う会社の決まり（壁の厚み・屋根板の出・外壁の仕上げ・標準の高さ・検品の考え方）。切り替えたあと、物件を選んで「読み込んで組み立てる」を押すと、その会社の決まりで作り直します。B工務店は、会社ごとに切り替えられることを見せるための架空の会社です。</p>
       <h3>組み立てたあとの検品</h3>
       <select id="auto-inspect"></select>
       <p class="hint">「読み込んで組み立てる」のあと、自動で検品を始めます。Claude（自分のプラン）はプランの利用枠を、Claude（API キー）はキーの持ち主の料金を使います。</p>

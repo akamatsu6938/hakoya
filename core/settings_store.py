@@ -5,6 +5,7 @@
   既定は off（勝手にプランや API の利用枠を使わない。それでも検品の欄は動く）。SPEC §12「組み立てると自動で検品が始まる」。
 - 社外用の exe（HAKOYA_EDITION=external）ではプランの接続（claude_code）を出さない（規約。SPEC §7-4）。
 - api_key を選ぶときは、費用の上限を見せて1回だけ確かめる（api_cost_ack）。
+- company：「読み込んで組み立てる」で使う会社ルール（rules/<会社>.yaml）。既定は jisha（★11/4 B工務店。SPEC §5）。
 """
 from __future__ import annotations
 
@@ -12,9 +13,11 @@ import json
 import os
 from importlib.util import find_spec
 
+import yaml
+
 from core import paths
 
-DEFAULTS = {"version": 1, "auto_inspect": "off", "api_cost_ack": False}
+DEFAULTS = {"version": 1, "auto_inspect": "off", "api_cost_ack": False, "company": "jisha"}
 AUTO_CHOICES = ("claude_code", "api_key", "off", "none")
 
 
@@ -34,6 +37,8 @@ def load() -> dict:
         pass                                          # 壊れていたら既定で動く
     if data["auto_inspect"] not in available_connections():
         data["auto_inspect"] = DEFAULTS["auto_inspect"]
+    if data["company"] not in {c["code"] for c in companies()}:
+        data["company"] = DEFAULTS["company"]          # 消した会社ルールが書いてあったら既定に戻す
     return data
 
 
@@ -69,6 +74,29 @@ def available_connections() -> list[str]:
     if edition() != "external" and find_spec("claude_agent_sdk") is not None:
         out.append("claude_code")
     return out + ["api_key", "off", "none"]
+
+
+def companies() -> list[dict]:
+    """選べる会社ルール：rules/ の yaml のうち会社の決まりのもの（AI の設定 ai_models.yaml は除く）。[{"code", "name"}]"""
+    from core.rules import RULES_DIR
+    out = []
+    for p in sorted(RULES_DIR.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("walls"), dict):
+            out.append({"code": p.stem, "name": str(data.get("name_ja") or p.stem)})
+    return out
+
+
+def set_company(code: str) -> dict:
+    if code not in {c["code"] for c in companies()}:
+        raise ValueError("その会社ルールはありません")
+    data = load()
+    data["company"] = code
+    save(data)
+    return data
 
 
 def set_auto_inspect(value: str, cost_ack: bool = False) -> dict:

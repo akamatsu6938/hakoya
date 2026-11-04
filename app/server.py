@@ -141,8 +141,9 @@ def build_property(alias: str):
     _check_alias(alias)
     if RUNS.get(alias, {}).get("running"):
         raise HTTPException(409, "この物件はいま検品中です。検品が終わってから組み立ててください")
+    from core import settings_store
     try:
-        write_building(alias, build(alias))
+        write_building(alias, build(alias, settings_store.load()["company"]))   # 設定の会社ルールで作る（★11/4 B工務店）
         summary = write_outputs(alias)
     except (ValueError, OSError) as e:      # HAKOYA が書いた説明（「3階建てはまだ扱えません」など）は画面に出す
         msg = _user_message(e)
@@ -710,7 +711,23 @@ def settings():
     st = settings_store.load()
     return _safe_json({"api_key_set": key, "auto_inspect": st["auto_inspect"], "api_cost_ack": st["api_cost_ack"],
                        "connections": settings_store.available_connections(),
-                       "max_budget_usd": float(load_ai_models()["limits"]["max_budget_usd"])})
+                       "max_budget_usd": float(load_ai_models()["limits"]["max_budget_usd"]),
+                       "company": st["company"], "companies": settings_store.companies()})
+
+
+class CompanyIn(BaseModel):
+    company: str
+
+
+@app.post("/api/settings/company")
+def save_company(body: CompanyIn):
+    """「読み込んで組み立てる」で使う会社ルールを保存する。作り直すのは、次に組み立てるとき（★11/4 B工務店。SPEC §5）。"""
+    from core import settings_store
+    try:
+        st = settings_store.set_company(body.company)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _safe_json({"company": st["company"]})
 
 
 class AutoInspectIn(BaseModel):

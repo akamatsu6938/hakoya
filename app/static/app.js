@@ -553,8 +553,20 @@ async function renderSettings() {
     const sel = $('#auto-inspect');
     sel.innerHTML = (st.connections || []).map((c) => `<option value="${c}">${AUTO_JA[c] || c}</option>`).join('');
     sel.value = st.auto_inspect; sel.dataset.prev = st.auto_inspect; sel.dataset.budget = st.max_budget_usd; sel.dataset.ack = st.api_cost_ack ? '1' : '';
+    state.companies = Object.fromEntries((st.companies || []).map((c) => [c.code, c.name]));
+    const cs = $('#company');
+    cs.innerHTML = (st.companies || []).map((c) => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('');
+    cs.value = st.company; cs.dataset.prev = st.company;
   } catch (e) { $('#apikey-state').textContent = '設定を読めませんでした：' + e.message; }
 }
+$('#company').addEventListener('change', async (e) => {   // 会社ルール：作り直すのは次に「読み込んで組み立てる」を押したとき
+  const sel = e.target;
+  try {
+    await call('POST', '/api/settings/company', { company: sel.value });
+    setStatus(`会社ルールを「${state.companies?.[sel.value] || sel.value}」にしました。「読み込んで組み立てる」を押すと、この決まりで作り直します`, 'ok');
+    sel.dataset.prev = sel.value;
+  } catch (err) { setStatus('会社ルールを切り替えられませんでした：' + err.message, 'err'); sel.value = sel.dataset.prev; }
+});
 $('#auto-inspect').addEventListener('change', async (e) => {
   const sel = e.target; const value = sel.value;
   let costAck = false;
@@ -854,10 +866,16 @@ async function refresh() {
   await renderChecks(); renderDownloads(); await renderFindings(); await loadModel();
 }
 
+// 自社以外の会社ルールで作った模型は、状態の文に会社の名前を出す（どの決まりで作った模型か分かるように）
+function companyNote() {
+  const c = companyOf();
+  return c === 'jisha' ? '' : `（会社ルール：${state.companies?.[c] || c}）`;
+}
+
 async function selectAlias(alias, built) {
   state.alias = alias; state.viewSet = false;
   if (!built) { setStatus(`${alias}：まだ組み立てていません。「読み込んで組み立てる」を押してください`); return; }
-  try { setStatus('読み込んでいます…', 'busy'); await refresh(); setStatus(`${alias}を表示しています`, 'ok'); }
+  try { setStatus('読み込んでいます…', 'busy'); await refresh(); setStatus(`${alias}を表示しています${companyNote()}`, 'ok'); }
   catch (e) { setStatus(e.message, 'err'); }
 }
 
@@ -865,7 +883,7 @@ $('#build').addEventListener('click', async () => {
   if (!state.alias) return;
   const btn = $('#build'); btn.disabled = true;
   let built = false;
-  try { setStatus('glb を読んで、壁を作り直し、模型を組み立てています（数秒かかります）…', 'busy'); await call('POST', '/api/build/{a}'); await refresh(); setStatus(`${state.alias} を組み立てました`, 'ok'); built = true; }
+  try { setStatus('glb を読んで、壁を作り直し、模型を組み立てています（数秒かかります）…', 'busy'); await call('POST', '/api/build/{a}'); await refresh(); setStatus(`${state.alias} を組み立てました${companyNote()}`, 'ok'); built = true; }
   catch (e) { setStatus('組み立てられませんでした：' + e.message, 'err'); }
   finally { btn.disabled = false; }
   if (built) await autoInspect();
