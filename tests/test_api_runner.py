@@ -91,7 +91,8 @@ def test_inspection_with_fake_api(env):
     # 直す案の数値は Claude ではなくコードが計算する（内壁の多数派 130）
     assert rep["findings"][0]["proposal"]["to"] == 130 and rep["findings"][0]["id"] == "F1"
     # 費用：面（Sonnet 5.5）は 1回目 3000入力＋100出力＋2500書き込み、2回目 500入力＋50出力＋2500読み直し。まとめ（Opus 5.5）5000＋800
-    face = (3000 * 2 + 100 * 10 + 2500 * 2.5) + (500 * 2 + 50 * 10 + 2500 * 0.2)
+    # 読み直しは Sonnet 5.5 で $0.10／100万トークン（11/4 公式の料金表で確かめて直した。前は 0.2）
+    face = (3000 * 2 + 100 * 10 + 2500 * 2.5) + (500 * 2 + 50 * 10 + 2500 * 0.1)
     assert rep["cost_usd"] == pytest.approx(round((6 * face + 5000 * 4 + 800 * 20) / 1e6, 4))
     assert json.loads((env / "findings.json").read_text(encoding="utf-8"))["findings"][0]["id"] == "F1"
 

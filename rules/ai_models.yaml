@@ -24,5 +24,6 @@ limits:
 # cache_write は「指示を覚えさせる」とき、cache_read は「覚えさせた指示を読み直す」ときの料金。
 prices_usd_per_mtok:
   claude-opus-5-5:   {input: 4.0,  output: 20.0, cache_write: 5.0,   cache_read: 0.20}
-  claude-sonnet-5-5: {input: 2.0,  output: 10.0, cache_write: 2.5,   cache_read: 0.20}   # cache_write は入力の1.25倍 (推定)
-  claude-haiku-5-5:  {input: 0.10, output: 0.50, cache_write: 0.125, cache_read: 0.01}   # 入力10万トークン以下のとき。cache は (推定)
+  claude-sonnet-5-5: {input: 2.0,  output: 10.0, cache_write: 2.5,   cache_read: 0.10}   # ★11/4 公式の料金表で確認（読み直しは入力の 0.05 倍。前は 0.20 と書いていた）
+  claude-haiku-5-5:  {input: 0.10, output: 0.50, cache_write: 0.125, cache_read: 0.01}   # 入力10万トークン以下のとき（11/4 公式の料金表で確認）
+# 出どころ：https://platform.claude.com/docs/en/about-claude/pricing（2026-11-04 に確認）。cache_write は5分の覚え方（1時間は入力の2倍）。
