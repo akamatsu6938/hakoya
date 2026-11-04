@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import shapely
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import MultiPoint, Point, Polygon, box
 from shapely.ops import unary_union
 
 from adapters import exterior_parts as xp
@@ -163,8 +163,11 @@ def _code_endswith(code: str | None, suffixes: tuple[str, ...]) -> bool:
     return bool(code) and code.endswith(suffixes)
 
 
-def _room_floor(part: Part, fl_mm: float) -> Polygon:
-    """部屋の床の形（FL＋100mm 以下の水平な面を合わせたもの。玄関の土間も含む）。"""
+RAISED_MAX_MM = 600.0   # 小上がり（床が FL より高い部屋）とみなす床の高さの上限 (推定。物件C は FL+300・物件D は FL+350)
+
+
+def _floor_triangles(part: Part, max_z: float) -> list[Polygon]:
+    """部屋の床の水平な三角形（高さ max_z 以下。巾木・廻り縁・天井は除く）。"""
     polys = []
     for pr in part.primitives:
         if _code_endswith(pr.code, NOT_FLOOR_CODES):
@@ -172,11 +175,66 @@ def _room_floor(part: Part, fl_mm: float) -> Polygon:
         f = pr.vertices[pr.triangles]
         if not len(f):
             continue
-        flat = (np.ptp(f[:, :, 2], axis=1) < FLAT_TOL_MM) & (f[:, 0, 2] <= fl_mm + 100)
+        flat = (np.ptp(f[:, :, 2], axis=1) < FLAT_TOL_MM) & (f[:, 0, 2] <= max_z)
         for t in f[flat]:
             p = Polygon(t[:, :2])
             if p.area > 1:
                 polys.append(p)
+    return polys
+
+
+def _raised_z(part: Part, fl_mm: float) -> float | None:
+    """FL+100 までに床がない部屋の、小上がりの床の高さ（FL+100〜FL+600 の水平な床の面で、いちばん低い所）。
+    ★11/4 物件C・D：小上がりの和室が「床は FL+100 まで」の決まりで部屋ごと落ち、畳の所が消えていた。"""
+    zs = []
+    for pr in part.primitives:
+        if _code_endswith(pr.code, NOT_FLOOR_CODES):
+            continue
+        f = pr.vertices[pr.triangles]
+        if not len(f):
+            continue
+        flat = np.ptp(f[:, :, 2], axis=1) < FLAT_TOL_MM
+        zs += [float(z) for z in f[flat, 0, 2] if fl_mm + 100 < z <= fl_mm + RAISED_MAX_MM]
+    return min(zs) if zs else None
+
+
+def _add_tatami(floors: dict, rooms: list[Part], model: GlbModel, fl: float, band: tuple = (None, None)) -> None:
+    """小上がりの部屋の床に、畳の面（typeETata）を足す。
+    ★11/4 物件C・D：畳の所は部屋の床ではなく畳の部材で書き出され、部屋の床の面は畳のまわりの細い所だけだった（C 0.81m²・D 0.01m²）。
+    足すのは、高さが小上がりの床と同じ（±30mm）で、半分以上がその部屋の範囲に入る畳だけ。"""
+    tatami = []
+    for p in model.by_type("typeETata"):
+        f = p.faces()
+        flat = f[np.ptp(f[:, :, 2], axis=1) < FLAT_TOL_MM] if len(f) else f
+        if not len(flat):
+            continue
+        z = float(np.min(flat[:, 0, 2]))
+        if band[0] is not None and not (band[0] <= z < band[1]):
+            continue
+        poly = unary_union([q for q in (Polygon(t[:, :2]) for t in flat) if q.area > 1])
+        if not poly.is_empty:
+            tatami.append((poly, z))
+    if not tatami:
+        return
+    for p in rooms:
+        rz = None if _floor_triangles(p, fl + 100) else _raised_z(p, fl)
+        if rz is None:
+            continue
+        hull = MultiPoint(p.faces().reshape(-1, 3)[:, :2]).convex_hull     # 部屋の部材の広がり（壁の仕上げ面も含む）
+        add = [poly for poly, z in tatami if abs(z - rz) <= 30 and poly.intersection(hull).area > 0.5 * poly.area]
+        if add:
+            floors[p.source] = (unary_union([floors[p.source]] + add)
+                                .buffer(0.5, join_style="mitre").buffer(-0.5, join_style="mitre"))
+
+
+def _room_floor(part: Part, fl_mm: float) -> Polygon:
+    """部屋の床の形（FL＋100mm 以下の水平な面を合わせたもの。玄関の土間も含む）。
+    FL＋100mm 以下に床がなければ、小上がりの床（_raised_z の高さの面）。"""
+    polys = _floor_triangles(part, fl_mm + 100)
+    if not polys:
+        rz = _raised_z(part, fl_mm)
+        if rz is not None:
+            polys = _floor_triangles(part, rz + FLAT_TOL_MM)
     if not polys:
         return Polygon()
     return unary_union(polys).buffer(0.5, join_style="mitre").buffer(-0.5, join_style="mitre")
@@ -338,6 +396,7 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
     rooms = sel.get("rooms", model.by_role("room"))
     finish_planes = wl.group_planes(_finish_triangles(rooms, fl, band))
     floors = {p.source: _room_floor(p, fl) for p in rooms}
+    _add_tatami(floors, rooms, model, fl, band)
     # 上の階：床の穴（階段・吹き抜け）を見つけ、内壁を探すときは仮の部屋として足す（穴と部屋の間の壁が消えないように）
     voids = _floor_voids(exterior_fp, [f for f in floors.values() if not f.is_empty], stairs) if band[0] is not None else []
     rooms_inner, region = wl.interior_region([f for f in floors.values() if not f.is_empty] + [v["polygon"] for v in voids],
@@ -458,7 +517,10 @@ def _floor_voids(exterior_fp, floors: list, stairs: list) -> list[dict]:
 def _min_floor_z(model: GlbModel, source: str, fl: float) -> int:
     part = next(p for p in model.parts if p.source == source)
     zs = [z for z in _flat_heights([part]) if z <= fl + 100]
-    return min(zs) if zs else int(fl)
+    if zs:
+        return min(zs)
+    rz = _raised_z(part, fl)          # 小上がり：その床の高さ（組み立てで FL から台を作る）
+    return int(round(rz)) if rz is not None else int(fl)
 
 
 def _xy(p) -> list[float]:
@@ -619,6 +681,11 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
         roofs = [{"id": "Y1", "level": names[0], "kind": "main", **roof}]
     else:
         roof, roofs = _multi_roofs(roof_parts, pre_roofs, recs, levels)
+    for n in _attach_soffits(model.by_role("eave_soffit"), roofs):
+        exceptions_json.append({"kind": "eave_soffit", "source": "glb:typeESnok", "note": n})
+    main = next((r for r in roofs if r.get("kind") == "main"), None)
+    if main is not None:
+        roof.update({k: main[k] for k in ("soffits", "soffit_z_mm") if k in main})
 
     building = {
         "source": {"glb": files.glb_label, "generator": model.generator, "wih_version": model.version_info,
@@ -724,6 +791,49 @@ def _roof_level(roof: dict, levels: list[dict]) -> int:
         if float(lv["fl_mm"]) + float(lv.get("ceiling_mm", 2400)) <= z + 1:
             idx = i
     return idx
+
+
+SOFFIT_SIDE_TOL_MM = 30.0   # 軒天の高さが辺ごとにこれ以上違えば、注記に残す
+
+
+def _attach_soffits(parts: list[Part], roofs: list[dict]) -> list[str]:
+    """軒天の部材（typeESnok）を、重なりのいちばん大きい屋根に結びつける。屋根には soffits（辺・水平な面の形・出どころ）と
+    soffit_z_mm（軒天の高さ、GL から）を書く。★11/4 物件C：軒天を知らない種類として捨てていた（作者「軒天がない」）。"""
+    notes = []
+    by_roof: dict[int, list[tuple[dict, float]]] = {}
+    for p in parts:
+        f = p.faces()
+        flat = f[np.ptp(f[:, :, 2], axis=1) < FLAT_TOL_MM] if len(f) else f
+        if not len(flat):
+            continue
+        z = float(np.min(flat[:, 0, 2]))
+        low = flat[np.abs(flat[:, 0, 2] - z) < FLAT_TOL_MM]          # いちばん下の水平な面＝軒天の板の下の面
+        poly = unary_union([q for q in (Polygon(t[:, :2]) for t in low) if q.area > 1])
+        if poly.is_empty:
+            continue
+        best, k_best = 0.0, None
+        for k, r in enumerate(roofs):
+            if not r.get("footprint"):
+                continue
+            a = poly.intersection(Polygon(r["footprint"])).area
+            if a > best:
+                best, k_best = a, k
+        if k_best is None:
+            notes.append(f"軒天 {p.source} は、どの屋根にも重ならないので使わなかった")
+            continue
+        c, rc = poly.centroid, Polygon(roofs[k_best]["footprint"]).centroid
+        dx, dy = c.x - rc.x, c.y - rc.y
+        side = ("E" if dx > 0 else "W") if abs(dx) > abs(dy) else ("N" if dy > 0 else "S")
+        geom = max(getattr(poly, "geoms", [poly]), key=lambda g: g.area)
+        by_roof.setdefault(k_best, []).append(({"side": side, "polygon": [[round(float(x), 1), round(float(y), 1)]
+                                                for x, y in list(geom.exterior.coords)[:-1]], "source": p.source}, z))
+    for k, items in by_roof.items():
+        zs = sorted(z for _, z in items)
+        roofs[k]["soffits"] = [it for it, _ in items]
+        roofs[k]["soffit_z_mm"] = int(round(zs[len(zs) // 2]))
+        if zs[-1] - zs[0] > SOFFIT_SIDE_TOL_MM:
+            notes.append(f"{roofs[k].get('id')} の軒天の高さが辺ごとに {zs[-1] - zs[0]:.0f}mm 違う。真ん中の値 {roofs[k]['soffit_z_mm']} にそろえた")
+    return notes
 
 
 def _multi_roofs(roof_parts: list[Part], pre_roofs: list[dict], recs: list[dict], levels: list[dict]) -> tuple[dict, list[dict]]:

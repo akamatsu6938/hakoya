@@ -24,6 +24,7 @@ ROLE_FOUNDATION = "foundation"           # 基礎
 ROLE_STANDALONE_WALL = "standalone_wall" # 厚みのある単独の壁
 ROLE_PORCH = "porch"                     # ポーチ・段
 ROLE_PORCH_SOFFIT = "porch_soffit"       # ポーチの天井
+ROLE_EAVE_SOFFIT = "eave_soffit"         # 軒天（軒の裏の水平な板）
 ROLE_OPTIONAL = "optional"               # 物件ごとに切り替え（既定は省く）
 ROLE_OMIT = "omit"                       # 省く
 ROLE_SITE = "site"                       # 敷地（印刷しない。大きさの確認だけ）
@@ -53,6 +54,10 @@ PART_TYPES: dict[str, PartType] = {
     "typeENich": PartType("ニッチ", ROLE_OMIT, "(推定)"),
     "typeEExte": PartType("外構", ROLE_EXCLUDE),
     "typeETree": PartType("植栽", ROLE_EXCLUDE),
+    # ★11/4 物件C・D：小上がりの和室の畳（厚みのない面だけ）。形は使わず、小上がりの台は部屋の床の高さから作る
+    "typeETata": PartType("畳", ROLE_OMIT, "小上がりの台は部屋の床の高さから作る"),
+    # ★11/4 物件C（寄棟）：四方の軒に1つずつ。水平な面が外壁の上端の高さ（サッシのすぐ上）にある
+    "typeESnok": PartType("軒天", ROLE_EAVE_SOFFIT, "(推定) 軒の裏の水平な板"),
 }
 
 UNKNOWN = PartType("不明な部材", ROLE_OMIT, "表にない種類。必要なら質問する")

@@ -176,6 +176,25 @@ def drop_loose_bits(parts: list[Manifold], max_height: float | None = None) -> t
     return [drop_specks(p - cut) for p in parts], len(small)
 
 
+RAISED_MIN_MM = 50.0           # 床が FL よりこれ以上高い部屋は「小上がり」（土間の逆）
+
+
+def raised_floors(rooms: list[dict], fl: float, walls_fp: Polygon, level: str | None = None) -> tuple[list[Manifold], list[str]]:
+    """小上がり（床が FL より高い部屋。畳の部屋など）の台：FL から部屋の床の高さまで。壁とは重ねない。
+    ★11/4 物件C・D：小上がりの和室（FL+300・FL+350）が部屋ごと落ちて、畳の所が消えていた。（台, 注記用の「R3（FL+300）」）"""
+    solids, labels = [], []
+    for r in rooms:
+        if (level is not None and r.get("level") != level) or float(r["floor_mm"]) < fl + RAISED_MIN_MM:
+            continue
+        poly = Polygon(r["polygon"])
+        poly = poly.difference(walls_fp) if not walls_fp.is_empty else poly
+        if poly.is_empty or poly.area < 1.0:
+            continue
+        solids.append(prism(poly, fl - 1.0, float(r["floor_mm"])))
+        labels.append(f"{r.get('id', '?')}（FL+{float(r['floor_mm']) - fl:.0f}）")
+    return solids, labels
+
+
 def footprint_of(solid: Manifold) -> Polygon:
     """立体を上から見た形（shapely）。穴（向きが逆の輪）は抜く。"""
     outer, holes = [], []
@@ -267,6 +286,36 @@ def slab_outline(roof: dict):
             pad = box(*poly.bounds).buffer(abs(d) + 10, join_style="mitre")
             poly = poly.difference(_sweep(pad.difference(poly), dx * d, dy * d))
     return poly
+
+
+def eave_soffit_solid(roof: dict, slab_poly, house_fp: Polygon, rt, zmax: float, fl: float, gap: float = 0.0):
+    """軒天（箱の軒）：軒天の高さから屋根の下の面までを、外壁の外から軒先まで埋める。（立体か None, 注記か None）
+    形は glb の軒天の部材の下の面（辺ごと）。軒の出を直した辺は同じだけ外へ掃き出し、屋根板の外形で切って、家の外形を除く。
+    gap：軒天が天井の高さより低いとき、1階の壁とのはめあいの隙間。★11/4 物件C：軒天を捨てていて、軒の裏が斜めのままだった。"""
+    items, z = roof.get("soffits") or [], roof.get("soffit_z_mm")
+    if not items or z is None:
+        return None, None
+    tip = (roof.get("top_z_range_mm") or [None])[0]
+    if tip is not None and float(z) >= float(tip):
+        return None, f"軒天（FL+{float(z) - fl:.0f}）が軒先より高いので作らなかった（軒天の高さを確かめてください）"
+    deltas = eave_deltas(roof)
+    polys = []
+    for s in items:
+        p = Polygon(s["polygon"])
+        d = deltas.get(s.get("side"), 0.0)
+        if d > 0 and s.get("side") in SIDE_DIRS:
+            dx, dy = SIDE_DIRS[s["side"]]
+            p = _sweep(p, dx * d, dy * d)
+        polys.append(p)
+    region = unary_union(polys).intersection(slab_poly)
+    region = region.difference(house_fp.buffer(gap, join_style="mitre") if gap > 0 else house_fp)
+    if region.is_empty or region.area < 1.0:
+        return None, None
+    sides = "・".join(SIDE_JA[s] for s in "SNEW" if any(i.get("side") == s for i in items))
+    # 屋根板の上の面まで埋めて屋根板と合わせる（★物件C：軒天 FL+2423 と軒先の屋根板の裏 FL+2423.6 がほぼ同じで、
+    # 裏の面まで埋めると軒先に厚み 0.6mm の楔ができ、立体が閉じなかった）
+    return (keep_below(prism(region, float(z), zmax), rt),
+            f"軒天（{sides}）を FL+{float(z) - fl:.0f} の高さで、外壁の外から軒先まで埋めた（箱の軒。glb の軒天の部材から）")
 
 
 def eave_note(roof: dict, name: str = "屋根") -> str | None:
@@ -472,6 +521,10 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         std_lo.append(lo)
         std_up.append(up)
     floor1 = union_all([prism(floor_poly, ftop, fl)] + [lower_part(wall_solid(w)) for w in int_walls] + std_lo)
+    raised, raised_ids = raised_floors(b.get("rooms", []), fl, walls_fp)
+    if raised:
+        floor1 = union_all([floor1] + raised)
+        notes["floor1"].append("小上がり（床が FL より高い部屋）" + "・".join(raised_ids) + " は、床の上に台を作った（畳の部屋など）")
     floor1 = floor1 - exterior
     # 窓の枠は「床・内壁」の部品に入れる（外壁の部品に入れると、ファジースキンで枠までざらざらになるため）
     # 窓の枠は会社ルールで切り替え（★自社は作らない：1/50 では枠が柱と紛らわしく、3連窓で線が増えるため）
@@ -553,6 +606,14 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     if eave_note(roof):
         notes["roof"].append(eave_note(roof))
     roof_parts = [slab]
+    # 軒天（箱の軒）。天井の高さより低い軒天は、1階の壁（別の部品）とはめあいの隙間を空ける
+    soffit_z = roof.get("soffit_z_mm")
+    soffit_gap = clearance if soffit_z is not None and (z_cut is None or float(soffit_z) < z_cut) else 0.0
+    soffit, soffit_note = eave_soffit_solid(roof, slab_poly, Polygon(outline.exterior), rt, roof_zmax, fl, soffit_gap)
+    if soffit is not None:
+        roof_parts.append(soffit)
+    if soffit_note:
+        notes["roof"].append(soffit_note)
     soffits = b.get("porch_soffits", [])
     soffit_top = max((float(s["z_mm"]) for s in soffits), default=None)
     if soffits:  # ポーチの天井：平らな板（下の面がポーチの天井の高さ）。垂れ壁の下まで広げ、屋根と一緒に印刷する

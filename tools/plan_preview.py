@@ -106,7 +106,14 @@ def render_svg(b: dict, title: str, level: str | None = None, overlay: list | No
            f'<text x="{MARGIN}" y="30" font-size="16">{html.escape(title)}（{level_label}平面図・壁の作り直し）</text>']
     for r in rooms:
         poly = " ".join(P(*p) for p in r["polygon"])
-        out.append(f'<polygon points="{poly}" fill="#eef2fa" stroke="#b8c2d8" stroke-width="0.5"/>')
+        if float(r["floor_mm"]) - fl >= 50:   # 小上がり（床が FL より高い部屋）：色と高さの札（11/4 物件C・D）
+            out.append(f'<polygon points="{poly}" fill="#efe6c9" stroke="#b9a66e" stroke-width="0.8"/>')
+            xs_r, ys_r = [p[0] for p in r["polygon"]], [p[1] for p in r["polygon"]]
+            cx, cy = P((min(xs_r) + max(xs_r)) / 2, (min(ys_r) + max(ys_r)) / 2).split(",")
+            out.append(f'<text x="{cx}" y="{cy}" font-size="10" fill="#7a6631" text-anchor="middle">'
+                       f'小上がり FL+{float(r["floor_mm"]) - fl:.0f}</text>')
+        else:
+            out.append(f'<polygon points="{poly}" fill="#eef2fa" stroke="#b8c2d8" stroke-width="0.5"/>')
     if multi:  # 2階建て：1階の図に2階の外形と下屋の範囲、2階の図に床の穴（階段）を重ねる
         out += _level_overlays(b, level, names, P)
     for w in walls:

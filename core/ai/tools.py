@@ -31,8 +31,10 @@ from core.rules import load_rules, rule
 VIEWS = ("S", "N", "E", "W", "plan", "plan2")    # plan2 は2階建ての2階の平面（平屋にはない）
 EDITABLE = {"walls": ("thickness_mm",), "openings": ("width_mm", "offset_mm", "sill_fl_mm", "head_fl_mm"),
             # 屋根の軒の出（外壁の外の面から屋根の先まで、板金・樋を除く）。模型は板金の分をさらに外に足す
-            "roofs": tuple(f"eave_mm.{s}" for s in "WESN")}
-ROOF_KEYS = ("id", "kind", "level", "shape", "pitch", "low_side", "thickness_mm", "eave_mm", "eave_with_gutter_mm")
+            # 軒天の高さ（GL から）。glb に軒天がある屋根だけ（11/4 物件C）
+            "roofs": tuple(f"eave_mm.{s}" for s in "WESN") + ("soffit_z_mm",)}
+ROOF_KEYS = ("id", "kind", "level", "shape", "pitch", "low_side", "thickness_mm", "eave_mm", "eave_with_gutter_mm",
+             "soffit_z_mm")
 
 
 class ToolError(ValueError):
@@ -94,6 +96,12 @@ def get_building(ctx: ToolContext) -> dict:
                  # 片流れ以外（切妻・寄棟など）は面ごとの低い側と勾配（面の式はコードが持つ。数値は作らない）
                  **({"planes": [{k: p.get(k) for k in ("id", "low_side", "pitch")} for p in r["planes"]]}
                     if len(r.get("planes") or []) > 1 else {}),
+                 # 軒天（箱の軒）：glb の軒天の部材から。高さは GL から（FL からは fl_plus_mm）
+                 **({"soffit": {"z_mm": r["soffit_z_mm"],
+                                "fl_plus_mm": round(float(r["soffit_z_mm"]) - float(b["levels"][0]["fl_mm"])),
+                                "sides": sorted({x.get("side") for x in r.get("soffits") or []}),
+                                "note": "軒天の高さから屋根の裏までを、外壁の外から軒先まで埋めている。直すときは field=soffit_z_mm（GL から）"}}
+                    if r.get("soffit_z_mm") is not None else {}),
                  # ★説明がないと「軒の出が glb（樋込み 146mm）より短い」と誤って指摘された（検品 3回目 F2）
                  "note": "eave_mm は glb の屋根板の出（外壁の外の面から屋根の先まで、板金・樋を除く）、eave_with_gutter_mm は軒樋を含めた出。"
                          "直すときは target=屋根の id・field=eave_mm.S のように辺を付ける。樋・破風・鼻隠しは模型では省く"
@@ -119,7 +127,7 @@ def get_building(ctx: ToolContext) -> dict:
             "floor_openings": [{"id": h.get("id"), "kind": h.get("kind"), "area_m2": h.get("area_m2")}
                                for h in lv.get("floor_openings", [])]} for lv in b["levels"]}
         out["roofs"] = [{k: x.get(k) for k in ("id", "kind", "level", "shape", "pitch", "low_side", "thickness_mm",
-                                               "eave_mm", "eave_with_gutter_mm")} for x in b.get("roofs", [])]
+                                               "eave_mm", "eave_with_gutter_mm", "soffit_z_mm")} for x in b.get("roofs", [])]
         out["multi_note"] = ("2階建て。roof は大屋根（2階の上）、roofs は全部の屋根（下屋 lean_to を含む）。"
                              "部品は5つ（基礎・1階・下屋の屋根・2階・大屋根）。平面の図は1階が plan、2階が plan2")
     return out
@@ -335,7 +343,7 @@ TOOL_SPECS = {
                                       "required": ["view"], "additionalProperties": False}},
     "run_checks": {"fn": run_checks, "description": "コードの検査の結果（閉じた立体・離れた塊・造形範囲・glb との数の差）を返す。",
                    "schema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    "propose_override": {"fn": propose_override, "description": "直す案を1件つくる。数値は書かず、数値の出どころ value_source（majority:種類 / rule:項目 / glb / number）を指定する。数値はコードが計算する。number は人が書いた数値のときだけ。図面の寸法・注記は jww:plan:D3 のように番号で（get_drawing_region が返す）。屋根の軒の出は target=Y1・field=eave_mm.S のように辺を付ける（外壁の外の面から屋根の先まで、板金・樋を除く）。",
+    "propose_override": {"fn": propose_override, "description": "直す案を1件つくる。数値は書かず、数値の出どころ value_source（majority:種類 / rule:項目 / glb / number）を指定する。数値はコードが計算する。number は人が書いた数値のときだけ。図面の寸法・注記は jww:plan:D3 のように番号で（get_drawing_region が返す）。屋根の軒の出は target=Y1・field=eave_mm.S のように辺を付ける（外壁の外の面から屋根の先まで、板金・樋を除く）。軒天の高さは target=Y1・field=soffit_z_mm（GL から。glb に軒天がある屋根だけ）。",
                          "schema": {"type": "object", "properties": {
                              "target": {"type": "string"}, "field": {"type": "string"}, "value_source": {"type": "string"},
                              "reason": {"type": "string"}, "number": {"type": "number"}, "finding": {"type": "string"}},

@@ -23,7 +23,8 @@ from core.roof_geom import surfaces as roof_surfaces
 
 from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
                           drop_loose_bits, drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note,
-                          slab_outline, slab_solid, opening_keep_out, openings_by_wall_of, smooth_near_openings)
+                          slab_outline, slab_solid, opening_keep_out, openings_by_wall_of, smooth_near_openings,
+                          raised_floors, eave_soffit_solid)
 
 Z_LO, Z_HI = -10000.0, 100000.0       # 「下・上の限りなし」の代わりの高さ（実寸 mm）
 BIG = box(-1e6, -1e6, 1e6, 1e6)
@@ -157,6 +158,10 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     doma_holes = [max(getattr(h, "geoms", [h]), key=lambda g: g.area) for h in doma_holes if not h.is_empty]
     floor_poly = outline.difference(unary_union(doma_holes)) if doma_holes else outline
     floor1 = union_all([prism(floor_poly, ftop, fl1)] + int1 + std1)
+    raised1, raised1_ids = raised_floors(b.get("rooms", []), fl1, walls_fp, level=lv1["name"])
+    if raised1:   # 小上がり（床が FL より高い部屋）の台。平屋と同じ
+        floor1 = union_all([floor1] + raised1)
+        notes["floor1"].append("小上がり（床が FL より高い部屋）" + "・".join(raised1_ids) + " は、床の上に台を作った（畳の部屋など）")
     floor1 = floor1 - exterior
 
     # ポーチの上の塊（2階のはね出しの下。作者 11/3：薄い板ではなく、2階の床の裏までの塊。サポート材で印刷）
@@ -224,7 +229,10 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
             full = full_wall(w, float(w["bottom_mm"]), top if top is not None else ceil2)
             int2.append(full.trim_by_plane((0.0, 0.0, -1.0), -ceil2))
     exterior2 = union_all(ext2_lo)
-    floor2 = union_all([floor2] + int2) - exterior2
+    raised2, raised2_ids = raised_floors(b.get("rooms", []), fl2, walls2_fp, level=lv2["name"])
+    floor2 = union_all([floor2] + int2 + raised2) - exterior2
+    if raised2:
+        notes["floor2"].append("小上がり（床が FL より高い部屋）" + "・".join(raised2_ids) + " は、床の上に台を作った（畳の部屋など）")
     if lv2.get("floor_openings"):
         notes["floor2"].append(f"2階の床板（厚み {m.get('upper_floor_plate_mm', 3.0)}mm）に階段の穴を開けた。階段は造作なので作らない")
 
@@ -253,6 +261,15 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
         roof_lower_parts.append(slab_solid(sp, rb, rt, zmax))
         if eave_note(r, f"下屋の屋根 {r.get('id', '')}"):
             notes["roof_lower"].append(eave_note(r, f"下屋の屋根 {r.get('id', '')}"))
+        # 下屋の軒天（箱の軒）：1階の外形と2階の外形を除く。1階の天井より低い軒天は、1階の壁とはめあいの隙間を空ける
+        sz = r.get("soffit_z_mm")
+        gap = clearance if sz is not None and float(sz) < ceil1 else 0.0
+        house1 = Polygon(outline.exterior).union(zone_a.buffer(clearance, join_style="mitre"))
+        so, so_note = eave_soffit_solid(r, sp, house1, rt, zmax, fl1, gap)
+        if so is not None:
+            roof_lower_parts.append(so)
+        if so_note:
+            notes["roof_lower"].append(f"下屋の屋根 {r.get('id', '')}：" + so_note)
     for s in soffits:   # 下屋の下の天井（南西のへこみなど）：平らな板。区域Bの途中から始まる壁の下まで広げる
         sp, z = Polygon(s["polygon"]), float(s["z_mm"])
         if sp.intersection(zone_a).area >= 0.5 * sp.area:
@@ -309,6 +326,14 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     roof_parts = [slab_solid(sp, rb, rt, zmax)]
     if eave_note(main, f"大屋根 {main.get('id', '')}"):
         notes["roof"].append(eave_note(main, f"大屋根 {main.get('id', '')}"))
+    # 大屋根の軒天：2階の外形を除く。2階の天井より低い軒天は、2階の壁とはめあいの隙間を空ける
+    sz = main.get("soffit_z_mm")
+    so, so_note = eave_soffit_solid(main, sp, zone_a, rt, zmax, fl2,
+                                    clearance if sz is not None and float(sz) < ceil2 else 0.0)
+    if so is not None:
+        roof_parts.append(so)
+    if so_note:
+        notes["roof"].append(so_note)
     ext2_fp = unary_union([wall_rect(w) for w in walls2 if w["kind"] == "exterior"])
     inside2 = zone_a.difference(ext2_fp)
     inside2 = max(getattr(inside2, "geoms", [inside2]), key=lambda g: g.area)

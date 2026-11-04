@@ -199,7 +199,8 @@ function renderTables(b) {
   // 表は2つ：屋根の形（勾配・低い側・軒先の高さ）と軒の出（西・東・南・北）。1つにすると右の欄からはみ出すため
   const rt = $('#roofs'), et = $('#roof-eaves');
   rt.innerHTML = `<tr><th>番号</th>${lvHead}<th>種類</th><th>勾配 /10</th><th>低い側</th><th>軒先の高さ</th></tr>`;
-  et.innerHTML = `<tr><th>番号</th>${[...'WESN'].map((s) => `<th>${SIDE[s]}</th>`).join('')}</tr>`;
+  const soffitCol = (b.roofs || []).some((r) => r.soffit_z_mm != null);   // 軒天がある屋根（glb に軒天の部材）のときだけ列を出す
+  et.innerHTML = `<tr><th>番号</th>${[...'WESN'].map((s) => `<th>${SIDE[s]}</th>`).join('')}${soffitCol ? '<th>軒天の高さ</th>' : ''}</tr>`;
   for (const r of b.roofs || []) {
     const shed = !(r.planes && r.planes.length > 1) && r.low_side && SIDE[r.low_side];
     const pitch = r.top_plane && r.pitch ? { field: 'pitch', value: r.pitch[0], step: '0.1' } : { text: (r.pitch || []).join('/') };
@@ -208,7 +209,8 @@ function renderTables(b) {
     editableRow([{ text: r.id }, ...lvCell(r), { text: roofKind(r) }, pitch, low, tip],
       (inputs, reason) => approveChanges(r.id, inputs, reason)).forEach((x) => rt.appendChild(x));
     const eaves = [...'WESN'].map((s) => (r.eave_mm && s in r.eave_mm ? { field: `eave_mm.${s}`, value: r.eave_mm[s] } : { text: '' }));
-    editableRow([{ text: r.id }, ...eaves], (inputs, reason) => approveChanges(r.id, inputs, reason)).forEach((x) => et.appendChild(x));
+    const soffit = soffitCol ? [r.soffit_z_mm != null ? { field: 'soffit_z_mm', value: r.soffit_z_mm } : { text: '' }] : [];
+    editableRow([{ text: r.id }, ...eaves, ...soffit], (inputs, reason) => approveChanges(r.id, inputs, reason)).forEach((x) => et.appendChild(x));
   }
 }
 
@@ -291,7 +293,7 @@ const VIEW_OF = { S: 'S', N: 'N', E: 'E', W: 'W', plan: 'plan', plan2: 'plan2', 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const FIELD = { thickness_mm: '厚み', width_mm: '幅', offset_mm: '壁の端からの位置', sill_fl_mm: '下端 FL+', head_fl_mm: '上端 FL+',
-  fl_mm: '床の高さ', ceiling_mm: '天井の高さ', pitch: '勾配（10 に対して）', low_side: '低い側', eave_tip_mm: '軒先の高さ' };
+  fl_mm: '床の高さ', ceiling_mm: '天井の高さ', pitch: '勾配（10 に対して）', low_side: '低い側', eave_tip_mm: '軒先の高さ', soffit_z_mm: '軒天の高さ' };
 const LEVEL_JA = { '1F': '1階', '2F': '2階' };
 for (const s of 'WESN') FIELD[`eave_mm.${s}`] = `軒の出（${SIDE[s]}）`;
 

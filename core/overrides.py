@@ -15,6 +15,7 @@ field に "_delete" を指定すると、その部材を取り除く（to は使
 基礎・外壁の下端・ポーチはそのまま（家が基礎の上で上下する。(推定) 2026-11-03、作者に確かめる）。
 屋根の形は target "Y1" など、field "pitch"（勾配。10 に対する値）・"low_side"（低い側。片流れだけ）・
 "eave_tip_mm"（軒先の高さ＝屋根の上の面のいちばん低い所）。当てるときにコードが面の式を計算し直す。
+軒天の高さは field "soffit_z_mm"（GL から）。glb に軒天（typeESnok）がある屋根だけ。屋根を上下させると軒天も一緒に動く。
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ CEILING_RANGE_MM = (1800.0, 4000.0)         # 天井の高さ（床から）
 FL_MAX_MM = 3000.0                          # 1階の床の高さ（GL から）の上限
 LEVEL_JA = {"1F": "1階", "2F": "2階"}
 ROOF_GEOM_FIELDS = ("pitch", "low_side", "eave_tip_mm")   # 屋根の形（当てるときに面の式を計算し直す）
+SOFFIT_FIELD = "soffit_z_mm"   # 軒天の高さ（GL から）。glb に軒天がある屋根だけ直せる（11/4）
 PITCH_RANGE = (0.5, 12.0)                                 # 勾配（10 に対する値）
 SIDES = ("S", "N", "E", "W")
 REACH_ROOF_MM = 150.0                                     # 屋根の下の面からこれ以内に上端がある壁は「屋根まで届いている」
@@ -107,6 +109,8 @@ def _set_field(obj: dict, field: str, value) -> None:
 def check_value(field: str, to, target: str = "") -> None:
     """値の範囲を確かめる（その値だけで決まるもの）。外れたら日本語の ValueError。
     家全体を見ないと決まらないもの（天井と屋根の間など）は level_problems で確かめる。"""
+    if field == SOFFIT_FIELD and (not isinstance(to, (int, float)) or isinstance(to, bool) or not 500 <= float(to) <= 20000):
+        raise ValueError("軒天の高さは GL からの mm（500〜20000）で入れてください")
     if field.startswith(EAVE_PREFIX):
         lo, hi = EAVE_RANGE_MM
         if not isinstance(to, (int, float)) or not lo <= float(to) <= hi:
@@ -175,6 +179,8 @@ def _shift_roof(roof: dict, dz: float) -> None:
         roof["planes"] = [_shift_planes(p, dz) for p in roof["planes"]]
     if isinstance(roof.get("top_z_range_mm"), list):
         roof["top_z_range_mm"] = [_num(float(v) + dz) for v in roof["top_z_range_mm"]]
+    if roof.get("soffit_z_mm") is not None:          # 軒天は軒と一緒に動く（11/4）
+        roof["soffit_z_mm"] = _num(float(roof["soffit_z_mm"]) + dz)
 
 
 def _shift_from_level(building: dict, idx: int, fl_before: float, dz: float) -> None:
