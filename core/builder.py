@@ -335,6 +335,10 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     fl = float(lv["fl_mm"])
     ftop = float(b["foundation"]["top_mm"])
     roof = b["roof"]
+    if not roof.get("footprint") or not (roof.get("bottom_plane") or roof.get("planes")) or not roof.get("top_z_range_mm"):
+        # ★11/4 の見直し：屋根の形を読めない glb で KeyError になり、何が悪いか分からなかった
+        raise ValueError(f"屋根の形を読めませんでした（{roof.get('note') or roof.get('shape') or '屋根の面がない'}）。"
+                         "glb の屋根（typeEYane）を Walk in home で確かめてください")
     rb, rt = roof_surfaces(roof)                 # 片流れは平面の式（dict）、面が複数の屋根は MultiPlane
     roof_zmax = float(roof["top_z_range_mm"][1]) + 200
     outline = Polygon(b["foundation"]["outline"])

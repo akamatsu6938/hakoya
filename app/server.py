@@ -140,9 +140,29 @@ def build_property(alias: str):
     _check_alias(alias)
     if RUNS.get(alias, {}).get("running"):
         raise HTTPException(409, "この物件はいま検品中です。検品が終わってから組み立ててください")
-    write_building(alias, build(alias))
-    summary = write_outputs(alias)
+    try:
+        write_building(alias, build(alias))
+        summary = write_outputs(alias)
+    except (ValueError, OSError) as e:      # HAKOYA が書いた説明（「3階建てはまだ扱えません」など）は画面に出す
+        msg = _user_message(e)
+        if msg is None:
+            raise                            # 場所の文字などが入るかもしれない文は出さない（HideErrorText が種類だけ出す）
+        raise HTTPException(422, f"組み立てられませんでした：{msg}")
     return _safe_json(summary)
+
+
+def _user_message(e: Exception) -> str | None:
+    """画面に見せてよいエラーの文（場所の文字・出してはいけない言葉がない、短い文）。なければ None。"""
+    import re as _re
+    from core.privacy import PrivacyError
+    msg = str(e)
+    if not msg or len(msg) > 300 or _re.search(r"[\\/]|\.(glb|jww|pdf)\b", msg, _re.I):
+        return None
+    try:
+        assert_clean(msg, "エラーの文")
+    except PrivacyError:
+        return None
+    return msg
 
 
 @app.get("/api/building/{alias}")
