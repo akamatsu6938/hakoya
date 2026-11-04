@@ -251,8 +251,10 @@ def split_across_eave(piece: Piece) -> list[Piece]:
         L = 1e5
         line = LineString([(cx - b * L, cy + a * L), (cx + b * L, cy - a * L)]) if (a or b) else \
             LineString([(cx - e[1] * L, cy + e[0] * L), (cx + e[1] * L, cy - e[0] * L)])
+        msg = "造形範囲に入らないので、軒と直角に半分に切った"
         halves.append(Piece(name=piece.name + ("（右）" if sign == 1 else "（左）"), solids=sub, top_plane=piece.top_plane,
-                            cuts=piece.cuts + [line], warnings=piece.warnings + ["造形範囲に入らないので、軒と直角に半分に切った"]))
+                            cuts=piece.cuts + [line],
+                            warnings=piece.warnings + ([] if msg in piece.warnings else [msg])))   # 2回切っても注意は1回
     return [h for h in halves if any(not m.is_empty() for m in h.solids.values())]
 
 

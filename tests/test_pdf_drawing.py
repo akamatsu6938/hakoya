@@ -109,6 +109,7 @@ def test_pdf_is_used_only_when_there_is_no_jww_of_that_kind(tmp_path):
 @pytest.fixture
 def house(tmp_path, monkeypatch):
     """図面のフォルダを登録した物件A（data/ の代わりに一時フォルダ）。"""
+    import app.server  # noqa: F401  差し替える前に読み込む（差し替えた property_files を、読み込んだモジュールが持ち続けないように）
     monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
     folder = tmp_path / "図面"
     folder.mkdir()

@@ -194,6 +194,10 @@ def drawing_check(alias: str):
     from core.drawing_check import summary
     key = tuple(p.stat().st_mtime if p.exists() else 0
                 for p in (_building_path(alias), ov.overrides_path(alias), out_dir(alias) / "reading.json"))
+    try:   # 図面を書き出し直したら（PDF・jww の時刻が変われば）作り直す
+        key += tuple(sorted((k, p.stat().st_mtime if p.exists() else 0) for k, p in property_files(alias).jww.items()))
+    except (KeyError, OSError, ValueError):
+        pass
     hit = DRAWING_CACHE.get(alias)
     if hit and hit[0] == key:
         return _safe_json(hit[1])
