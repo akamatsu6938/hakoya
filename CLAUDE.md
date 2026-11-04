@@ -50,6 +50,7 @@ Built with Claude: Japan 2026 の提出作品（2026-11-02 12:00 〜 11-10 14:00
 - フォルダ名に `☆` `【】` などの全角記号が入るので、パスは `pathlib`、UTF-8 モード（`PYTHONUTF8=1`）で扱う。
 - 開発中は `start.bat` で起動。配るときは PyInstaller で exe にする（設定は `packaging/`。作業フォルダ `build/`・`dist/` は .gitignore）。
 - テストは pytest。`data/` がない環境では、実データを使うテストは飛ばす（skip）。
+- 図面を読む部品：jww は ezjww、文字を選べる PDF は pdfplumber（高性能読み込みのときだけ読む。選んだ理由は `docs/decisions.md`「PDF を読む部品」「高性能読み込み」）。
 - アプリの Claude が読む Skill は `skills/`、開発用の Claude Code の設定（フック）は `.claude/` に分けて置く。
 
 ## よく使う確認

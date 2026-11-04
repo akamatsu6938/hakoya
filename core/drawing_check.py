@@ -251,8 +251,8 @@ def _aligned(alias: str, b: dict, kind: str):
     hit = _CACHE.get(key)
     if hit and hit[0] == stamp:
         return hit[1]
-    d = read_property(alias, kind)
-    al = align_property(alias, b).get(kind) if d is not None else None
+    al = align_property(alias, b).get(kind) if f is not None else None
+    d = read_property(alias, kind)       # 位置合わせのあとで読む（★11/4 縮尺が分からない PDF は、位置合わせで縮尺が決まる）
     _CACHE[key] = (stamp, (d, al))
     return d, al
 

@@ -34,6 +34,9 @@ def _sh(cmd, tool="Bash"):
     _sh("git add data/"),
     _sh("git add model.3mf"),
     _sh("git add --force ."),
+    _file("Write", r"C:\図面\物件C\1階平面図.pdf"),                   # ★11/4 PDF の図面も元のファイル
+    _sh("Remove-Item C:/図面/1階平面図.PDF", tool="PowerShell"),
+    _sh("git add docs/plan.pdf"),
 ])
 def test_blocks(payload):
     assert guard.decide(payload, PROJECT) is not None
@@ -48,6 +51,7 @@ def test_blocks(payload):
     _sh("git status --short 2>/dev/null"),
     _sh("cat data/out/building.json"),
     _sh(".venv/Scripts/python -m adapters.walkinhome 物件A"),
+    _sh(".venv/Scripts/python -m pytest tests/test_pdf_drawing.py"),
     _sh("Get-Content data/local_paths.yaml", tool="PowerShell"),
     {"tool_name": "Read", "tool_input": {"file_path": "C:/x/物件A.glb"}},
 ])

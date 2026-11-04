@@ -199,6 +199,8 @@ li.lv-情報 { color: var(--ink-2); }
 .registry th, .registry td { padding: 5px 5px; text-align: left; white-space: normal; }
 .registry th:nth-child(-n+2), .registry td:nth-child(-n+2) { white-space: nowrap; }   /* 仮名・glb は短いので折り返さない */
 .registry .warn { color: var(--bad); }
+.registry th:nth-child(4), .registry td:nth-child(4) { white-space: nowrap; }   /* 高性能読み込み：見出しを途中で折り返さない */
+.registry label.high { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .registry-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
 .registry-form label { display: flex; flex-direction: column; gap: 4px; color: var(--ink-2); font-size: var(--fs-s); }
 .registry-form input[type="text"], .registry-form textarea { width: 100%; box-sizing: border-box; }

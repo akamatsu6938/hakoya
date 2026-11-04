@@ -191,7 +191,8 @@ def drawing_check(alias: str):
     """図面（jww）と比べた結果：平面図の窓・テラスドアの注記（品番と上端の FL+）と模型の開口の上端。数値はコードが読む。"""
     _check_alias(alias)
     from core.drawing_check import summary
-    key = tuple(p.stat().st_mtime if p.exists() else 0 for p in (_building_path(alias), ov.overrides_path(alias)))
+    key = tuple(p.stat().st_mtime if p.exists() else 0
+                for p in (_building_path(alias), ov.overrides_path(alias), out_dir(alias) / "reading.json"))
     hit = DRAWING_CACHE.get(alias)
     if hit and hit[0] == key:
         return _safe_json(hit[1])
@@ -199,7 +200,9 @@ def drawing_check(alias: str):
     try:
         result = summary(alias, b)
     except Exception as e:                                    # 図面が読めない（壊れている・ライブラリがない）
-        result = {"available": False, "note": f"図面を読めませんでした（{type(e).__name__}）"}
+        from core.pdf_drawing import DrawingUnreadable
+        why = _user_message(e) if isinstance(e, DrawingUnreadable) else None    # スキャンの PDF など：直し方を出す
+        result = {"available": False, "note": f"図面を読めませんでした（{why or type(e).__name__}）"}
     DRAWING_CACHE[alias] = (key, result)
     return _safe_json(result)
 
@@ -671,6 +674,27 @@ def registry_add(body: RegisterIn):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _safe_json({"alias": alias, **rg.list_properties()})
+
+
+class ReadingIn(BaseModel):
+    high: bool
+
+
+@app.post("/api/reading/{alias}")
+def reading_set(alias: str, body: ReadingIn):
+    """高性能読み込み（図面と突き合わせる）の入れ切り（★11/4 作者：ふだんは glb だけ、高性能読み込みのときだけ図面）。
+    切にすると、図面の照合・重ね・図面ありの検品は「図面なし」と同じになる。模型（glb から組み立てた形）は変わらない。"""
+    _check_alias(alias)
+    from core import drawing_check as dc
+    from core import reading
+    from core import registry as rg
+    if body.high and not property_files(alias, use_mode=False).jww:
+        raise HTTPException(400, "この物件には図面が登録されていません（図面のフォルダを登録すると入にできます）")
+    reading.set_high(alias, body.high)
+    DRAWING_CACHE.pop(alias, None)                            # 照合・重ね・図面の画像を、次に開いたときに作り直す
+    for k in [k for k in dc._CACHE if k[0] == alias]:
+        dc._CACHE.pop(k, None)
+    return _safe_json(rg.list_properties())
 
 
 @app.get("/api/settings")

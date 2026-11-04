@@ -5,6 +5,7 @@ data/
 *.jww
 *.jwc
 *.glb
+*.pdf
 *.3mf
 local_paths.yaml
 

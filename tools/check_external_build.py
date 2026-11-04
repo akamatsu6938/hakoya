@@ -6,6 +6,7 @@
 - 版の印（EDITION）が external
 - data\\（実物の図面・glb・設定）が入っていない
 - API キーらしい文字（sk-ant-…）が、文字のファイルにも、バイナリの中にもない
+- PDF の日本語の文字の表（pdfminer の cmap）が入っている（ないと、高性能読み込みで PDF の日本語が読めない。★11/4）
 見つけた内容は出さない（場所と種類だけ）。問題があれば終了コード 1。
 """
 from __future__ import annotations
@@ -17,6 +18,7 @@ from pathlib import Path
 KEY_RE = re.compile(rb"sk-ant-[A-Za-z0-9_\-]{20,}")
 FORBIDDEN_DIRS = ("claude_agent_sdk", "mcp")
 FORBIDDEN_FILES = ("claude.exe", "claude")
+JP_CMAP = "UniJIS-UCS2-H.json.gz"     # 日本語の PDF の文字の表の1つ（ほかの表と一緒に pdfminer/cmap に入る）
 TEXT_EXT = {".py", ".json", ".yaml", ".yml", ".md", ".txt", ".js", ".css", ".html", ".toml", ".cfg", ".ini"}
 
 
@@ -40,6 +42,8 @@ def check(root: Path) -> list[str]:
                 continue
             if KEY_RE.search(blob):
                 problems.append(f"API キーらしい文字：{rel}")
+    if not any(p.parent.name == "cmap" for p in root.rglob(JP_CMAP)):
+        problems.append("PDF の日本語の文字の表（pdfminer の cmap）がない（高性能読み込みで PDF の文字が読めない）")
     marks = list(root.rglob("EDITION"))
     if not marks:
         problems.append("版の印（EDITION）がない")

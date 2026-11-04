@@ -17,6 +17,7 @@ dependencies = [
     "anthropic>=2.3",
     "keyring>=25",
     "ezjww>=0.7.6",
+    "pdfplumber>=0.11.9",   # 高性能読み込みの PDF の図面（11/4 作者「作ってしまってもいい」。理由は docs/decisions.md）
 ]
 
 [project.optional-dependencies]

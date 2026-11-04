@@ -280,7 +280,7 @@ async function renderChecks() {
   try {   // 図面（jww）と比べた結果：平面図の窓・テラスドアの注記（品番と上端）と模型の開口
     const dw = await call('GET', '/api/drawing/{a}');
     if (dw.available) {
-      add('<li class="lv-情報"><b>図面（jww）と比べた結果</b>（平面図の窓・テラスドアの注記の上端 FL+ と品番の幅・高さ、立面図の窓の位置を、模型の窓と比べる）</li>');
+      add('<li class="lv-情報"><b>図面と比べた結果</b>（平面図の窓・テラスドアの注記の上端 FL+ と品番の幅・高さ、立面図の窓の位置を、模型の窓と比べる）</li>');
       for (const r of dw.levels) {
         const name = LEVEL_JA[r.level] || r.level;
         if (!r.aligned) { add(`<li class="lv-中"><span class="tag">${esc(name)}</span>${esc(r.note)}</li>`); continue; }
@@ -904,10 +904,25 @@ async function renderRegistry() {
   let r;
   try { r = await call('GET', '/api/registry'); } catch (e) { $('#reg-msg').textContent = '登録の一覧を読めませんでした：' + e.message; return; }
   if (!$('#reg-alias').value) $('#reg-alias').value = r.next_alias;
-  $('#registry-list').innerHTML = '<tr><th>仮名</th><th>glb</th><th>図面</th><th>出してはいけない言葉</th></tr>' + r.properties.map((p) =>
+  $('#registry-list').innerHTML = '<tr><th>仮名</th><th>glb</th><th>図面</th><th>高性能読み込み</th><th>出してはいけない言葉</th></tr>' + r.properties.map((p) =>
     `<tr><td>${esc(p.alias)}</td><td>${esc(p.glb)}</td><td>${esc(p.drawings.join('・') || 'なし')}</td>` +
+    `<td>${p.drawings.length ? `<label class="high"><input type="checkbox" data-high="${esc(p.alias)}"${p.high ? ' checked' : ''}>${p.high ? '入' : '切'}</label>` : '<span class="hint">glb だけ</span>'}</td>` +
     `<td>${p.ng_words ? `${p.ng_words} 件` : `<span class="warn">この物件の言葉なし</span>${r.global_ng_words ? `（全体の ${r.global_ng_words} 件だけ）` : ''}`}</td></tr>`).join('');
 }
+// 高性能読み込み（図面と突き合わせる）の入れ切り。切ると、図面の照合・重ね・図面ありの検品を使わない（模型は変わらない）
+$('#registry-list').addEventListener('change', async (e) => {
+  const box = e.target.closest('input[data-high]');
+  if (!box) return;
+  const alias = box.dataset.high, on = box.checked;
+  box.disabled = true;
+  try {
+    await call('POST', `/api/reading/${encodeURIComponent(alias)}`, { high: on });
+    $('#reg-msg').textContent = on ? `${alias}：高性能読み込みを入にしました。図面と突き合わせて検査・検品します` : `${alias}：高性能読み込みを切にしました。glb だけで検査・検品します`;
+    $('#reg-msg').className = 'ok';
+    if (alias === state.alias) { if ($('#plan-drawing').checked) await loadPlan(); await renderChecks(); }
+  } catch (err) { box.checked = !on; $('#reg-msg').textContent = '切り替えられませんでした：' + err.message; $('#reg-msg').className = 'err'; }
+  renderRegistry();
+});
 async function pickFor(what, key, el) {
   el.textContent = '選ぶ窓を開いています…（ブラウザの後ろに出ることがあります）'; el.className = 'hint';
   try {

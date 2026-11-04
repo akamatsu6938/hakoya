@@ -144,14 +144,35 @@ def read_drawing(path: Path, kind: str, ng_words: list[str] | None = None) -> Dr
                    lines=np.array(lines, float).reshape(-1, 4), texts=texts, dims=dims, dropped=dropped)
 
 
+_PDF_CACHE: dict = {}
+
+
 def read_property(alias: str, kind: str = "plan") -> Drawing | None:
-    """物件の図面を読む（data/local_paths.yaml の jww。なければ None）。"""
+    """物件の図面を読む（data/local_paths.yaml の jww か PDF。なければ None。高性能読み込みが切でも None）。
+    PDF の縮尺は、控え（平面図の位置合わせで決めたもの）→ 寸法の数字 → 平面図と同じ、の順に決める。"""
     from core.paths import property_files
     files = property_files(alias)
     p = files.jww.get(kind)
     if p is None or not p.exists():
         return None
-    return read_drawing(p, kind)
+    if p.suffix.lower() != ".pdf":
+        return read_drawing(p, kind)
+    from core import reading
+    from core.pdf_drawing import read_pdf, rescale
+    st = p.stat()
+    key = (str(p), st.st_size, int(st.st_mtime), kind)
+    if key not in _PDF_CACHE:                          # 1枚で数秒かかるので、同じファイルは読み直さない
+        _PDF_CACHE[key] = read_pdf(p, kind)
+    d = _PDF_CACHE[key]
+    saved = reading.saved_scale(alias, kind, p)
+    if saved and abs(saved - d.scale) > 1e-6:
+        return rescale(d, saved)
+    if getattr(d, "scale_source", "") == "assumed" and kind != "plan":
+        plan = files.jww.get("plan")
+        ps = reading.saved_scale(alias, "plan", plan) if plan is not None and plan.exists() else None
+        if ps:
+            return rescale(d, ps)                      # 平面図と同じ縮尺とみなす（同じ組の図面）
+    return d
 
 
 # ---------------------------------------------------------------- 平面図と模型の位置合わせ
@@ -250,7 +271,8 @@ def align_plan(d: Drawing, b: dict, level: str | None = "1F", hint: dict | None 
     if not len(faces) or not len(d.lines):
         return None
     raster = _Raster(faces)
-    pts = _sample(d.lines, 50.0)
+    src = getattr(d, "align_lines", None)               # PDF：縦横の長い線だけ（core/pdf_drawing.py _strong）
+    pts = _sample(src if src is not None and len(src) else d.lines, 50.0)
     results = []
     model_pts = _sample(faces, COARSE_CELL_MM / 2)
     for theta in ((hint["rot"],) if hint else (0, 90, 180, 270)):
@@ -286,11 +308,39 @@ def align_plan(d: Drawing, b: dict, level: str | None = "1F", hint: dict | None 
     return top
 
 
+PDF_TRY_SCALES = (100, 50, 200, 150, 300, 30)   # PDF の縮尺が分からないときに試す（1/100 → 1/50 → …）
+
+
+def _align_pdf_scale(alias: str, d: Drawing, b: dict, level: str) -> tuple[Drawing, dict | None]:
+    """縮尺が分からない PDF の平面図：縮尺を変えながら位置合わせして、いちばん合う縮尺に決める（控えに残す）。"""
+    from core import reading
+    from core.paths import property_files
+    from core.pdf_drawing import rescale
+    best = None
+    for s in PDF_TRY_SCALES:
+        ds = rescale(d, s)
+        a = align_plan(ds, b, level)
+        if a is not None and (best is None or a["score"] > best[2]["score"]):
+            best = (s, ds, a)
+    if best is None:
+        return d, None
+    p = property_files(alias).jww.get("plan")
+    if p is not None:
+        reading.save_scale(alias, "plan", p, best[0], "aligned")
+    best[2]["pdf_scale"] = best[0]
+    return best[1], best[2]
+
+
 def align_property(alias: str, b: dict) -> dict:
-    """物件の平面図（1階・2階）の位置合わせ。{"plan": 変換か None, "plan_2f": …}。2階は1階の変換を手がかりにする。"""
+    """物件の平面図（1階・2階）の位置合わせ。{"plan": 変換か None, "plan_2f": …}。2階は1階の変換を手がかりにする。
+    PDF の平面図で縮尺が分からないときは、縮尺も探す（_align_pdf_scale）。"""
     out = {}
     d1 = read_property(alias, "plan")
-    out["plan"] = align_plan(d1, b, (b.get("levels") or [{}])[0].get("name", "1F")) if d1 else None
+    lv1 = (b.get("levels") or [{}])[0].get("name", "1F")
+    if d1 is not None and getattr(d1, "scale_source", "") == "assumed":
+        d1, out["plan"] = _align_pdf_scale(alias, d1, b, lv1)
+    else:
+        out["plan"] = align_plan(d1, b, lv1) if d1 else None
     if len(b.get("levels") or []) > 1:
         d2 = read_property(alias, "plan_2f")
         out["plan_2f"] = align_plan(d2, b, b["levels"][1]["name"], hint=out["plan"]) if d2 and out["plan"] else None

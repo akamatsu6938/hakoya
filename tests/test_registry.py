@@ -65,7 +65,7 @@ def test_list_shows_kinds_and_counts_but_no_places(yml, tmp_path):
     data = rg.list_properties(yml)
     assert data["next_alias"] == "物件C" and data["global_ng_words"] == 1
     assert [r["alias"] for r in data["properties"]] == ["物件A", "物件B"]
-    assert data["properties"][1] == {"alias": "物件B", "glb": "あり", "drawings": [], "ng_words": 1}
+    assert data["properties"][1] == {"alias": "物件B", "glb": "あり", "drawings": [], "ng_words": 1, "high": False}
     assert str(tmp_path) not in str(data) and "鈴木" not in str(data)
 
 

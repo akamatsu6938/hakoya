@@ -103,6 +103,11 @@ def describe_drawings(p: Path) -> tuple[bool, str]:
     return True, text + ("。" + "／".join(notes) if notes else "")
 
 
+def _is_high(alias: str, has_drawings: bool) -> bool:
+    from core.reading import is_high
+    return is_high(alias, has_drawings) and has_drawings
+
+
 def list_properties(path: Path | None = None) -> dict:
     path = _where(path)
     conf = _conf(path)
@@ -110,7 +115,7 @@ def list_properties(path: Path | None = None) -> dict:
     for alias, entry in conf.items():
         if not isinstance(entry, dict):
             continue
-        f = property_files(alias, path)
+        f = property_files(alias, path, use_mode=False)
         if entry.get("glb"):        # glb の欄には glb のことだけ（前は図面の注意が出ることがあった）
             gp, why = _resolve_glb(Path(str(entry["glb"])))
             glb_state = "あり" if gp is not None and gp.exists() else (why or "見つかりません")
@@ -118,7 +123,8 @@ def list_properties(path: Path | None = None) -> dict:
             glb_state = "書かれていません"
         rows.append({"alias": alias, "glb": glb_state,
                      "drawings": [JWW_KIND_JA[k] for k in KIND_ORDER if k in f.jww],
-                     "ng_words": len(clean_words(entry.get("ng_words")))})   # 空の行は数えない（数で打ち間違いに気づけるように）
+                     "ng_words": len(clean_words(entry.get("ng_words"))),   # 空の行は数えない（数で打ち間違いに気づけるように）
+                     "high": _is_high(alias, bool(f.jww))})                  # 高性能読み込み（図面と突き合わせる）
     return {"properties": rows, "next_alias": next_alias(path), "global_ng_words": len(clean_words(conf.get("ng_words")))}
 
 

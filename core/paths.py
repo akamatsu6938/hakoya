@@ -84,24 +84,26 @@ def jww_kind(stem: str) -> str | None:
     return hits[0]
 
 
-def detect_jww(folder: Path) -> tuple[dict[str, Path], list[str]]:
-    """図面のフォルダのすぐ下の .jww を、ファイル名から種類に分ける。同じ種類が2つ以上あれば使わない（取り違えないように）。"""
+def detect_jww(folder: Path, with_pdf: bool = True) -> tuple[dict[str, Path], list[str]]:
+    """図面のフォルダのすぐ下の .jww を、ファイル名から種類に分ける。同じ種類が2つ以上あれば使わない（取り違えないように）。
+    with_pdf：jww がない種類は、同じ決まりで .pdf（CAD から書き出した図面）も使う（★11/4 高性能読み込み。jww があれば jww）。"""
     if not folder.is_dir():
         return {}, ["図面のフォルダが見つかりません"]
     try:
         entries = sorted(folder.iterdir())
     except OSError as e:     # 場所はエラーの文に出さない
         return {}, [f"図面のフォルダを読めません（{type(e).__name__}。権限やネットワークの切断を確かめてください）"]
-    found: dict[str, list[Path]] = {}
-    for p in entries:
-        if p.is_file() and p.suffix.lower() == ".jww" and (kind := jww_kind(p.stem)):
-            found.setdefault(kind, []).append(p)
     out, notes = {}, []
-    for kind, ps in found.items():
-        if len(ps) == 1:
-            out[kind] = ps[0]
-        else:
-            notes.append(f"{JWW_KIND_JA[kind]}らしい図面が {len(ps)} つあるので使いません（local_paths.yaml の jww: で指定してください）")
+    for ext in ((".jww", ".pdf") if with_pdf else (".jww",)):
+        found: dict[str, list[Path]] = {}
+        for p in entries:
+            if p.is_file() and p.suffix.lower() == ext and (kind := jww_kind(p.stem)) and kind not in out:
+                found.setdefault(kind, []).append(p)
+        for kind, ps in found.items():
+            if len(ps) == 1:
+                out[kind] = ps[0]
+            else:
+                notes.append(f"{JWW_KIND_JA[kind]}らしい図面（{ext}）が {len(ps)} つあるので使いません（local_paths.yaml の jww: で指定してください）")
     return out, notes
 
 
@@ -131,8 +133,9 @@ def aliases(path: Path = LOCAL_PATHS) -> list[str]:
     return [k for k, v in load_local_paths(path).items() if isinstance(v, dict)]
 
 
-def property_files(alias: str, path: Path = LOCAL_PATHS) -> PropertyFiles:
-    """物件のファイルの場所。glb にはファイルかフォルダを書ける。図面は jww: の指定がなければ、フォルダの中から名前で探す。"""
+def property_files(alias: str, path: Path = LOCAL_PATHS, use_mode: bool = True) -> PropertyFiles:
+    """物件のファイルの場所。glb にはファイルかフォルダを書ける。図面は jww: の指定がなければ、フォルダの中から名前で探す。
+    use_mode：高性能読み込み（core/reading.py）が切の物件は、図面を空にする（図面を使う所はすべて「図面なし」の動きになる）。"""
     conf = load_local_paths(path).get(alias)
     if not isinstance(conf, dict):
         raise KeyError(f"data/local_paths.yaml に「{alias}」がありません。")
@@ -150,6 +153,11 @@ def property_files(alias: str, path: Path = LOCAL_PATHS) -> PropertyFiles:
         notes += more
     else:
         jww = {}
+    if use_mode and jww:
+        from core.reading import is_high
+        if not is_high(alias, has_drawings=True):
+            jww = {}
+            notes.append("高性能読み込みが切なので、図面は使わない（glb だけ）")
     return PropertyFiles(alias=alias, glb=glb, jww_folder=folder, jww=jww, notes=notes)
 
 

@@ -2,6 +2,8 @@
 
 サブエージェントが公式の説明・配布元の記録・ソースを調べた結果を、私（Claude）が確かめてまとめた。部品はまだ入れていない。入れるかは 作者が決める（CLAUDE.md・docs/decisions.md の決まり）。
 
+> **→ 11/4 夜、pdfplumber を入れた**（作者「一旦時間あるから作ってしまってもいいよ」）。使い方は SPEC §4-2b、理由は docs/decisions.md「PDF を読む部品」「高性能読み込み」。
+
 ## 結論
 - **入れるなら pdfplumber（中身は pdfminer.six）。次点は pypdfium2。**
 - **PyMuPDF は使わない。** ライセンスが AGPL で、社外に配る exe ごと「ソースを渡す義務」が付くため。

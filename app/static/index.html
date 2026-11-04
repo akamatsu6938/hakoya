@@ -47,7 +47,7 @@
           <option value="2F">2階</option>
         </select>
         <button id="lasso-toggle">囲む</button>
-        <label><input type="checkbox" id="plan-drawing">図面（jww）を重ねる</label>
+        <label><input type="checkbox" id="plan-drawing">図面を重ねる</label>
         <span class="label" id="lasso-hint">「囲む」を押してから、平面図の上で直したい壁や窓をぐるっと囲んでください。</span>
       </div>
       <div id="plan" class="plan">まだ組み立てていません</div>
@@ -118,12 +118,12 @@
     </div>
     <div id="sset" class="pane">
       <h3>物件の登録</h3>
-      <p class="hint">Walk in home の glb（と図面のフォルダ）を選び、仮名を付けて登録します。元のファイルは読むだけで、書き換えもコピーもしません。ファイル名や場所（施主名が入ることがあります）は画面に出しません。</p>
+      <p class="hint">Walk in home の glb（と図面のフォルダ）を選び、仮名を付けて登録します。元のファイルは読むだけで、書き換えもコピーもしません。ファイル名や場所（施主名が入ることがあります）は画面に出しません。<br>ふだんは glb だけで組み立て・検査・検品します。「高性能読み込み」を入にした物件だけ、図面とも突き合わせます（窓の注記の照合・平面図に図面を重ねる・図面を見せた検品）。スキャンした PDF は読めません。</p>
       <table id="registry-list" class="registry"></table>
       <div class="registry-form">
         <label>仮名 <input id="reg-alias" type="text" maxlength="20"></label>
         <div><button id="reg-pick-glb">glb を選ぶ</button> <span id="reg-glb-status" class="hint">まだ選んでいません</span></div>
-        <div><button id="reg-pick-dwg">図面のフォルダを選ぶ</button> <span id="reg-dwg-status" class="hint">なくても登録できます（jww。名前の「平面」「立面」「断面」「2階」で種類を分けます）</span></div>
+        <div><button id="reg-pick-dwg">図面のフォルダを選ぶ</button> <span id="reg-dwg-status" class="hint">なくても登録できます（jww か、jww・Walk in home から書き出した文字を選べる PDF。名前の「平面」「立面」「断面」「2階」で種類を分けます）</span></div>
         <details><summary>選ぶ窓が出ないとき（場所を貼り付ける）</summary>
           <input id="reg-glb-path" type="text" placeholder="glb の場所（ファイルか、glb が1つだけ入ったフォルダ）" spellcheck="false">
           <input id="reg-dwg-path" type="text" placeholder="図面（jww）のフォルダの場所（なくてもよい）" spellcheck="false">

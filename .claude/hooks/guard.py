@@ -1,9 +1,9 @@
 """書き込む前の見張り（Claude Code の PreToolUse フック）。
 
 止めるもの（SPEC §2-1・§2-6・§11）:
-- 元のファイル（*.glb / *.jww / *.jwc）への書き込み・削除・移動
+- 元のファイル（*.glb / *.jww / *.jwc / *.pdf）への書き込み・削除・移動（★11/4 PDF の図面も高性能読み込みで読む）
 - data/ の中への書き込み（data/local_paths.yaml だけは例外）
-- git add で data/・glb・jww を入れる操作と、git add -f（.gitignore を無視する）
+- git add で data/・glb・jww・PDF を入れる操作と、git add -f（.gitignore を無視する）
 
 止めるときは終了コード 2 と理由（stderr）を返す。Claude Code はその操作を取りやめる。
 """
@@ -15,7 +15,7 @@ import re
 import sys
 from pathlib import Path
 
-PROTECTED_EXT = (".glb", ".jww", ".jwc")
+PROTECTED_EXT = (".glb", ".jww", ".jwc", ".pdf")
 ALLOWED_IN_DATA = ("local_paths.yaml",)
 
 FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
@@ -27,9 +27,9 @@ WRITE_VERBS = re.compile(
     r"\brename-item\b|\bcopy-item\b|\bclear-content\b|\bnew-item\b|\brm\b|\bdel\b|\bmv\b|\bcp\b|"
     r"\bren\b|\btee\b|\btruncate\b|\bsed\s+-i\b|\bshred\b)"
 )
-PROTECTED_IN_SHELL = re.compile(r"(?i)(\.(glb|jww|jwc)\b|(^|[\s\"'=/\\])data[/\\])")
+PROTECTED_IN_SHELL = re.compile(r"(?i)(\.(glb|jww|jwc|pdf)\b|(^|[\s\"'=/\\])data[/\\])")
 # リダイレクト（> や >>）の書き込み先そのものが守る対象か
-REDIRECT_TO_PROTECTED = re.compile(r"(?i)(?<![0-9&])>>?\s*[\"']?[^\s\"']*(\.(glb|jww|jwc)\b|(^|[/\\])?data[/\\])")
+REDIRECT_TO_PROTECTED = re.compile(r"(?i)(?<![0-9&])>>?\s*[\"']?[^\s\"']*(\.(glb|jww|jwc|pdf)\b|(^|[/\\])?data[/\\])")
 
 
 def _norm(p: str) -> str:
@@ -41,7 +41,7 @@ def check_file_path(file_path: str, project_dir: str) -> str | None:
         return None
     path = _norm(file_path)
     if path.endswith(PROTECTED_EXT):
-        return "元のファイル（glb・jww）には書き込めません（SPEC §2-1）。作業はコピーで行ってください。"
+        return "元のファイル（glb・jww・PDF の図面）には書き込めません（SPEC §2-1）。作業はコピーで行ってください。"
     project = _norm(str(Path(project_dir)))
     if not re.match(r"^[a-z]:/|^/", path):
         path = f"{project}/{path}"
@@ -62,12 +62,12 @@ def check_shell(command: str) -> str | None:
         args = m.group(1)
         if re.search(r"(^|\s)(-f|--force)\b", args):
             return "git add -f は使えません（.gitignore を無視して data/ などが入るのを防ぐため。SPEC §2-6）。"
-        if re.search(r"(?i)(\.(glb|jww|jwc|3mf)\b|(^|[\s\"'/\\])data([/\\]|\s|$)|local_paths)", args):
-            return "data/・glb・jww・3mf は git に入れられません（SPEC §2-6）。"
+        if re.search(r"(?i)(\.(glb|jww|jwc|3mf|pdf)\b|(^|[\s\"'/\\])data([/\\]|\s|$)|local_paths)", args):
+            return "data/・glb・jww・3mf・PDF は git に入れられません（SPEC §2-6）。"
     if REDIRECT_TO_PROTECTED.search(cmd):
         return "元のファイル（glb・jww）や data/ の中へは書き込めません（SPEC §2-1）。"
     if WRITE_VERBS.search(cmd) and PROTECTED_IN_SHELL.search(cmd):
-        if re.search(r"(?i)data[/\\]local_paths\.yaml", cmd) and not re.search(r"(?i)\.(glb|jww|jwc)\b", cmd):
+        if re.search(r"(?i)data[/\\]local_paths\.yaml", cmd) and not re.search(r"(?i)\.(glb|jww|jwc|pdf)\b", cmd):
             return None
         return "元のファイル（glb・jww）や data/ の中を、書き換え・削除・移動するコマンドは使えません（SPEC §2-1）。"
     return None

@@ -20,7 +20,9 @@ hiddenimports = [
     "uvicorn.protocols.websockets.auto", "uvicorn.lifespan.on",
 ]
 # anthropic：api_key 接続（Messages API）。keyring：API キーを資格情報マネージャーに保存する（仕組みの選び方を同梱する）
-for pkg in ("manifold3d", "shapely", "trimesh", "pygltflib", "claude_agent_sdk", "anthropic", "keyring", "ezjww"):
+# pdfplumber・pdfminer（PDF の日本語の文字の表 cmap を含む）・pypdfium2（pdfplumber が使う部品）：高性能読み込みの PDF の図面（11/4）
+for pkg in ("manifold3d", "shapely", "trimesh", "pygltflib", "claude_agent_sdk", "anthropic", "keyring", "ezjww",
+            "pdfplumber", "pdfminer", "pypdfium2", "pypdfium2_raw"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

@@ -44,6 +44,8 @@ def _bundle(tmp_path, edition="external"):
     (root / "_internal" / "anthropic" / "x.py").write_text("print('ok')", encoding="utf-8")
     (root / "_internal" / "EDITION").write_text(edition, encoding="utf-8")
     (root / "HAKOYA_external.exe").write_bytes(b"MZ" + b"\0" * 100)
+    (root / "_internal" / "pdfminer" / "cmap").mkdir(parents=True)                     # PDF の日本語の文字の表
+    (root / "_internal" / "pdfminer" / "cmap" / "UniJIS-UCS2-H.json.gz").write_bytes(b"x")
     return root
 
 
@@ -59,8 +61,9 @@ def test_build_check_finds_forbidden_things(tmp_path):
     (root / "data" / "local_paths.yaml").write_text("x", encoding="utf-8")
     fake_key = "sk-" + "ant-" + "a1" * 20                                     # 架空のキー（リポジトリにキーの形の文字を置かない）
     (root / "_internal" / "anthropic" / "y.json").write_text(fake_key, encoding="utf-8")
+    (root / "_internal" / "pdfminer" / "cmap" / "UniJIS-UCS2-H.json.gz").unlink()
     problems = " / ".join(check(root))
-    for word in ("claude_agent_sdk", "Claude Code 本体", "data フォルダ", "API キーらしい文字", "external でない"):
+    for word in ("claude_agent_sdk", "Claude Code 本体", "data フォルダ", "API キーらしい文字", "external でない", "日本語の文字の表"):
         assert word in problems, word
     assert fake_key not in problems                                           # 見つけた中身は出さない
 
