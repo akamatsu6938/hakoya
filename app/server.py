@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -219,15 +220,18 @@ def plan(alias: str, level: str | None = None, drawing: bool = False):
     return Response(svg, media_type="image/svg+xml; charset=utf-8")
 
 
+PIECE_STL = re.compile(r"^(roof|roof_ext|roof_lower|roof_lower_ext)_p\d{1,2}\.stl$")   # 屋根を面ごとに分けた STL
+
+
 @app.get("/api/model/{alias}/{name}")
 def model_file(alias: str, name: str):
     _check_alias(alias)
-    if name not in MODEL_FILES:
+    if name not in MODEL_FILES and not PIECE_STL.match(name):
         raise HTTPException(404, "そのファイルはありません")
     p = out_dir(alias) / "model" / name
     if not p.exists():
         raise HTTPException(409, "まだ書き出していません")
-    return FileResponse(p, media_type=MODEL_FILES[name], filename=f"hakoya_{name}")
+    return FileResponse(p, media_type=MODEL_FILES.get(name, "model/stl"), filename=f"hakoya_{name}")
 
 
 @app.get("/api/overrides/{alias}")

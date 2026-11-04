@@ -22,6 +22,7 @@ from shapely.geometry import LineString, Polygon, box
 from shapely.ops import nearest_points, unary_union
 
 from core.roof_geom import MultiPlane, surfaces as roof_surfaces
+from core.print_split import roof_print_faces
 
 UPPER_WALL_ABOVE_FL = 1500.0   # 下端がこれより上の壁は「途中から始まる壁」（ポーチの上の垂れ壁など）
 DOMA_UNDER_WALL_MM = 100.0     # 土間を壁の下まで広げる幅（実寸）
@@ -38,6 +39,7 @@ class ModelPart:
     fuzzy_skin: bool = False              # 外壁だけファジースキン
     object_key: str | None = None         # 同じオブジェクトに入れる相手（外壁 → 1階）
     notes: list[str] = field(default_factory=list)
+    print_faces: list = field(default_factory=list)   # 屋根：印刷のときに分ける面（core/print_split.py の PrintFace）
 
 
 # ---------------------------------------------------------------- 形の道具
@@ -796,7 +798,8 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     parts["floor1"] = ModelPart("floor1", "1階（床・内壁）", floor1, notes=notes["floor1"])
     parts["exterior1"] = ModelPart("exterior1", "1階の外壁（表面）" if band_mm else "1階の外壁", exterior,
                                    fuzzy_skin=True, object_key="floor1")
-    parts["roof"] = ModelPart("roof", "屋根（屋根板・ポーチの天井）", roof_solid, flip_for_print=True, notes=notes["roof"])
+    parts["roof"] = ModelPart("roof", "屋根（屋根板・ポーチの天井）", roof_solid, flip_for_print=True, notes=notes["roof"],
+                              print_faces=roof_print_faces(roof))
     if not roof_ext.is_empty():
         parts["roof_ext"] = ModelPart("roof_ext", "屋根の外壁", roof_ext, flip_for_print=True, fuzzy_skin=True, object_key="roof")
     return parts

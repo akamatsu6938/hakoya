@@ -276,12 +276,17 @@ async function renderChecks() {
   } catch (e) { if (my === checksSeq) ul.innerHTML = '<li>まだ検査していません</li>'; }
 }
 
-function renderDownloads() {
+async function renderDownloads() {
   const files = [['model_bambu.3mf', '3MF（Bambu Studio 形式・外壁のファジースキン設定済み）おすすめ'], ['model.3mf', '3MF（ふつうの形式・設定は手で）'], ['model.glb', 'GLB（3D 表示用）'], ['foundation.stl', 'STL：基礎'],
     ['floor1.stl', 'STL：1階（床・内壁）'], ['exterior1.stl', 'STL：1階の外壁']];
-  if (state.multi) {   // 2階建て
-    files.push(['roof_lower.stl', 'STL：下屋の屋根'], ['roof_lower_ext.stl', 'STL：下屋の外壁'], ['floor2.stl', 'STL：2階（床・内壁）'],
-      ['exterior2.stl', 'STL：2階の外壁'], ['roof.stl', 'STL：大屋根'], ['roof_ext.stl', 'STL：大屋根の外壁']);
+  if (state.multi) files.push(['floor2.stl', 'STL：2階（床・内壁）'], ['exterior2.stl', 'STL：2階の外壁']);
+  // 屋根は面ごとに分けて寝かせた STL（core/print_split.py）。分けていない書き出しなら前の名前
+  let pieces = [];
+  try { pieces = (await call('GET', '/api/model/{a}/checks.json')).print_pieces || []; } catch (e) { /* まだ書き出していない */ }
+  if (pieces.length) {
+    for (const pc of pieces) for (const f of pc.files) files.push([f, `STL：${pc.name}${f.includes('_ext') ? '（外壁）' : ''}`]);
+  } else if (state.multi) {
+    files.push(['roof_lower.stl', 'STL：下屋の屋根'], ['roof_lower_ext.stl', 'STL：下屋の外壁'], ['roof.stl', 'STL：大屋根'], ['roof_ext.stl', 'STL：大屋根の外壁']);
   } else {
     files.push(['roof.stl', 'STL：屋根（屋根板・ポーチの天井）'], ['roof_ext.stl', 'STL：屋根の外壁']);
   }

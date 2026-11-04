@@ -20,6 +20,7 @@ from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
 
 from core.roof_geom import surfaces as roof_surfaces
+from core.print_split import roof_print_faces
 
 from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
                           drop_loose_bits, drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note,
@@ -39,6 +40,24 @@ def _real_corners(corners, walls_fp: Polygon, leg: float, tol: float = 3.0):
         if all(walls_fp.distance(Point(*(v + e * leg / 2))) <= tol for e in (e1, e2)):
             out.append((v, e1, e2))
     return out
+
+
+def _lean_print_faces(lean: list[dict]) -> list:
+    """下屋の屋根の印刷の面。下屋が2つ以上なら、屋根ごとの受け持ちの範囲（その屋根板の外形を 1.5m 広げ、ほかの屋根板の所を除き、
+    先の屋根の範囲を除く）で分けてから、面に分ける（ほかの下屋の板を取り込まないように）。"""
+    if len(lean) <= 1:
+        return roof_print_faces(lean[0], prefix="下屋の") if lean else []
+    slabs = [slab_outline(r) for r in lean]
+    faces, taken = [], None
+    for k, r in enumerate(lean):
+        region = slabs[k].buffer(1500.0, join_style="mitre")
+        others = unary_union([s for j, s in enumerate(slabs) if j != k])
+        region = region.difference(others)
+        if taken is not None:
+            region = region.difference(taken)
+        taken = region if taken is None else taken.union(region)
+        faces += roof_print_faces(r, clip=region, prefix=f"下屋{k + 1}の")
+    return faces
 
 
 def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
@@ -421,12 +440,14 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
         "foundation": ModelPart("foundation", "基礎", foundation, notes=notes["foundation"]),
         "floor1": ModelPart("floor1", "1階（床・内壁）", floor1, notes=notes["floor1"]),
         "exterior1": ModelPart("exterior1", "1階の外壁（表面）", exterior, fuzzy_skin=True, object_key="floor1"),
-        "roof_lower": ModelPart("roof_lower", "下屋の屋根", roof_lower, flip_for_print=True, notes=notes["roof_lower"]),
+        "roof_lower": ModelPart("roof_lower", "下屋の屋根", roof_lower, flip_for_print=True, notes=notes["roof_lower"],
+                                print_faces=_lean_print_faces(lean)),
         "roof_lower_ext": ModelPart("roof_lower_ext", "下屋の外壁", roof_lower_ext, flip_for_print=True, fuzzy_skin=True,
                                     object_key="roof_lower"),
         "floor2": ModelPart("floor2", "2階（床・内壁）", floor2, notes=notes["floor2"]),
         "exterior2": ModelPart("exterior2", "2階の外壁（表面）", exterior2, fuzzy_skin=True, object_key="floor2"),
-        "roof": ModelPart("roof", "大屋根", roof_solid, flip_for_print=True, notes=notes["roof"]),
+        "roof": ModelPart("roof", "大屋根", roof_solid, flip_for_print=True, notes=notes["roof"],
+                          print_faces=roof_print_faces(main)),
         "roof_ext": ModelPart("roof_ext", "大屋根の外壁", roof_ext, flip_for_print=True, fuzzy_skin=True, object_key="roof"),
     }
     return {k: p for k, p in parts.items() if not p.solid.is_empty() or k in ("foundation", "floor1", "floor2", "roof")}
