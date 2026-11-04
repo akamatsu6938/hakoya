@@ -43,6 +43,7 @@ const camera = new THREE.PerspectiveCamera(30, 1, 1, 10000); camera.up.set(0, 0,
 const controls = new OrbitControls(camera, renderer.domElement);
 function resize() { const w = holder.clientWidth, h = holder.clientHeight || 400; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 window.addEventListener('resize', resize);
+new ResizeObserver(resize).observe(holder);   // 上の帯が2行になったときも、3D の大きさを合わせ直す
 (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
 
 const LIFT = { foundation: 0, floor1: 1, exterior1: 1, roof: 3, roof_ext: 3 };
@@ -230,13 +231,16 @@ async function renderHistory(results) {
   }
 }
 
+let checksSeq = 0;   // 描き直しが重なったら、最後に始めたものだけを描く（前は2回分が足され、前の物件の結果も混ざった）
 async function renderChecks() {
+  const my = ++checksSeq;
   const ul = $('#checks'); ul.innerHTML = '';
+  const add = (html) => { if (my === checksSeq) ul.insertAdjacentHTML('beforeend', html); };
   try {   // 予防：会社ルールと比べた結果（家ごとに変わる値は比べない）
     const rc = await call('GET', '/api/rulecheck/{a}');
-    ul.insertAdjacentHTML('beforeend', '<li class="lv-情報"><b>会社ルールと比べた結果</b>（家ごとに変わる窓の高さ・屋根の勾配などは比べません）</li>');
+    add('<li class="lv-情報"><b>会社ルールと比べた結果</b>（家ごとに変わる窓の高さ・屋根の勾配などは比べません）</li>');
     for (const r of rc.rows) {
-      ul.insertAdjacentHTML('beforeend', r.match
+      add(r.match
         ? `<li class="lv-情報"><span class="tag">一致</span>${esc(r.label)}：会社ルール ${esc(r.rule_text)}</li>`
         : `<li class="lv-中"><span class="tag">いつもと違う</span>${esc(r.message)}</li>`);
     }
@@ -244,30 +248,30 @@ async function renderChecks() {
   try {   // 図面（jww）と比べた結果：平面図の窓・テラスドアの注記（品番と上端）と模型の開口
     const dw = await call('GET', '/api/drawing/{a}');
     if (dw.available) {
-      ul.insertAdjacentHTML('beforeend', '<li class="lv-情報"><b>図面（jww）と比べた結果</b>（平面図の窓・テラスドアの注記の上端 FL+ と品番の幅・高さ、立面図の窓の位置を、模型の窓と比べる）</li>');
+      add('<li class="lv-情報"><b>図面（jww）と比べた結果</b>（平面図の窓・テラスドアの注記の上端 FL+ と品番の幅・高さ、立面図の窓の位置を、模型の窓と比べる）</li>');
       for (const r of dw.levels) {
         const name = LEVEL_JA[r.level] || r.level;
-        if (!r.aligned) { ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">${esc(name)}</span>${esc(r.note)}</li>`); continue; }
-        ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${esc(name)}</span>注記 ${r.notes} 件のうち ${r.matched} 件を開口に結び、${r.same} 件が一致（上端・幅・高さ）`
+        if (!r.aligned) { add(`<li class="lv-中"><span class="tag">${esc(name)}</span>${esc(r.note)}</li>`); continue; }
+        add(`<li class="lv-情報"><span class="tag">${esc(name)}</span>注記 ${r.notes} 件のうち ${r.matched} 件を開口に結び、${r.same} 件が一致（上端・幅・高さ）`
           + (r.unmatched ? `。近くに開口がない注記 ${r.unmatched} 件` : '') + '</li>');
-        for (const m of r.mismatches) ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">図面と違う</span>${esc(m.message)}</li>`);
-        for (const n of r.unmatched_notes) ul.insertAdjacentHTML('beforeend', `<li class="lv-低"><span class="tag">要確認</span>図面に注記（品番 ${esc(n.code)}、FL+${n.head_fl_mm}）があるが、近くに模型の開口がない</li>`);
+        for (const m of r.mismatches) add(`<li class="lv-中"><span class="tag">図面と違う</span>${esc(m.message)}</li>`);
+        for (const n of r.unmatched_notes) add(`<li class="lv-低"><span class="tag">要確認</span>図面に注記（品番 ${esc(n.code)}、FL+${n.head_fl_mm}）があるが、近くに模型の開口がない</li>`);
       }
       const VJ = { S: '南', N: '北', E: '東', W: '西' };
       for (const r of dw.elevations || []) {   // 立面図：面ごとに位置を合わせ、見えている窓・ドアの4辺に図面の線があるか
         const name = `${VJ[r.view]}の立面`;
-        if (!r.aligned) { ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${name}</span>立面図を位置合わせできなかったので、照合していません</li>`); continue; }
-        if (r.note) { ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${name}</span>${esc(r.note)}</li>`); continue; }
-        ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${name}</span>見えている窓・ドア ${r.windows} か所のうち ${r.same} か所が立面図と合う</li>`);
-        for (const m of r.mismatches) ul.insertAdjacentHTML('beforeend', `<li class="lv-中"><span class="tag">図面と違う</span>${esc(m.opening)} の${esc(m.edges.join('・'))}が立面図の線と合わない</li>`);
+        if (!r.aligned) { add(`<li class="lv-情報"><span class="tag">${name}</span>立面図を位置合わせできなかったので、照合していません</li>`); continue; }
+        if (r.note) { add(`<li class="lv-情報"><span class="tag">${name}</span>${esc(r.note)}</li>`); continue; }
+        add(`<li class="lv-情報"><span class="tag">${name}</span>見えている窓・ドア ${r.windows} か所のうち ${r.same} か所が立面図と合う</li>`);
+        for (const m of r.mismatches) add(`<li class="lv-中"><span class="tag">図面と違う</span>${esc(m.opening)} の${esc(m.edges.join('・'))}が立面図の線と合わない</li>`);
       }
     }
   } catch (e) { /* 図面がない・読めないときは出さない */ }
   try {
     const s = await call('GET', '/api/model/{a}/checks.json');
-    for (const [k, p] of Object.entries(s.parts)) for (const n of p.notes) ul.insertAdjacentHTML('beforeend', `<li class="lv-情報"><span class="tag">${p.label}</span>${n}</li>`);
-    for (const c of s.checks) ul.insertAdjacentHTML('beforeend', `<li class="lv-${c.level}"><span class="tag">${c.level}</span>${c.message}</li>`);
-  } catch (e) { ul.innerHTML = '<li>まだ検査していません</li>'; }
+    for (const [k, p] of Object.entries(s.parts)) for (const n of p.notes) add(`<li class="lv-情報"><span class="tag">${p.label}</span>${n}</li>`);
+    for (const c of s.checks) add(`<li class="lv-${c.level}"><span class="tag">${c.level}</span>${c.message}</li>`);
+  } catch (e) { if (my === checksSeq) ul.innerHTML = '<li>まだ検査していません</li>'; }
 }
 
 function renderDownloads() {
