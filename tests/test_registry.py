@@ -69,6 +69,15 @@ def test_list_shows_kinds_and_counts_but_no_places(yml, tmp_path):
     assert str(tmp_path) not in str(data) and "鈴木" not in str(data)
 
 
+def test_empty_lines_are_not_counted_or_used(tmp_path):
+    """★11/4：空の行（`- ` だけ）は言葉にしない・数えない（数で打ち間違いに気づけるように）。"""
+    p = tmp_path / "local_paths.yaml"
+    p.write_text("ng_words:\n  - 山田\n  -\n物件A:\n  glb: C:/x/a.glb\n  ng_words:\n    - 鈴木\n    - \n", encoding="utf-8")
+    assert ng_words(p) == ["山田", "鈴木"]
+    data = rg.list_properties(p)
+    assert data["global_ng_words"] == 1 and data["properties"][0]["ng_words"] == 1
+
+
 def test_screen_registers_with_a_picked_file(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 

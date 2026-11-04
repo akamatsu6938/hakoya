@@ -8,17 +8,23 @@ from pathlib import Path
 from core.paths import LOCAL_PATHS, load_local_paths
 
 
+def clean_words(items) -> list[str]:
+    """YAML の言葉の並びを文字の並びにする。空の行（`- ` だけ）は捨てる。
+    ★11/4：空の行は None になり、str(None) で「None」という言葉になって、コードの None に当たっていた。"""
+    return [str(w) for w in (items or []) if w is not None and str(w).strip()]
+
+
 def ng_words(path: Path | None = None) -> list[str]:
     """全体の ng_words と、物件ごとの ng_words（画面の「物件の登録」で書く）を合わせたもの。"""
     p = path or LOCAL_PATHS
     if not p.exists():
         return []
     conf = load_local_paths(p)
-    words = list(conf.get("ng_words") or [])
+    words = clean_words(conf.get("ng_words"))
     for v in conf.values():
         if isinstance(v, dict):
-            words += list(v.get("ng_words") or [])
-    return [str(w) for w in words if str(w).strip()]
+            words += clean_words(v.get("ng_words"))
+    return words
 
 
 class PrivacyError(RuntimeError):

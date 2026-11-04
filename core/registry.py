@@ -20,6 +20,7 @@ import yaml
 
 from core import paths as _paths
 from core.paths import JWW_KIND_JA, _resolve_glb, detect_jww, load_local_paths, parse_local_paths, property_files
+from core.privacy import clean_words
 
 ALIAS_RE = re.compile(r"^[^\s\\/:*?\"<>|#\[\]{},&!%@`'=]{1,20}$")   # フォルダ名と YAML にそのまま使える短い名前
 WIN_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
@@ -68,10 +69,10 @@ def _check_alias_and_words(alias: str, words: list[str], conf: dict, path: Path)
         if NUMBERS_ONLY.fullmatch(w):
             raise ValueError("数字だけの言葉（番地だけ・郵便番号だけなど）は入れないでください（模型の数値に当たって組み立てが止まります）。"
                              "「○○町1-2-3」のように地名と一緒に入れてください")
-    existing = [str(x) for x in (conf.get("ng_words") or [])]
+    existing = clean_words(conf.get("ng_words"))
     for v in conf.values():
         if isinstance(v, dict):
-            existing += [str(x) for x in (v.get("ng_words") or [])]
+            existing += clean_words(v.get("ng_words"))
     if find_ng(alias, words + existing) is not None:
         raise ValueError("仮名に、出してはいけない言葉が入っています（仮名は「物件G」のような名前にしてください）")
     if any(find_ng(a, words) is not None for a, v in conf.items() if isinstance(v, dict)):
@@ -117,8 +118,8 @@ def list_properties(path: Path | None = None) -> dict:
             glb_state = "書かれていません"
         rows.append({"alias": alias, "glb": glb_state,
                      "drawings": [JWW_KIND_JA[k] for k in KIND_ORDER if k in f.jww],
-                     "ng_words": len(entry.get("ng_words") or [])})
-    return {"properties": rows, "next_alias": next_alias(path), "global_ng_words": len(conf.get("ng_words") or [])}
+                     "ng_words": len(clean_words(entry.get("ng_words")))})   # 空の行は数えない（数で打ち間違いに気づけるように）
+    return {"properties": rows, "next_alias": next_alias(path), "global_ng_words": len(clean_words(conf.get("ng_words")))}
 
 
 def register(alias: str, glb: str, drawings: str | None, ng_words: list[str], path: Path | None = None) -> str:

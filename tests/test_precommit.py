@@ -39,6 +39,15 @@ def test_ng_words_include_each_property(tmp_path):
     assert load_ng_words(p) == ["架空施主", "架空次郎", "ほげ町9-9"]
 
 
+def test_empty_lines_are_not_words(tmp_path):
+    """★11/4：`- ` だけの空の行は None になり、「None」という言葉としてコードの None に当たっていた。空の行は捨てる。"""
+    from tools.precommit_check import load_ng_words
+    p = tmp_path / "local_paths.yaml"
+    p.write_text("ng_words:\n  - 架空施主\n  - \n物件C:\n  glb: C:/x\n  ng_words:\n    -\n    - 架空次郎\n", encoding="utf-8")
+    assert load_ng_words(p) == ["架空施主", "架空次郎"]
+    assert find_problems({"a.py": b"x = None\n"}, load_ng_words(p)) == []
+
+
 def test_ng_word_with_other_width_or_spaces():
     """全角・半角と空白の違いでも見つける（言葉「架空 施主」→ 中身「架空施主様」、言葉「ほげ市1-2-3」→ 中身「ほげ市１－２－３」）。"""
     assert find_problems({"docs/a.md": "架空施主様".encode()}, ["架空 施主"])

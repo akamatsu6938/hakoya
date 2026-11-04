@@ -40,7 +40,8 @@ def load_ng_words(path: Path = LOCAL_PATHS) -> list[str]:
     for v in (data.values() if isinstance(data, dict) else []):
         if isinstance(v, dict):
             words += list(v.get("ng_words") or [])
-    return [str(w) for w in words if str(w).strip()]
+    # 空の行（`- ` だけ）は None になるので捨てる（str(None) の「None」がコードに当たってコミットが止まっていた。11/4）
+    return [str(w) for w in words if w is not None and str(w).strip()]
 
 
 def _norm(s: str) -> str:

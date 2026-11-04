@@ -4,7 +4,7 @@
 - 出してはいけない言葉（data/local_paths.yaml の ng_words：施主名・住所など）。UTF-8・Shift_JIS（cp932）・UTF-16 で探す。
   空白を抜いた形・全角半角をそろえた形でも探す。
 - API キーらしい文字
-- メールアドレス（Anthropic と GitHub の noreply は除く）
+- メールアドレス（Anthropic と GitHub の noreply、例示用の example.com などは除く）
 - data/ の中のファイル、図面・模型・画像・PDF などのファイル（名前の拡張子と、中身の先頭の印で見分ける）
 - コミットの文（メッセージ）と、作者・コミットした人の名前とアドレス
 
@@ -27,7 +27,9 @@ MORE_EXT = (".dxf", ".dwg", ".obj", ".zip", ".jwc", ".bmp", ".tif", ".tiff", ".h
 SIGNATURES = {b"\x89PNG": "PNG 画像", b"\xff\xd8\xff": "JPEG 画像", b"GIF8": "GIF 画像", b"%PDF": "PDF",
               b"glTF": "glb（3D）", b"PK\x03\x04": "ZIP（3MF など）", b"BM": None}
 EMAIL_RE = re.compile(rb"(?<![A-Za-z0-9._%+\-])[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-ALLOWED_EMAIL = (rb"noreply@anthropic.com", rb"users.noreply.github.com")
+# 許すアドレス：Anthropic と GitHub の noreply、例示用に予約されたドメイン（example.com など。誰のものでもない）
+ALLOWED_EMAIL = (rb"noreply@anthropic.com", rb"users.noreply.github.com",
+                 rb"@example.com", rb"@example.org", rb"@example.net")
 
 
 def _git(args: list[str], repo: Path, data: bytes | None = None) -> bytes:
