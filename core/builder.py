@@ -176,6 +176,39 @@ def drop_loose_bits(parts: list[Manifold], max_height: float | None = None) -> t
     return [drop_specks(p - cut) for p in parts], len(small)
 
 
+EDGE_BRIDGE_MM = 10.0          # 辺だけで接する所に足す角柱の太さ（実寸。模型で 0.2mm）
+OVERLAP_TRIM_MM3 = 1000.0      # 組む部品どうしの重なりがこれ（実寸 mm³）より大きければ、上の部品から除く（面が接するだけの誤差は除かない）
+
+
+def bridge_edge_contacts(m: Manifold) -> tuple[Manifold, int]:
+    """2つの形が辺だけで接している所（同じ位置の点をまとめると、1本の辺を4枚の面が使う所）に、ごく細い角柱を足して面でつなぐ。
+    ★11/4 物件H・K：壁の角どうしが辺だけで接し、STL や検査では「閉じた立体でない」に見えた（形そのものは閉じていた）。
+    （つないだ形, 足した数）。"""
+    import trimesh
+    if m.is_empty():
+        return m, 0
+    mesh = m.to_mesh()
+    v = np.asarray(mesh.vert_properties, dtype=np.float64)[:, :3]
+    t = trimesh.Trimesh(vertices=v, faces=np.asarray(mesh.tri_verts, dtype=np.int64), process=True)
+    if t.is_watertight:
+        return m, 0
+    uniq, counts = np.unique(t.edges_sorted, axis=0, return_counts=True)
+    bad = uniq[counts != 2]
+    if not len(bad) or len(bad) > 200:              # 壊れ方が大きいときは触らない（別の原因）
+        return m, 0
+    h = EDGE_BRIDGE_MM / 2
+    boxes = []
+    for a, b in bad:
+        p, q = t.vertices[a], t.vertices[b]
+        d = (q - p) / (np.linalg.norm(q - p) or 1.0)
+        if abs(d[2]) < 0.99:
+            continue                                  # 縦の辺（壁の角）だけ。棟・軒などの辺に足すと、屋根の上に出っ張る（試験用の寄棟で 5mm）
+        pad = np.where(np.abs(d) > 0.99, 0.0, h)      # 辺の向きには伸ばさない（となりの部品へはみ出さないように）
+        lo, hi = np.minimum(p, q) - pad, np.maximum(p, q) + pad
+        boxes.append(Manifold.cube(np.maximum(hi - lo, 1e-3).tolist()).translate(lo.tolist()))
+    return (union_all([m] + boxes), len(boxes)) if boxes else (m, 0)
+
+
 RAISED_MIN_MM = 50.0           # 床が FL よりこれ以上高い部屋は「小上がり」（土間の逆）
 
 
@@ -627,13 +660,29 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         roof_parts.append(prism(sp, soffit_top, soffit_top + plate_t))
         notes["roof"].append("ポーチの天井は屋根と一緒に印刷する（作者指定）")
     roof_ext_parts = ext_up + std_up
+    # ★11/4 デモ用：屋根まで届く袖壁（屋根の部品）が、同じ所の外壁（1階の部品）と重なっていた（glb で同じ所に壁が2枚）。
+    # 組むとぶつかるので、1階の部品の壁がある所は、はめあいの隙間を付けて屋根の部品から除く（組むと1階の壁が受け持つ）
+    first_fp = unary_union([wall_rect(o) for o in ext_walls + std_in + int_walls]) if (ext_walls or std_in or int_walls) else None
+    first_top = z_cut if z_cut is not None else roof_zmax
+    trimmed = []
     for w in roof_walls:
         on_plate = (soffit_top is not None and is_upper(w)
                     and wall_rect(w).intersection(sp).area >= 0.5 * wall_rect(w).area)
         bottom = soffit_top + plate_t if on_plate else None   # ポーチの天井の板の上に乗る
-        roof_ext_parts.append(wall_solid(w, bottom=bottom))
+        s = wall_solid(w, bottom=bottom)
+        if first_fp is not None and wall_rect(w).intersects(first_fp.buffer(clearance, join_style="mitre")):
+            near = first_fp.buffer(clearance, join_style="mitre").intersection(wall_rect(w).buffer(2 * clearance, join_style="mitre"))
+            if not near.is_empty and near.area > 1.0:
+                cut = s - prism(near, -10000.0, first_top)
+                if (s.volume() - cut.volume()) > 1.0:
+                    trimmed.append(w["id"])
+                s = cut
+        roof_ext_parts.append(s)
     if roof_walls:
         notes["roof"].append("ポーチの上の垂れ壁と屋根まで届く袖壁（" + "・".join(w["id"] for w in roof_walls) + "）は屋根と一緒に印刷する")
+    if trimmed:
+        notes["roof"].append("屋根の部品の壁（" + "・".join(trimmed) + "）は、1階の部品の壁と重なる所を除いた（glb で同じ所に壁が2枚。"
+                             "組むと1階の壁がそこを受け持つ）")
     if hanging:
         # 屋根の裏まで立ち上げて屋根と一体にする（裏返して印刷すると屋根板から立つ壁になる。天井より上は組むと屋根裏に隠れる）。
         # 天井より下は、1階の壁（床から立つ壁）の所を、はめあいの隙間の分だけ広く抜く（屋根を載せるときにぶつからない）
@@ -710,11 +759,37 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     if (foundation ^ roof_walls).volume() > 1.0:
         foundation = foundation - roof_walls
         notes["foundation"].append("屋根の部品の壁（袖壁など）と重なる所も、基礎の方を削った")
+    # ★11/4 物件L：屋根の部品が1階の部品と少し重なる所（glb で同じ所に2つの部材がある所など）は、屋根の部品から除く（組むとぶつかる）
+    first_floor = union_all([floor1, exterior])
+    cut_vol = 0.0
+    for_roof = []
+    for solid in (roof_solid, roof_ext):
+        if not solid.is_empty():
+            v = (solid ^ first_floor).volume()
+            if v > OVERLAP_TRIM_MM3:
+                solid = solid - first_floor
+                cut_vol += v
+        for_roof.append(solid)
+    roof_solid, roof_ext = for_roof
+    if cut_vol:
+        notes["roof"].append(f"1階の部品と重なる所（模型で約 {cut_vol / scale ** 3:.1f}mm³）は屋根の部品から除いた（組むとぶつかるため）")
     (floor1, exterior), loose = drop_loose_bits([floor1, exterior], max_height=fl - ftop + 1.0)   # 床の板の切れ端だけ
     if loose:
         notes["floor1"].append(f"1階の床・壁から離れた小さなかけら {loose} 個は作らない（上がり框のまわりの床の切れ端など。印刷するとばらばらになるため）")
     foundation, floor1, exterior, roof_solid, roof_ext = (
         drop_specks(x) for x in (foundation, floor1, exterior, roof_solid, roof_ext))
+    bridged = {}
+    for name, key in (("foundation", "foundation"), ("floor1", "floor1"), ("exterior", "floor1"), ("roof_solid", "roof"), ("roof_ext", "roof")):
+        fixed, n = bridge_edge_contacts(locals()[name])
+        if n:
+            bridged[key] = bridged.get(key, 0) + n
+            if name == "foundation": foundation = fixed
+            elif name == "floor1": floor1 = fixed
+            elif name == "exterior": exterior = fixed
+            elif name == "roof_solid": roof_solid = fixed
+            else: roof_ext = fixed
+    for key, n in bridged.items():
+        notes[key].append(f"辺だけで接していた所 {n} か所に、ごく細い角柱（模型 0.2mm 角）を足して面でつないだ（閉じた立体にするため）")
 
     parts = {}
     parts["foundation"] = ModelPart("foundation", "基礎", foundation, notes=notes["foundation"])

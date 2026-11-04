@@ -372,9 +372,11 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
         _extend_on_lower_roof(ext, lower_roofs, fl)
         ext = wl.merge_exterior_pieces(ext)    # 床まで下ろした壁と、同じ面の続きの壁を1枚に
     wl.fill_inside_corners(ext)
+    wl.close_t_gaps(ext)          # 袖壁の付いた角などで、外壁の端と直角の外壁の間に残る小さなすき間をつなぐ（11/4 デモ用）
     ceiling_abs = fl + float(level.get("ceiling_mm", rule(rules, "levels.ceiling_height_mm")))
     # ★背中合わせの外壁の面は、実際は内壁（物件Aで 作者確認）。内壁の厚み・天井までで作る
     ext = wl.merge_back_to_back(ext, t_ext, as_kind="interior", new_thickness=t_int, new_top=ceiling_abs)
+    wl.keep_outline_back_to_back(ext, t_ext)   # ★11/4 物件H：外周の壁の続きは、背中合わせでも外壁のまま
     back_to_back = [w for w in ext if w.kind == "interior"]
     ext = [w for w in ext if w.kind == "exterior"]
     standalone, skipped = [], []
@@ -716,12 +718,22 @@ def build(alias: str, company: str = "jisha", return_debug: bool = False):
     return (building, rec) if return_debug else building
 
 
+FILL_GAP_MM = 30.0   # 外形を求めるとき、壁と壁の間のこれ以下のすき間・角の1点だけの接触を埋める
+
+
 def _filled(fp) -> Polygon:
-    """壁の形（壁の四角を合わせたもの）の外側の輪で囲んだ面（その階の外形）。"""
+    """壁の形（壁の四角を合わせたもの）の外側の輪で囲んだ面（その階の外形）。
+    ★11/4 物件H：外壁どうしが角の1点だけで触れていて輪が閉じず、外形が 18m²（家は約 72m²）になった。
+    少し太らせて細めて（閉じる処理）、細いすき間と点の接触を埋めてから外側の輪を取る（角は留めで、四角い形は変わらない）。"""
     if fp.is_empty:
         return Polygon()
-    big = max(getattr(fp, "geoms", [fp]), key=lambda g: g.area)
-    return Polygon(big.exterior)
+    grown = fp.buffer(FILL_GAP_MM, join_style="mitre")                       # すき間と点の接触をつなぐ
+    big = max(getattr(grown, "geoms", [grown]), key=lambda g: g.area)
+    filled = Polygon(big.exterior).buffer(-FILL_GAP_MM, join_style="mitre")  # 中を埋めてから、外の輪を元の位置へ戻す
+    if filled.is_empty:
+        big = max(getattr(fp, "geoms", [fp]), key=lambda g: g.area)
+        return Polygon(big.exterior)
+    return max(getattr(filled, "geoms", [filled]), key=lambda g: g.area)
 
 
 def _level_bands(levels: list[dict]) -> list[tuple]:

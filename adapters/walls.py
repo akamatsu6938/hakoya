@@ -247,6 +247,71 @@ def fill_inside_corners(walls: list[Wall], tol: float = 3.0, min_z_overlap: floa
                 w.assumptions.append("inside_corner: 入隅のすき間を埋めるため、端を厚み分伸ばした")
 
 
+def close_t_gaps(walls: list[Wall], max_gap: float = 50.0, min_z_overlap: float = 300.0, min_gap: float = 5.0) -> int:
+    """外壁の端と、直角に交わる外壁の面の間の小さなすき間（max_gap 以下）を、端を相手の中心線まで伸ばしてつなぐ（T字）。
+    ★11/4 デモ用：北西の角で、北の外壁が袖壁として家の外へ続き、角に単独の壁（袖壁）があったため、入隅の埋め
+    （fill_inside_corners。外壁どうしの入隅だけを見る）が効かず、西の外壁の端と北の外壁の内側の面の間に 18mm のすき間が残った。
+    すき間のせいで、ずれ止めの三角が壁の中に置かれて組むとぶつかり、角が辺だけで接して屋根の部品が閉じなかった。
+    min_gap 以下のすき間（物件A の垂れ壁の端の 2.8mm など。模型で 0.1mm 未満）は、見た目にも組み立てにも効かないので触らない。
+    伸ばした端の数を返す。"""
+    n_fixed = 0
+    for a in walls:
+        if a.length <= 0:
+            continue
+        for which in ("start", "end"):
+            p = getattr(a, which)
+            d = a.direction if which == "end" else -a.direction           # 端の外向き
+            best = None
+            for b in walls:
+                if b is a or b.length <= 0 or abs(float(np.dot(b.direction, a.direction))) > 0.1:
+                    continue                                              # 直角に近い相手だけ
+                if min((a.top if a.top is not None else 1e9), (b.top if b.top is not None else 1e9)) - max(a.bottom, b.bottom) < min_z_overlap:
+                    continue
+                nb = np.array([-b.direction[1], b.direction[0]])
+                dist_c = float(np.dot(p - b.start, nb))                   # 相手の中心線からの符号つき距離
+                if abs(float(np.dot(d, nb))) < 0.9:
+                    continue
+                s = float(np.dot(p - b.start, b.direction))               # 相手の長さの中か（厚みの半分＋α の余裕）
+                if s < -a.thickness or s > b.length + a.thickness:
+                    continue
+                toward = -np.sign(dist_c) if abs(dist_c) > 1e-6 else 0.0  # 端が相手へ向かっているか
+                if toward == 0.0 or float(np.dot(d, nb)) * toward < 0.9:
+                    continue
+                gap = abs(dist_c) - b.thickness / 2                       # 端から相手の近い面まで
+                if min_gap < gap <= max_gap and (best is None or gap < best[0]):
+                    best = (gap, abs(dist_c))
+            if best is not None:
+                setattr(a, which, p + d * best[1])                        # 相手の中心線まで伸ばす
+                a.assumptions.append(f"t_gap: 直角の外壁との間の {best[0]:.0f}mm のすき間を、端を伸ばしてつないだ")
+                n_fixed += 1
+    return n_fixed
+
+
+def keep_outline_back_to_back(walls: list[Wall], thickness: float, line_tol: float = 20.0, end_tol: float = 60.0) -> int:
+    """背中合わせの面から作った内壁（merge_back_to_back）のうち、外壁と同じ線の上で端どうしがつながっているもの
+    （家の外周の壁の続き）は、外壁に戻す。戻した数を返す。
+    ★11/4 物件H：西の外周の壁の一部（間 162mm＝外壁の厚みの背中合わせ）が内壁にされ、外壁の輪が切れて、
+    基礎の外形・1階の床の板が作れなかった。物件A の背中合わせ（間 90mm、部屋と部屋の間）は外周ではないので変わらない。"""
+    n = 0
+    exts = [w for w in walls if w.kind == "exterior"]
+    for w in walls:
+        if w.kind != "interior" or not any("back_to_back" in a for a in w.assumptions) or w.length <= 0:
+            continue
+        nrm = np.array([-w.direction[1], w.direction[0]])
+        for e in exts:
+            if e.length <= 0 or abs(float(np.dot(e.direction, w.direction))) < 0.999:
+                continue                                          # 平行な外壁だけ
+            if abs(float(np.dot(e.start - w.start, nrm))) > line_tol:
+                continue                                          # 同じ線の上
+            if min(np.linalg.norm(a - b) for a in (w.start, w.end) for b in (e.start, e.end)) > end_tol:
+                continue                                          # 端どうしがつながる
+            w.kind, w.thickness, w.top = "exterior", thickness, None
+            w.assumptions.append("outline: 外周の外壁と同じ線で端がつながるので、背中合わせでも外壁のままにした")
+            n += 1
+            break
+    return n
+
+
 def _find_inside_corner(pc: Piece, e: np.ndarray, outers, w: Wall, tol: float, min_z_overlap: float) -> bool:
     n = pc.plane.n
     for w2, pc2 in outers:

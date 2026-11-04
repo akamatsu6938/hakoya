@@ -64,6 +64,12 @@ def foundation(kiso: list[Part], top_mm: float, bridges: list[Polygon] = (), cli
         if clip is not None and not clip.is_empty:
             outline = max(_polys(outline.intersection(clip)), key=lambda g: g.area)
         method = "kiso_ilow+door_bridge"
+    if clip is not None and not clip.is_empty and outline.area < 0.6 * clip.area:
+        # ★11/4 物件I：帯が玄関ドア以外の所でも切れていて、つないでも帯のまま（0.8m²）だった。基礎の外形が細い輪のままだと、
+        # 外壁が全部「家の外」と判定されて屋根の部品へ入り、1階の床の板もほとんど作られなかった。
+        # 帯から輪を作れないときは、1階の外壁の外形（clip は 1mm 広げてあるので戻す）を基礎の外形にする
+        outline = max(_polys(clip.buffer(-1, join_style="mitre")), key=lambda g: g.area)
+        method = "exterior_walls"
     footings = [g for g in _polys(flat_union(kiso, ("KISO_HONT",), 0.0)) if not outline.buffer(1).contains(g)]
     out = {"top_mm": top_mm, "outline": _coords(outline), "area_m2": round(outline.area / 1e6, 2),
            "footings": [{"polygon": _coords(g), "note": "袖壁などの下の基礎（底の形）"} for g in footings],

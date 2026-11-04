@@ -7,8 +7,11 @@ import trimesh
 BUILD_VOLUME_MM = 256.0   # Bambu Lab A1
 
 
-def part_checks(key: str, label: str, mesh: trimesh.Trimesh, body_volumes: list[float]) -> list[dict]:
-    """body_volumes：離れた塊ごとの体積（manifold の decompose で数える。trimesh の split は追加の部品が要るため）。"""
+def part_checks(key: str, label: str, mesh: trimesh.Trimesh, body_volumes: list[float],
+                raw_watertight: bool | None = None) -> list[dict]:
+    """body_volumes：離れた塊ごとの体積（manifold の decompose で数える。trimesh の split は追加の部品が要るため）。
+    raw_watertight：点をまとめない形（3MF に書く形）で閉じているか。★11/4 物件K：2つの壁が面や辺だけで接している所は、
+    同じ位置の点をまとめると「閉じていない」に見えるが、3MF に書く形は閉じていた → その場合は「低」の注意にする。"""
     out = []
 
     def add(level, item, message):
@@ -17,7 +20,9 @@ def part_checks(key: str, label: str, mesh: trimesh.Trimesh, body_volumes: list[
     if mesh.is_empty:
         add("高", "empty", "形がありません")
         return out
-    if not mesh.is_watertight:
+    if not mesh.is_watertight and raw_watertight:
+        add("低", "watertight", "閉じた立体です。ただ、面や辺だけで接している所があります（STL を開くと Bambu Studio が「修復」を勧めることがあります）")
+    elif not mesh.is_watertight:
         add("高", "watertight", "閉じた立体になっていません（印刷できない可能性）")
     else:
         add("情報", "watertight", "閉じた立体です")

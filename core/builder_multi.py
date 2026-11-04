@@ -24,7 +24,7 @@ from core.roof_geom import surfaces as roof_surfaces
 from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
                           drop_loose_bits, drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note,
                           slab_outline, slab_solid, opening_keep_out, openings_by_wall_of, smooth_near_openings,
-                          raised_floors, eave_soffit_solid)
+                          raised_floors, eave_soffit_solid, bridge_edge_contacts, OVERLAP_TRIM_MM3)
 
 Z_LO, Z_HI = -10000.0, 100000.0       # 「下・上の限りなし」の代わりの高さ（実寸 mm）
 BIG = box(-1e6, -1e6, 1e6, 1e6)
@@ -389,7 +389,33 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
 
     # 小さなかけら（模型で 0.5mm³ 未満。区域の境目や斜めの壁の角の床板の切れ端）は捨てる
     crumb = CRUMB_MODEL_MM3 * scale ** 3
+    # ★11/4 物件K・M：下屋の屋根の部品の壁（垂れ壁・1階の天井より上の外壁）が、1階・2階の壁と角で少し重なっていた。
+    # 組む順の後ろの部品（下屋の屋根・大屋根）から、先に組む部品（1階・2階）と重なる所を除く
+    first_obj = union_all([floor1, exterior])
+    second_obj = union_all([floor2, exterior2])
+    trimmed = {}
+    def _trim(solid, base, key):
+        if solid.is_empty() or base.is_empty():
+            return solid
+        v = (solid ^ base).volume()
+        if v <= OVERLAP_TRIM_MM3:
+            return solid
+        trimmed[key] = trimmed.get(key, 0.0) + v
+        return solid - base
+    roof_lower = _trim(_trim(roof_lower, first_obj, "roof_lower"), second_obj, "roof_lower")
+    roof_lower_ext = _trim(_trim(roof_lower_ext, first_obj, "roof_lower"), second_obj, "roof_lower")
+    roof_solid = _trim(roof_solid, second_obj, "roof")
+    roof_ext = _trim(roof_ext, second_obj, "roof")
+    for key, v in trimmed.items():
+        notes[key].append(f"先に組む部品（1階・2階）と重なる所（模型で約 {v / scale ** 3:.1f}mm³）は除いた（組むとぶつかるため）")
     parts_solids = [drop_specks(x, crumb) for x in (foundation, floor1, exterior, roof_lower, roof_lower_ext, floor2, exterior2, roof_solid, roof_ext)]
+    # 辺だけで接している所を、ごく細い角柱で面でつなぐ（平屋と同じ。★11/4 物件H・K）
+    note_key = ["foundation", "floor1", "floor1", "roof_lower", "roof_lower", "floor2", "floor2", "roof", "roof"]
+    for i, x in enumerate(parts_solids):
+        fixed, n = bridge_edge_contacts(x)
+        if n:
+            parts_solids[i] = fixed
+            notes[note_key[i]].append(f"辺だけで接していた所 {n} か所に、ごく細い角柱（模型 0.2mm 角）を足して面でつないだ（閉じた立体にするため）")
     foundation, floor1, exterior, roof_lower, roof_lower_ext, floor2, exterior2, roof_solid, roof_ext = parts_solids
     parts = {
         "foundation": ModelPart("foundation", "基礎", foundation, notes=notes["foundation"]),

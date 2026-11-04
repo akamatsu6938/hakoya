@@ -40,6 +40,13 @@ def to_trimesh(part: ModelPart, scale: float, for_print: bool = False) -> trimes
     return mesh
 
 
+def _raw_watertight(part: ModelPart) -> bool:
+    """点をまとめない形（3MF に書く形）で閉じているか。"""
+    m = part.solid.to_mesh()
+    v = np.asarray(m.vert_properties, dtype=np.float64)[:, :3]
+    return bool(trimesh.Trimesh(vertices=v, faces=np.asarray(m.tri_verts, dtype=np.int64), process=False).is_watertight)
+
+
 def _object_keys(parts: dict[str, ModelPart]) -> list[str]:
     """3MF のオブジェクトの並び：ほかの部品にまとめられない部品（基礎・1階・屋根…）を、組み立ての順に。
     外壁の部品は object_key のオブジェクトに入る。★前は「基礎・1階・屋根」の決め打ちで、2階建てで足した部品が落ちた。"""
@@ -105,7 +112,7 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
         # 離れた塊は、同じオブジェクトに入る部品（1階の床・内壁と外壁）を合わせて数える（印刷では一体になるため）
         together = [q.solid for q in parts.values() if (q.object_key or q.key) == (part.object_key or key)]
         obj = drop_specks(together[0] if len(together) == 1 else union_all(together))  # 合体の計算でできる厚みゼロのかけらは数えない
-        checks += part_checks(key, part.label, printable, [x.volume() for x in obj.decompose()])
+        checks += part_checks(key, part.label, printable, [x.volume() for x in obj.decompose()], raw_watertight=_raw_watertight(part))
     scene.export(dst / "model.glb", include_normals=False)  # 法線は表示側で計算（trimesh は法線に scipy が要るため）
 
     # 3MF：同じオブジェクトの部品（1階の床・内壁と外壁）は、同じ向き・同じ位置のまま入れる
