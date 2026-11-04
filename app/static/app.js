@@ -36,9 +36,32 @@ const holder = $('#canvas');
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 holder.appendChild(renderer.domElement);
-const scene = new THREE.Scene(); scene.background = new THREE.Color(0xffffff);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8a8a, 1.3));
-const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(-1, -2, 3); scene.add(sun);
+// 見た目（11/4 夜・案3「造形室」）：暗い背景に、3D プリンターの金色の造形板（256mm 角）と、樹脂の灰色の模型
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x1f2226);
+scene.add(new THREE.HemisphereLight(0xe8eef5, 0x3a3a3a, 1.5));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5); sun.position.set(-1, -2, 3); scene.add(sun);
+const PART_COLORS = { foundation: 0x7d848b, floor1: 0xc9cdd1, exterior1: 0xe2e5e8, roof: 0x8e959c, roof_ext: 0xdadde1,
+  roof_lower: 0x979ea5, roof_lower_ext: 0xdadde1, floor2: 0xc9cdd1, exterior2: 0xe2e5e8 };
+const plate = (() => {             // 造形板：ざらついた金色の板（模型の mm で 256 角、角を丸める）。模型の真下に置く
+  const cv = document.createElement('canvas'); cv.width = cv.height = 512;
+  const cx = cv.getContext('2d'); cx.fillStyle = '#b8924f'; cx.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 26000; i++) {
+    cx.fillStyle = Math.random() > 0.5 ? 'rgba(255,230,170,0.10)' : 'rgba(60,40,10,0.10)';
+    cx.fillRect(Math.random() * 512, Math.random() * 512, 1.5, 1.5);
+  }
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const shape = new THREE.Shape(); const r = 10, s = 128;
+  shape.moveTo(-s + r, -s); shape.lineTo(s - r, -s); shape.quadraticCurveTo(s, -s, s, -s + r); shape.lineTo(s, s - r);
+  shape.quadraticCurveTo(s, s, s - r, s); shape.lineTo(-s + r, s); shape.quadraticCurveTo(-s, s, -s, s - r); shape.lineTo(-s, -s + r);
+  shape.quadraticCurveTo(-s, -s, -s + r, -s);
+  const geo = new THREE.ShapeGeometry(shape); const uv = geo.attributes.uv; const pos = geo.attributes.position;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + s) / (2 * s), (pos.getY(i) + s) / (2 * s));
+  const g = new THREE.Group();
+  const board = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex })); board.position.z = -0.6; g.add(board);
+  const grid = new THREE.GridHelper(256, 8, 0x8a6c37, 0x8a6c37); grid.rotation.x = Math.PI / 2; grid.position.z = -0.5;
+  grid.material.transparent = true; grid.material.opacity = 0.35; g.add(grid);
+  g.visible = false; scene.add(g); return g;
+})();
 const camera = new THREE.PerspectiveCamera(30, 1, 1, 10000); camera.up.set(0, 0, 1);
 const controls = new OrbitControls(camera, renderer.domElement);
 function resize() { const w = holder.clientWidth, h = holder.clientHeight || 400; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
@@ -92,7 +115,14 @@ async function loadModel() {
   const gltf = await new GLTFLoader().parseAsync(buf, '');
   if (state.root) scene.remove(state.root);
   state.root = gltf.scene;
-  state.root.traverse((o) => { if (o.isMesh) { o.geometry.computeVertexNormals(); o.material.flatShading = true; o.material.needsUpdate = true; } });
+  state.root.traverse((o) => {
+    if (!o.isMesh) return;
+    o.geometry.computeVertexNormals(); o.material.flatShading = true;
+    if (PART_COLORS[o.name] !== undefined) o.material.color.setHex(PART_COLORS[o.name]);   // 樹脂の灰色（書き出しの GLB の色は変えない）
+    o.material.needsUpdate = true;
+  });
+  const box = new THREE.Box3().setFromObject(state.root); const mid = box.getCenter(new THREE.Vector3());
+  plate.position.set(mid.x, mid.y, box.min.z); plate.visible = true;
   scene.add(state.root); resize(); applyVisibility();
   if (!state.viewSet) { setView('iso'); state.viewSet = true; }
 }
@@ -827,7 +857,7 @@ async function refresh() {
 async function selectAlias(alias, built) {
   state.alias = alias; state.viewSet = false;
   if (!built) { setStatus(`${alias}：まだ組み立てていません。「読み込んで組み立てる」を押してください`); return; }
-  try { setStatus('読み込んでいます…', 'busy'); await refresh(); setStatus(`${alias} を表示しています`, 'ok'); }
+  try { setStatus('読み込んでいます…', 'busy'); await refresh(); setStatus(`${alias}を表示しています`, 'ok'); }
   catch (e) { setStatus(e.message, 'err'); }
 }
 
