@@ -18,6 +18,7 @@ PROTRUDE_MM = 20.0           # 開口が壁の端からこれより出れば「�
 OPENING_OVERLAP_MM = 50.0    # 開口どうしが、横・縦ともこれより重なれば「重なる」（連窓の枠の重なり 25mm は拾わない）
 ABOVE_MM = 50.0              # 開口の上端が、壁の上端・屋根の下の面をこれより超えれば「突き抜ける」（★物件C・F：天井までのドアと、天井の 30mm 下で終わる内壁の差は拾わない）
 SHORT_WALL_MM = 100.0        # これより短い壁は「ごく短い壁」
+VERTICAL_OVERLAP_MM = 100.0  # 2枚の壁の高さの範囲が、これより重なるときだけ「同じ所に壁が2枚」（★11/4：下がり壁と腰壁の組は拾わない）
 
 KIND_JA = {"exterior": "外壁", "interior": "内壁", "standalone": "単独の壁",
            "window": "窓", "door": "ドア", "entrance_door": "玄関ドア"}
@@ -36,8 +37,15 @@ def _rect(w: dict, t0: float | None = None, t1: float | None = None) -> Polygon:
     return Polygon([a + n, b + n, b - n, a - n])
 
 
+def _z_range(w: dict) -> tuple[float, float]:
+    """壁の高さの範囲（屋根まで届く壁は上を限りなしとする）。"""
+    h = w.get("height", "to_roof")
+    return float(w.get("bottom_mm", 0.0)), (math.inf if h in ("to_roof", None) else float(h))
+
+
 def overlapping_walls(b: dict) -> list[dict]:
-    """同じ階で平行な2枚の壁が、厚みの中で長く重なっている（同じ所に壁が2枚）。"""
+    """同じ階で平行な2枚の壁が、厚みの中で長く重なっている（同じ所に壁が2枚）。
+    ★11/4 の見直し：高さの範囲も重なるときだけ（縦に抜けのある内壁は、組み立てが上下2枚に分けて作る：下がり壁と腰壁）。"""
     out, walls = [], b.get("walls", [])
     cos_tol = math.cos(math.radians(PARALLEL_DEG))
     for i, w1 in enumerate(walls):
@@ -45,6 +53,9 @@ def overlapping_walls(b: dict) -> list[dict]:
         n1 = np.array([-d1[1], d1[0]])
         for w2 in walls[i + 1:]:
             if w1.get("level") != w2.get("level"):
+                continue
+            (a0, a1), (b0, b1) = _z_range(w1), _z_range(w2)
+            if min(a1, b1) - max(a0, b0) <= VERTICAL_OVERLAP_MM:
                 continue
             s2, d2, L2 = _line(w2)
             if abs(float(d1 @ d2)) < cos_tol:
@@ -67,10 +78,10 @@ def opening_problems(b: dict) -> list[dict]:
     from core.roof_geom import surfaces
     walls = {w["id"]: w for w in b.get("walls", [])}
     ops = [o for o in b.get("openings", []) if o.get("wall") in walls and o.get("offset_mm") is not None]
-    roofs = []
+    roofs = []   # （平面, 下の面, 載る階）。★11/4 の見直し：壁と同じ階の屋根とだけ比べる（組み立ても2階の壁は大屋根だけで切る）
     for r in b.get("roofs") or ([b["roof"]] if b.get("roof") else []):
         if r.get("footprint") and (r.get("bottom_plane") or r.get("planes")):
-            roofs.append((Polygon(r["footprint"]).buffer(10), surfaces(r)[0]))
+            roofs.append((Polygon(r["footprint"]).buffer(10), surfaces(r)[0], r.get("level")))
     out = []
     for o in ops:
         w = walls[o["wall"]]
@@ -97,7 +108,7 @@ def opening_problems(b: dict) -> list[dict]:
                         "message": f"{name} の上端（{head:.0f}）が、{w['id']} の上端（{top:.0f}）より {head - top:.0f}mm 高い"})
         elif top is None and roofs:
             p = Point(o["center"])
-            zs = [plane_z(rb, p.x, p.y) for fp, rb in roofs if fp.contains(p)]
+            zs = [plane_z(rb, p.x, p.y) for fp, rb, lvl in roofs if fp.contains(p) and lvl in (None, w.get("level"))]
             zs = [z for z in zs if z > float(w["bottom_mm"])]
             if zs and head > min(zs) + ABOVE_MM:
                 out.append({"kind": "opening_above_top", "targets": [o["id"], w["id"]],

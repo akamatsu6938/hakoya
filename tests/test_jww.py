@@ -301,3 +301,27 @@ def test_one_code_can_describe_a_row_or_a_stack_of_openings():
     assert opening_units(stack[0], stack)["stack"] == (795, 20, 2400)
     alone = [op(5, 0, 790, 900, 2000)]
     assert opening_units(alone[0], alone) == {"own": (790, 900, 2000), "row": None, "stack": None}
+
+
+def _op_fl(i, off, w, sill, head, kind="window"):
+    return {"id": f"O{i}", "wall": "W1", "kind": kind, "offset_mm": off, "width_mm": w, "sill_fl_mm": sill, "head_fl_mm": head}
+
+
+def test_stacked_head_proposal_goes_to_the_top_opening():
+    """★11/4 の見直し：段窓（07424＝下 FL+20〜920・上 1030〜2400）で注記が下の開口に結ばれ、上の開口の上端が違うとき、
+    直す案は上の開口に出す（前は下の開口に出て、承認すると窓が重なった）。"""
+    from core.drawing_check import compare_with_note
+    low, up = _op_fl(8, 0, 795, 20, 920), _op_fl(9, 0, 795, 1030, 2100)
+    note = {"note_id": "T1", "code": "07424", "head_fl_mm": 2400, "opening": "O8"}
+    (m,) = [x for x in compare_with_note(note, low, [low, up]) if x["what"] == "head"]
+    assert m["opening"] == "O9" and m["model_head_fl_mm"] == 2100 and "O9 の上端" in m["message"]
+
+
+def test_row_width_ignores_a_window_beyond_a_pillar():
+    """★11/4 の見直し：連窓 34023（840＋1790＋840）の隣に、柱1本（110mm）をはさんで別の窓があっても、幅は連窓の3つで合う。"""
+    from core.drawing_check import compare_with_note
+    row = [_op_fl(1, 0, 840, 0, 2400), _op_fl(2, 815, 1790, 0, 2400), _op_fl(3, 2580, 840, 0, 2400), _op_fl(4, 3530, 1690, 0, 2400)]
+    note = {"note_id": "T1", "code": "34023", "head_fl_mm": 2400, "opening": "O2"}
+    assert [x["what"] for x in compare_with_note(note, row[1], row)] == []
+    row[2]["width_mm"] = 640                                                     # 連窓の右の窓が狭い → どの組とも合わない
+    assert [x["what"] for x in compare_with_note(note, row[1], row)] == ["width"]

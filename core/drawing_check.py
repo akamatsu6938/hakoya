@@ -60,19 +60,20 @@ STACK_MM = 300.0   # 平面でこれ以内に重なる開口は「上下に並�
 UNIT_GAP_MM = 150.0  # 同じ壁で、これ以内の隙間で並ぶ開口は、1つの品番（連窓・段窓）のことがある
 
 
-def opening_units(o: dict, ops: list[dict]) -> dict:
-    """注記の品番と比べる大きさ（幅, 下端 FL+, 上端 FL+）：own＝その開口だけ・row＝横に並ぶ連窓・stack＝上下に並ぶ段窓（なければ None）。
-    ★物件F（11/3）：品番 34023 の窓が glb では3つの開口（840＋1790＋840）、07424 は上下2つ（FL+20〜920 と 1030〜2400）だった。"""
+def _h(p):  # 横の範囲
+    return float(p["offset_mm"]), float(p["offset_mm"]) + float(p["width_mm"])
+
+
+def _v(p):  # 縦の範囲
+    return float(p["sill_fl_mm"]), float(p["head_fl_mm"])
+
+
+def unit_members(o: dict, ops: list[dict]) -> tuple[list[dict], list[dict]]:
+    """o と同じ品番かもしれない開口のまとまり：（横に並ぶ連窓, 上下に並ぶ段窓）。どちらも o を含む（1つなら [o]）。"""
     same = [p for p in ops if p.get("wall") == o.get("wall") and p.get("offset_mm") is not None]
-    own = (float(o["width_mm"]), float(o["sill_fl_mm"]), float(o["head_fl_mm"]))
     if o.get("offset_mm") is None:
-        return {"own": own, "row": None, "stack": None}
-
-    def h(p):  # 横の範囲
-        return float(p["offset_mm"]), float(p["offset_mm"]) + float(p["width_mm"])
-
-    def v(p):  # 縦の範囲
-        return float(p["sill_fl_mm"]), float(p["head_fl_mm"])
+        return [o], [o]
+    h, v = _h, _v
 
     def grow(near) -> list[dict]:
         unit, changed = [o], True
@@ -93,11 +94,55 @@ def opening_units(o: dict, ops: list[dict]) -> dict:
         (a0, a1), (b0, b1) = h(p), h(q)
         overlap_h = min(a1, b1) - max(a0, b0)
         return overlap_h >= 0.8 * min(a1 - a0, b1 - b0) and max(v(p)[0], v(q)[0]) - min(v(p)[1], v(q)[1]) <= UNIT_GAP_MM
+    return grow(side_by_side), grow(stacked)
 
-    def extent(unit):
-        return None if len(unit) < 2 else (max(h(p)[1] for p in unit) - min(h(p)[0] for p in unit),
-                                           min(v(p)[0] for p in unit), max(v(p)[1] for p in unit))
-    return {"own": own, "row": extent(grow(side_by_side)), "stack": extent(grow(stacked))}
+
+def _extent(unit: list[dict]):
+    return None if len(unit) < 2 else (max(_h(p)[1] for p in unit) - min(_h(p)[0] for p in unit),
+                                       min(_v(p)[0] for p in unit), max(_v(p)[1] for p in unit))
+
+
+def opening_units(o: dict, ops: list[dict]) -> dict:
+    """注記の品番と比べる大きさ（幅, 下端 FL+, 上端 FL+）：own＝その開口だけ・row＝横に並ぶ連窓・stack＝上下に並ぶ段窓（なければ None）。
+    ★物件F（11/3）：品番 34023 の窓が glb では3つの開口（840＋1790＋840）、07424 は上下2つ（FL+20〜920 と 1030〜2400）だった。"""
+    own = (float(o["width_mm"]), float(o["sill_fl_mm"]), float(o["head_fl_mm"]))
+    row, stack = unit_members(o, ops)
+    return {"own": own, "row": _extent(row), "stack": _extent(stack)}
+
+
+def _runs(o: dict, unit: list[dict], key) -> list[float]:
+    """o を含む、続いて並ぶ開口の組の大きさ（連窓なら幅、段窓なら高さ）。★11/4 の見直し：柱1本をはさんだ別の窓まで
+    連窓に入れると、品番の幅と合わなくなった → まとまり全体だけでなく、o を含む続きの組ごとに比べる。"""
+    unit = sorted(unit, key=lambda p: key(p)[0])
+    k = next(i for i, p in enumerate(unit) if p is o)
+    return [key(unit[j])[1] - key(unit[i])[0] for i in range(k + 1) for j in range(k, len(unit)) if j > i]
+
+
+def compare_with_note(m: dict, o: dict, ops: list[dict]) -> list[dict]:
+    """注記 m と結んだ開口 o の、上端・幅・高さの食い違い。★11/4 の見直し：段窓の上端は段窓のいちばん上と比べるので、
+    違うときの相手（直す案の部材）も、いちばん上の開口にする（前は下の開口に案が出て、承認すると窓が重なった）。"""
+    row, stack = unit_members(o, ops)
+    own = (float(o["width_mm"]), float(o["sill_fl_mm"]), float(o["head_fl_mm"]))
+    top = max(stack, key=lambda p: float(p["head_fl_mm"]))
+    out = []
+    # 上端はその開口か段窓のいちばん上、幅はその開口か連窓（続きの組）、高さはその開口か段窓（続きの組）で比べる
+    # （横に並ぶ窓の上端を連窓でまとめると、1つだけ下がった上端を見逃す：試験の E01）
+    heads = [own[2], float(top["head_fl_mm"])]
+    widths = [own[0]] + (_runs(o, row, _h) if len(row) > 1 else [])
+    heights = [own[2] - own[1]] + (_runs(o, stack, _v) if len(stack) > 1 else [])
+    if all(abs(x - m["head_fl_mm"]) > SAME_MM for x in heads):
+        tgt = top if len(stack) > 1 else o
+        out.append({**m, "opening": tgt["id"], "what": "head", "model_head_fl_mm": tgt["head_fl_mm"],
+                    "message": f"{tgt['id']} の上端：模型 FL+{float(tgt['head_fl_mm']):.0f}、図面の注記 FL+{m['head_fl_mm']}（品番 {m['code']}）"})
+    width_est = int(m["code"][:3]) * 10 + CODE_WIDTH_ADD_MM
+    if all(abs(x - width_est) > SIZE_TOL_MM for x in widths):
+        out.append({**m, "what": "width", "model_head_fl_mm": o["head_fl_mm"],
+                    "message": f"{m['opening']} の幅：模型 {float(o['width_mm']):.0f}mm、図面の品番 {m['code']} の幅の目安 {width_est:.0f}mm"})
+    height_est = int(m["code"][3:5]) * 100
+    if o.get("kind") == "window" and all(abs(x - height_est) > SIZE_TOL_MM for x in heights):
+        out.append({**m, "what": "height", "model_head_fl_mm": o["head_fl_mm"],
+                    "message": f"{m['opening']} の高さ（下端〜上端）：模型 {own[2] - own[1]:.0f}mm、図面の品番 {m['code']} の高さの目安 {height_est}mm"})
+    return out
 
 
 def _swap_stacked(matched: list[dict], ops: dict, notes: list[dict], pos: list) -> None:
@@ -143,27 +188,9 @@ def summary(alias: str, b: dict) -> dict:
         matched, unmatched = match_notes(notes, b, al, lv.get("name"))
         mism = []
         for m in matched:
-            o = ops[m["opening"]]
-            units = opening_units(o, list(ops.values()))
-            # 上端はその開口か段窓のいちばん上、幅はその開口か連窓、高さはその開口か段窓で比べる
-            # （横に並ぶ窓の上端を連窓でまとめると、1つだけ下がった上端を見逃す：試験の E01）
-            heads = [units["own"][2]] + ([units["stack"][2]] if units["stack"] else [])
-            widths = [units["own"][0]] + ([units["row"][0]] if units["row"] else [])
-            heights = [units["own"][2] - units["own"][1]] + ([units["stack"][2] - units["stack"][1]] if units["stack"] else [])
-            if all(abs(x - m["head_fl_mm"]) > SAME_MM for x in heads):
-                mism.append({**m, "what": "head", "model_head_fl_mm": o["head_fl_mm"],
-                             "message": f"{m['opening']} の上端：模型 FL+{float(o['head_fl_mm']):.0f}、図面の注記 FL+{m['head_fl_mm']}（品番 {m['code']}）"})
-            width_est = int(m["code"][:3]) * 10 + CODE_WIDTH_ADD_MM
-            if all(abs(x - width_est) > SIZE_TOL_MM for x in widths):
-                mism.append({**m, "what": "width", "model_head_fl_mm": o["head_fl_mm"],
-                             "message": f"{m['opening']} の幅：模型 {float(o['width_mm']):.0f}mm、図面の品番 {m['code']} の幅の目安 {width_est:.0f}mm"})
-            height_est = int(m["code"][3:5]) * 100
-            height = float(o["head_fl_mm"]) - float(o["sill_fl_mm"])
-            if o.get("kind") == "window" and all(abs(x - height_est) > SIZE_TOL_MM for x in heights):
-                mism.append({**m, "what": "height", "model_head_fl_mm": o["head_fl_mm"],
-                             "message": f"{m['opening']} の高さ（下端〜上端）：模型 {height:.0f}mm、図面の品番 {m['code']} の高さの目安 {height_est}mm"})
+            mism += compare_with_note(m, ops[m["opening"]], list(ops.values()))
         row.update(score=al["score"], notes=len(notes), matched=len(matched), unmatched=len(unmatched),
-                   same=len(matched) - len({x["opening"] for x in mism}), mismatches=mism,
+                   same=len(matched) - len({x["note_id"] for x in mism}), mismatches=mism,
                    unmatched_notes=[{k: n[k] for k in ("note_id", "code", "head_fl_mm")} for n in unmatched],
                    pairs=[{"opening": m["opening"], "code": m["code"], "head_fl_mm": m["head_fl_mm"]} for m in matched])
         levels.append(row)

@@ -83,6 +83,10 @@ def describe(b: dict, summary: dict, code: list[dict], drawing: dict | None) -> 
     out["bambu_3mf"] = bool((summary.get("bambu_3mf") or {}).get("ok"))
     out["code_findings"] = dict(collections.Counter(f"{f['kind']}・{f['severity']}" for f in code))
     out["code_messages"] = [f"[{f['severity']}] {f['message']}" for f in code]
+    # ★11/4 の見直し：作り直しで番号が変わり、人の修正が当たらなくなっても、表で気づけるようにする
+    out["overrides"] = dict(collections.Counter(r.get("status", "?") for r in summary.get("overrides") or []))
+    ids = b.get("id_changes") or {}
+    out["id_changes"] = {"new": len(ids.get("new", [])), "removed": len(ids.get("removed", []))}
     if drawing:
         rows = []
         for r in drawing.get("levels", []):
@@ -91,6 +95,8 @@ def describe(b: dict, summary: dict, code: list[dict], drawing: dict | None) -> 
         for r in drawing.get("elevations", []):
             rows.append(f"立面 {r['view']}：" + (f"窓・ドア {r.get('windows')} か所のうち {r.get('same')} か所が合う" if r.get("aligned") and "windows" in r
                                                else (r.get("note") or "位置合わせできず")))
+        if drawing.get("elevations_note"):          # 立面図の照合が途中で止まった（前は表から行ごと消えていた）
+            rows.append(drawing["elevations_note"])
         if not drawing.get("available", True):
             rows.append(drawing.get("note") or "図面なし")
         out["drawing"] = rows
@@ -167,12 +173,13 @@ def run_one(alias: str, bambu: bool, images: bool) -> tuple[dict, dict | None]:
             except Exception as e:  # noqa: BLE001  図面が読めなくても、ほかの結果は出す
                 drawing = {"available": False, "note": f"図面を読めませんでした（{_safe_error(e)}）"}
         row["seconds"][step] = round(time.time() - t, 1)
+        step = "まとめ"                      # ★11/4 の見直し：まとめの失敗も、ほかの物件を止めない
+        row.update(describe(b, summary, code, drawing))
     except Exception as e:  # noqa: BLE001  1件で止まっても、ほかの物件は続ける
         row["stopped"] = step
         row["error"] = _safe_error(e)
         return row, b
     row["ok"] = True
-    row.update(describe(b, summary, code, drawing))
     return row, b
 
 
@@ -205,6 +212,11 @@ def report_markdown(rows: list[dict], pairs: list[dict], rules: list[dict], titl
         for x in r["roofs"]:
             lines.append(f"- 屋根 {x['id']}（{x['level']}）：{x['shape']}・面 {x['planes']}・勾配 {'/'.join(x['pitch'])}・軒の出 {x['eave_mm']}")
         lines.append(f"- glb の例外：{r['glb_exceptions'] or 'なし'}　未解決：{r['unresolved']}　飛ばした部材：{r['skipped']}　Bambu 形式：{'あり' if r['bambu_3mf'] else 'なし'}")
+        ov, ids = r.get("overrides") or {}, r.get("id_changes") or {}
+        failed = ov.get("failed", 0)
+        lines.append(f"- 人の修正：{sum(ov.values())} 件" + (f"（当てた {sum(ov.values()) - failed}・" + (f"**当てられない {failed}**" if failed else "当てられない 0") + "）" if ov else "")
+                     + f"　番号：新しい部材 {ids.get('new', 0)}・なくなった部材 {ids.get('removed', 0)}"
+                     + ("（前の指摘の直す案は、番号を確かめてから承認する）" if ids.get("new") or ids.get("removed") else ""))
         for c in r["checks_high_mid"]:
             lines.append(f"- 検査 {c}")
         for c in r["code_messages"]:

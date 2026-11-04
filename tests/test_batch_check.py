@@ -57,3 +57,18 @@ def test_report_lists_stopped_and_passed_properties():
     md = report_markdown([ok, stopped], [], [], "まとめて検査")
     assert "| 物件A | 通った | 平屋 | 寄棟（面4、4/10）" in md and "**超える**" in md
     assert "止まった（glb がない）" in md and "203.8×222.0mm" in md
+
+
+def test_report_shows_human_fixes_that_no_longer_apply_and_stopped_elevations():
+    """★11/4 の見直し：作り直しで人の修正が当たらなくなった・番号が変わった・立面図の照合が止まったことを表に出す。"""
+    from tools.batch_check import describe
+    b = {"levels": [{"name": "1F", "fl_mm": 624, "ceiling_mm": 2400}], "walls": [], "openings": [],
+         "roof": {"shape": "shed", "pitch": [1.5, 10]}, "id_changes": {"new": ["W30"], "removed": ["W12", "O4"]}}
+    summary = {"overrides": [{"id": "OV1", "status": "applied"}, {"id": "OV2", "status": "failed"}], "checks": [], "parts": {}}
+    drawing = {"available": True, "levels": [], "elevations_note": "立面図を照合できませんでした（ValueError）"}
+    d = describe(b, summary, [], drawing)
+    assert d["overrides"] == {"applied": 1, "failed": 1} and d["id_changes"] == {"new": 1, "removed": 2}
+    assert "立面図を照合できませんでした（ValueError）" in d["drawing"]
+    row = {"alias": "物件A", "ok": True, "glb": True, "drawings": ["plan"], "notes": [], "seconds": {}, "outline_mm": None, **d}
+    md = report_markdown([row], [], [], "まとめて検査")
+    assert "**当てられない 1**" in md and "なくなった部材 2" in md

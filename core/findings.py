@@ -49,8 +49,10 @@ def code_findings(alias: str) -> list[dict]:
             out.append({"view": "plan2" if levels.get(c["targets"][0]) in upper else "plan", "kind": "shape", "severity": "低",
                         "message": f"glb の整合性（要確認）：{c['message']}", "targets": c["targets"],
                         "evidence": ["コードの検査（glb の整合性）"], "source": "code"})
-    except Exception:  # noqa: BLE001  整合性の検査の失敗で、ほかの指摘を止めない
-        pass
+    except Exception as e:  # noqa: BLE001  整合性の検査の失敗で、ほかの指摘を止めない（★11/4：失敗したことは知らせる）
+        out.append({"view": "plan", "kind": "shape", "severity": "低", "targets": [], "source": "code",
+                    "message": f"glb の整合性の検査が途中で止まりました（{type(e).__name__}）。ほかの検査の結果は出ています",
+                    "evidence": ["コードの検査（glb の整合性）"]})
     for u in b.get("unresolved", []):
         out.append({"view": "plan", "kind": "shape", "severity": "中", "message": f"未解決の所 {u['id']}：{u['note']}",
                     "targets": [], "evidence": ["壁の作り直し（unresolved）"], "source": "code"})
@@ -60,12 +62,21 @@ def code_findings(alias: str) -> list[dict]:
     for d in differences(b, load_rules(b.get("source", {}).get("company_rules", "jisha"))):
         out.append({"view": "plan", "kind": "rule", "severity": "中", "message": d["message"],
                     "targets": [], "evidence": [f"会社ルール {d['rule_key']}"], "source": "code"})
-    try:   # 図面（jww）と比べて違う所（修正を当てたあとの家と比べる。図面が読めなくてもほかの指摘は出す）
-        from core import overrides as ov
-        from core.drawing_check import findings as drawing_findings
-        out += drawing_findings(alias, ov.apply(b, ov.load(alias))[0])
-    except Exception:  # noqa: BLE001  図面の読み取りの失敗で検品全体を止めない
-        pass
+    try:
+        from core.paths import property_files
+        has_drawings = bool(property_files(alias).jww)
+    except Exception:  # noqa: BLE001  登録されていない家（試験用の家など）は図面と比べない
+        has_drawings = False
+    if has_drawings:
+        try:   # 図面（jww）と比べて違う所（修正を当てたあとの家と比べる。図面が読めなくてもほかの指摘は出す）
+            # ★11/4：ここで overrides を import し直していたため、関数の中で ov が「まだ入っていない変数」になり、
+            # 上の整合性の検査が毎回 UnboundLocalError で止まって、握りつぶされていた（ov はファイルの先頭で読んでいる）
+            from core.drawing_check import findings as drawing_findings
+            out += drawing_findings(alias, ov.apply(b, ov.load(alias))[0])
+        except Exception as e:  # noqa: BLE001  図面の読み取りの失敗で検品全体を止めない（★11/4：失敗したことは知らせる）
+            out.append({"view": "plan", "kind": "opening", "severity": "低", "targets": [], "source": "code",
+                        "message": f"図面（jww）との照合が途中で止まりました（{type(e).__name__}）。ほかの検査の結果は出ています",
+                        "evidence": ["図面との照合"]})
     for s in b.get("skipped", []):
         if "見つからない" in s.get("reason", ""):
             out.append({"view": "plan", "kind": "opening", "severity": "中", "message": f"{s['source']}：{s['reason']}",
