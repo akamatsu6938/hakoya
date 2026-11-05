@@ -20,6 +20,7 @@ from core.ai.api_runner import Meter, api_tools, japanese_error, make_client, sk
 from core.ai.tools import ToolContext, ToolError, propose_override
 from core.paths import out_dir
 from core.privacy import assert_clean
+from core.rules import default_company
 
 ROLE = ("あなたは住宅模型（1/50、3D プリント）の手直しの担当。日本語で考え、日本語で書く。"
         "人が平面図か 3D の画面で部材を囲み、一言で直したいことを書いた。使える道具は HAKOYA の道具だけ。"
@@ -71,7 +72,7 @@ async def _run_agent(ctx: ToolContext, prompt: str, conf: dict) -> tuple[str, fl
         raise RuntimeError("claude_code 接続なのに、環境に ANTHROPIC_API_KEY があります。API の料金になるため止めました。"
                            "API キーで動かすときは api_key 接続を選んでください。")
     m, limits = conf["claude_code"]["lasso"], conf["limits"]
-    company = ctx.raw["source"].get("company_rules", "jisha")
+    company = ctx.raw["source"].get("company_rules", default_company())
     options = ClaudeAgentOptions(
         system_prompt=ROLE, model=m["model"], effort=m["effort"],
         mcp_servers={SERVER: build_server(ctx)}, tools=["Skill"], allowed_tools=["Skill"] + tool_names(),
@@ -94,7 +95,7 @@ async def _run_api(ctx: ToolContext, prompt: str, conf: dict, client=None) -> tu
     own = client is None
     client = client or make_client()
     meter = Meter(prices=conf["prices_usd_per_mtok"], limit_usd=float(limits["lasso_max_budget_usd"]))
-    system = ROLE + "\n\n" + skill_text(ctx.raw["source"].get("company_rules", "jisha"))
+    system = ROLE + "\n\n" + skill_text(ctx.raw["source"].get("company_rules", default_company()))
     try:
         text, stop, _ = await tool_loop(client, ctx, prompt, model=m["model"], effort=m["effort"], system=system,
                                         tools=api_tools(), meter=meter, max_turns=int(limits["lasso_max_turns"]))

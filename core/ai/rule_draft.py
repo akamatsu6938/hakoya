@@ -31,7 +31,7 @@ from core.ai.tools import ask_question as _ask_question
 from core.paths import aliases
 from core.privacy import assert_clean
 from core.rule_stats import code_candidates, collect, entries
-from core.rules import LEARNABLE, base_text, load_answers, load_learned, load_rules, rule, save_learned
+from core.rules import LEARNABLE, base_text, default_company, load_answers, load_learned, load_rules, rule, save_learned
 
 ROLE = ("あなたは住宅会社の「会社ルール」を言葉にする担当。日本語で考え、日本語で書く。使える道具は HAKOYA の道具だけ。"
         "家・会社によって変わる部分は物件ごとに glb から作るので、会社ルールで決め打ちしない。"
@@ -402,7 +402,7 @@ def undo(company: str, learned_id: str) -> dict:
 def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="会社ルールの言語化：集計と人の答えから、会社ルールの案を出す")
-    ap.add_argument("company", nargs="?", default="jisha")
+    ap.add_argument("company", nargs="?", default=default_company())
     ap.add_argument("--connection", default="off", choices=["claude_code", "api_key", "off"])
     ap.add_argument("--text", default="")
     args = ap.parse_args(argv)

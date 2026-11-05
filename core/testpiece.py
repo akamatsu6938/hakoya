@@ -18,7 +18,7 @@ from shapely.geometry import Polygon, box
 
 from core.builder import prism, union_all
 from core.paths import out_dir
-from core.rules import load_rules
+from core.rules import default_company, load_rules
 from core.threemf import write_3mf
 
 LEG_MM = 30.0     # L 字の長さ（模型寸法）
@@ -78,7 +78,7 @@ def write(rules: dict) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="はめあいを試す試験片を書き出す")
-    ap.add_argument("--company", default="jisha")
+    ap.add_argument("--company", default=default_company())
     args = ap.parse_args(argv)
     rules = load_rules(args.company)
     names = write(rules)

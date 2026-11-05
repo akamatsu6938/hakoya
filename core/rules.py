@@ -18,12 +18,27 @@ import yaml
 from core.paths import DATA_DIR
 
 RULES_DIR = Path(__file__).resolve().parents[1] / "rules"
-DEFAULT_COMPANY = "jisha"
+DEFAULT_COMPANY = "jisha"      # 自社の会社ルール。公開の版には入れない（そのときは default_company() が B工務店（架空）にする）
 LEARNED_DIR = DATA_DIR / "rules"
 # 学んでよい項目（会社で変わらない値）。模型の作り方（model.*）と内壁の厚み（作者の決め）は学ばない
 LEARNABLE = ("levels.gl_to_foundation_top_mm", "levels.gl_to_1fl_mm", "levels.ceiling_height_mm",
              "levels.story_height_choices_mm", "walls.exterior_thickness_mm", "openings.door_top_fl_mm",
              "roof.build_up_mm")
+
+
+def default_company() -> str:
+    """既定の会社ルール。rules/jisha.yaml があれば jisha（今までどおり）。
+    ない（公開の版）ときは、rules/ にある会社の決まりのうち名前順で最初のもの（B工務店（架空）＝bkoumuten）。"""
+    if (RULES_DIR / f"{DEFAULT_COMPANY}.yaml").exists():
+        return DEFAULT_COMPANY
+    for p in sorted(RULES_DIR.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("walls"), dict):    # 会社の決まり（ai_models.yaml などは除く）
+            return p.stem
+    return DEFAULT_COMPANY
 
 
 def _base(company: str) -> dict:
@@ -106,8 +121,10 @@ def apply_learned(rules: dict, learned: dict) -> tuple[dict, list[dict]]:
     return out, skipped
 
 
-def load_rules(company: str = DEFAULT_COMPANY, learned: bool | None = None) -> dict:
-    """会社ルール。learned=None のときは HAKOYA_LEARNED_RULES に従って学んだルールを重ねる。"""
+def load_rules(company: str | None = None, learned: bool | None = None) -> dict:
+    """会社ルール。company を省くと既定の会社（default_company()）。
+    learned=None のときは HAKOYA_LEARNED_RULES に従って学んだルールを重ねる。"""
+    company = default_company() if company is None else company
     base = _base(company)
     use = learned_enabled() if learned is None else learned
     if not use:

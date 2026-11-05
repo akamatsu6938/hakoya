@@ -179,9 +179,9 @@ def rule_check(alias: str):
     """予防：この物件を会社ルール（学んだルールを含む）と比べた結果。家ごとに変わる値は比べない。"""
     _check_alias(alias)
     from core.rule_check import check_property
-    from core.rules import load_rules
+    from core.rules import default_company, load_rules
     b, _ = _effective(alias)
-    return _safe_json({"rows": check_property(b, load_rules(b["source"].get("company_rules", "jisha")))})
+    return _safe_json({"rows": check_property(b, load_rules(b["source"].get("company_rules", default_company())))})
 
 
 DRAWING_CACHE: dict[str, tuple] = {}     # 物件ごとの（building・修正の更新時刻, 照合の結果）。位置合わせに数秒かかるため
@@ -488,9 +488,9 @@ def pick_proxies(alias: str):
     """3D で囲んで直すの当たり判定用の形（部材ごと、実寸 mm）。修正を当てた後の家で作る。"""
     _check_alias(alias)
     from core.pick import proxies
-    from core.rules import load_rules
+    from core.rules import default_company, load_rules
     b, _ = _effective(alias)
-    return _safe_json(proxies(b, load_rules(b["source"].get("company_rules", "jisha"))))
+    return _safe_json(proxies(b, load_rules(b["source"].get("company_rules", default_company()))))
 
 
 @app.post("/api/lasso/{alias}/select")
@@ -770,6 +770,7 @@ def settings():
     組み立てたあとの検品（auto_inspect）と、選べるつなぎ方・API の1回の上限も返す。"""
     from core import settings_store
     from core.ai.agent import load_ai_models
+    from core.rules import default_company
     try:
         key = secret_store.has_api_key()
     except secret_store.SecretStoreError as e:
@@ -778,7 +779,8 @@ def settings():
     return _safe_json({"api_key_set": key, "auto_inspect": st["auto_inspect"], "api_cost_ack": st["api_cost_ack"],
                        "connections": settings_store.available_connections(),
                        "max_budget_usd": float(load_ai_models()["limits"]["max_budget_usd"]),
-                       "company": st["company"], "companies": settings_store.companies()})
+                       "company": st["company"], "companies": settings_store.companies(),
+                       "default_company": default_company()})       # 会社ルールの書いていない模型に使う会社（jisha。なければ B工務店（架空））
 
 
 class CompanyIn(BaseModel):

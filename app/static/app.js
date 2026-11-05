@@ -456,7 +456,7 @@ $('#inspect-off').addEventListener('click', () => startInspection('off'));
 // 家ごとに変わる値は物件ごとに glb から作る。会社で変わらない値と細かい決まりを会社ルールとして残し、予防に使う（作者 11/3）
 const STATUS_JA = { same: '会社で同じ', varies: '物件ごとに違う', few: '件数が足りない', info: '参考' };
 const RKIND_JA = { value: '値を直す', glb: '物件ごとに glb の値', skill: '細かい決まり' };
-const companyOf = () => state.building?.source?.company_rules || 'jisha';
+const companyOf = () => state.building?.source?.company_rules || state.defaultCompany || 'jisha';   // 既定は設定の画面の default_company（jisha がない版では B工務店（架空））
 const rulesApi = (p = '') => `/api/rules/${encodeURIComponent(companyOf())}${p}`;
 let rulesDone = new Set();       // 承認・却下した案の印（最後の案を開き直しても出さない）
 
@@ -554,6 +554,7 @@ async function renderSettings() {
     sel.innerHTML = (st.connections || []).map((c) => `<option value="${c}">${AUTO_JA[c] || c}</option>`).join('');
     sel.value = st.auto_inspect; sel.dataset.prev = st.auto_inspect; sel.dataset.budget = st.max_budget_usd; sel.dataset.ack = st.api_cost_ack ? '1' : '';
     state.companies = Object.fromEntries((st.companies || []).map((c) => [c.code, c.name]));
+    state.defaultCompany = st.default_company;
     const cs = $('#company');
     cs.innerHTML = (st.companies || []).map((c) => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('');
     cs.value = st.company; cs.dataset.prev = st.company;

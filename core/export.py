@@ -16,7 +16,7 @@ from core import overrides as ov
 from core.builder import ModelPart, build_model, drop_specks, union_all
 from core.checks import building_checks, part_checks
 from core.paths import out_dir
-from core.rules import load_rules
+from core.rules import default_company, load_rules
 from core.bambu import to_bambu_3mf
 from core.threemf import write_3mf
 from core import print_split as ps
@@ -89,7 +89,7 @@ def overlap_checks(parts: dict[str, ModelPart], scale: float) -> list[dict]:
 def make_model(alias: str, company: str | None = None) -> tuple[dict, dict[str, ModelPart], list[dict], dict]:
     """building.json＋修正 → 組み立て。（修正を当てた building、パーツ、修正の結果、会社ルール）を返す。"""
     b = json.loads((out_dir(alias) / "building.json").read_text(encoding="utf-8"))
-    rules = load_rules(company or b["source"].get("company_rules", "jisha"))
+    rules = load_rules(company or b["source"].get("company_rules", default_company()))
     applied, results = ov.apply(b, ov.load(alias))
     return applied, build_model(applied, rules), results, rules
 

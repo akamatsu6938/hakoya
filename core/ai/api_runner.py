@@ -26,6 +26,7 @@ from core.ai.tools import TOOL_SPECS, ToolContext, call_tool
 from core.findings import code_findings
 from core.paths import out_dir
 from core.privacy import PrivacyError, assert_clean
+from core.rules import default_company
 from core.secret_store import SecretStoreError
 
 # 1回の返事の上限（考える分を含む）。この大きさなら、流しっぱなし（streaming）にしなくても時間切れにならない
@@ -281,7 +282,7 @@ async def run_inspection_api(alias: str, *, client=None, ctx: ToolContext | None
     client = client or make_client()
     ctx = ctx or ToolContext.load(alias)
     out = out or out_dir(alias)
-    company = ctx.raw["source"].get("company_rules", "jisha")
+    company = ctx.raw["source"].get("company_rules", default_company())
     skills = skill_text(company)
     face_system = [{"type": "text", "text": FACE_ROLE + "\n\n" + skills, "cache_control": {"type": "ephemeral"}}]
     fm, mm = models["inspect_face"], models["inspect_merge"]

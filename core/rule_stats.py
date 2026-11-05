@@ -16,7 +16,7 @@ import re
 
 from core import overrides as ov
 from core.paths import aliases, out_dir
-from core.rules import LEARNABLE, load_learned, load_rules, rule
+from core.rules import LEARNABLE, default_company, load_learned, load_rules, rule
 
 SAME_SHARE = 0.6        # この割合以上の物件で同じ値なら「会社で同じ」
 FROM_GLB = "from_glb"   # 会社ルールで「物件ごとに glb の値を使う」と決めてある項目の印
@@ -146,7 +146,7 @@ def entries(company: str) -> list[tuple[str, dict]]:
         if not p.exists():
             continue
         b = json.loads(p.read_text(encoding="utf-8"))
-        if b.get("source", {}).get("company_rules", "jisha") == company:
+        if b.get("source", {}).get("company_rules", default_company()) == company:
             out.append((a, b))
     return out
 

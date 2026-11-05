@@ -26,7 +26,7 @@ from PIL import Image, ImageDraw
 
 from core import overrides as ov
 from core.paths import out_dir
-from core.rules import load_rules, rule
+from core.rules import default_company, load_rules, rule
 
 VIEWS = ("S", "N", "E", "W", "plan", "plan2")    # plan2 は2階建ての2階の平面（平屋にはない）
 EDITABLE = {"walls": ("thickness_mm",), "openings": ("width_mm", "offset_mm", "sill_fl_mm", "head_fl_mm"),
@@ -55,7 +55,7 @@ class ToolContext:
     def load(cls, alias: str) -> "ToolContext":
         raw = json.loads((out_dir(alias) / "building.json").read_text(encoding="utf-8"))
         applied, _ = ov.apply(raw, ov.load(alias))
-        return cls(alias=alias, raw=raw, building=applied, rules=load_rules(raw["source"].get("company_rules", "jisha")))
+        return cls(alias=alias, raw=raw, building=applied, rules=load_rules(raw["source"].get("company_rules", default_company())))
 
     @property
     def inspect_dir(self) -> Path:

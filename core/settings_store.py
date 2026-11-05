@@ -6,6 +6,7 @@
 - 社外用の exe（HAKOYA_EDITION=external）ではプランの接続（claude_code）を出さない（規約。SPEC §7-4）。
 - api_key を選ぶときは、費用の上限を見せて1回だけ確かめる（api_cost_ack）。
 - company：「読み込んで組み立てる」で使う会社ルール（rules/<会社>.yaml）。既定は jisha（★11/4 B工務店。SPEC §5）。
+  rules/jisha.yaml がない（公開の版）ときは、core.rules.default_company()（B工務店（架空））。
 """
 from __future__ import annotations
 
@@ -38,7 +39,8 @@ def load() -> dict:
     if data["auto_inspect"] not in available_connections():
         data["auto_inspect"] = DEFAULTS["auto_inspect"]
     if data["company"] not in {c["code"] for c in companies()}:
-        data["company"] = DEFAULTS["company"]          # 消した会社ルールが書いてあったら既定に戻す
+        from core.rules import default_company
+        data["company"] = default_company()            # 消した会社ルールが書いてあったら既定に戻す（jisha がなければ B工務店（架空））
     return data
 
 

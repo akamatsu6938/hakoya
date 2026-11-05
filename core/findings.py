@@ -61,8 +61,8 @@ def code_findings(alias: str) -> list[dict]:
                     "targets": [], "evidence": ["壁の作り直し（unresolved）"], "source": "code"})
     # 予防：会社ルールと比べて「いつもと違う」所（会社ルールの言語化。家ごとに変わる値は比べない）
     from core.rule_check import differences
-    from core.rules import load_rules
-    for d in differences(b, load_rules(b.get("source", {}).get("company_rules", "jisha"))):
+    from core.rules import default_company, load_rules
+    for d in differences(b, load_rules(b.get("source", {}).get("company_rules", default_company()))):
         out.append({"view": "plan", "kind": "rule", "severity": "中", "message": d["message"],
                     "targets": [], "evidence": [f"会社ルール {d['rule_key']}"], "source": "code"})
     try:

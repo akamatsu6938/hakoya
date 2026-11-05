@@ -19,6 +19,7 @@ def _keys(d: dict, prefix: str = "") -> set[str]:
     return out
 
 
+@pytest.mark.jisha
 def test_b_koumuten_has_every_item_of_jisha():
     """項目が足りないと、組み立ての途中でコードが止まる（会社ルールに ○○ がありません）。"""
     a = yaml.safe_load((RULES_DIR / "jisha.yaml").read_text(encoding="utf-8"))
@@ -45,6 +46,7 @@ def data_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.mark.jisha
 def test_company_setting(data_dir):
     from core import settings_store as ss
     assert {"code": "bkoumuten", "name": "B工務店（架空）"} in ss.companies()
@@ -58,6 +60,7 @@ def test_company_setting(data_dir):
     assert ss.load()["company"] == "jisha"                                       # 消した会社ルールなら既定に戻す
 
 
+@pytest.mark.jisha
 def test_company_screen(data_dir):
     from fastapi.testclient import TestClient
 

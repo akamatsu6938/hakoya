@@ -26,7 +26,7 @@ from adapters.walkinhome_types import part_type
 from core.paths import glb_working_copy, out_dir, property_files
 from core.ids import stabilize
 from core.privacy import assert_clean
-from core.rules import load_rules, rule
+from core.rules import default_company, load_rules, rule
 
 FLAT_TOL_MM = 1.0          # 水平な面とみなす高さの差
 STORY_GAP_MM = 1500.0      # 床の高さがこれ以上離れていたら別の階 (推定。2階建ては要検証)
@@ -588,7 +588,8 @@ def walls_to_json(walls: list[wl.Wall], level, level_of: dict[int, int] | None =
     return out, assumptions, ids
 
 
-def build(alias: str, company: str = "jisha", return_debug: bool = False):
+def build(alias: str, company: str | None = None, return_debug: bool = False):
+    company = default_company() if company is None else company     # 省くと既定の会社（jisha。なければ B工務店（架空））
     files = property_files(alias)
     model = read_glb(glb_working_copy(files))
     rules = load_rules(company)
@@ -932,7 +933,7 @@ def _print_summary(alias: str, b: dict) -> None:
         mark = "一致" if c["match"] else "★食い違い"
         print(f"    {c['item']}: glb {c['glb_mm']} / ルール {c['rule_mm']} → {mark}" + (f"（{c['note']}）" if c.get("note") else ""))
     from core.rule_check import check_property
-    rows = check_property(b, load_rules(b["source"].get("company_rules", "jisha")))
+    rows = check_property(b, load_rules(b["source"].get("company_rules", default_company())))
     print("  会社ルールと比べた結果（壁の厚み・ドアの上端なども。家ごとに変わる値は比べない）:")
     for r in rows:
         print(f"    {r['label']}: " + ("一致" if r["match"] else f"★{r['message']}"))
@@ -982,7 +983,7 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="Walk in home の glb から building.json を作る")
     ap.add_argument("alias", help="物件の仮名（data/local_paths.yaml の名前。例：物件A）")
-    ap.add_argument("--company", default="jisha", help="会社ルール（rules/<名前>.yaml）")
+    ap.add_argument("--company", default=default_company(), help="会社ルール（rules/<名前>.yaml）")
     ap.add_argument("--fresh-ids", action="store_true", help="前回の番号を引き継がず、振り直す")
     args = ap.parse_args(argv)
     building = build(args.alias, args.company)

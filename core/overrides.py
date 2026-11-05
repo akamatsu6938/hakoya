@@ -524,8 +524,8 @@ def _apply_one(b: dict, ov: dict) -> dict:
 
 
 def _company_rules(building: dict) -> dict:
-    from core.rules import load_rules           # 使うときだけ読む（会社ルールの読み込みは overrides に依存しない）
-    return load_rules((building.get("source") or {}).get("company_rules", "jisha"))
+    from core.rules import default_company, load_rules           # 使うときだけ読む（会社ルールの読み込みは overrides に依存しない）
+    return load_rules((building.get("source") or {}).get("company_rules", default_company()))
 
 
 def add(alias: str, building: dict, target: str, field: str, to, value_source: str, reason: str,

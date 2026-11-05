@@ -262,7 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     pairs = [p for p in pairs if p["sim"]["walls"][0] >= 0.5 * max(p["sim"]["walls"][1], 1)]   # 半分以上同じものだけ出す
     try:
         from core.rule_stats import collect
-        rules = collect("jisha")
+        from core.rules import default_company
+        rules = collect(default_company())
     except Exception as e:  # noqa: BLE001
         rules = [{"label": "会社ルールの集計", "agreement": f"できませんでした（{_safe_error(e)}）"}]
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")

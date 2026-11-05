@@ -26,6 +26,7 @@ import yaml
 from core.ai.tools import TOOL_SPECS, ToolContext, call_tool, propose_override, ToolError
 from core.findings import code_findings
 from core.paths import REPO_ROOT, out_dir
+from core.rules import default_company
 
 SERVER = "hakoya"
 FACES = {"S": "南の立面", "N": "北の立面", "E": "東の立面", "W": "西の立面", "plan": "平面（屋根を外して上から）",
@@ -171,7 +172,7 @@ def build_options(ctx: ToolContext, connection: str = "claude_code"):
                            "API キーで動かすときは api_key 接続を選んでください。")
     conf = load_ai_models()
     models, limits = conf[connection], conf["limits"]
-    company = ctx.raw["source"].get("company_rules", "jisha")
+    company = ctx.raw["source"].get("company_rules", default_company())
     work = prepare_workdir(ctx.alias, company)
     merge = models["inspect_merge"]
     return ClaudeAgentOptions(
