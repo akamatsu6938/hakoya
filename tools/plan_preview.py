@@ -268,7 +268,11 @@ def _split_svg(split: dict, P, x0: float, x1: float, y0: float, y1: float) -> li
         left = (float(t) - edges[i]) / MODEL_SCALE
         right = (edges[i + 2] - float(t)) / MODEL_SCALE
         names = (sides[i] if i < len(sides) else "", sides[i + 1] if i + 1 < len(sides) else "")
-        out.append(f'<text class="split-label" data-i="{i}" x="{float(pa[0]) + 6:.1f}" y="{float(pa[1]) - 6:.1f}" font-size="12" '
+        # 札は線の左の端（縦の線なら上の端）に置く（右には壁の一覧があり、文字が重なるため）
+        ends_svg = sorted([(float(pa[0]), float(pa[1])), (float(pb[0]), float(pb[1]))],
+                          key=lambda q: (round(q[0]), q[1]) if abs(float(pa[0]) - float(pb[0])) > 1 else (q[1], q[0]))
+        lx, ly = ends_svg[0]
+        out.append(f'<text class="split-label" data-i="{i}" x="{max(lx, 0.0) + 6:.1f}" y="{max(ly, 14.0) - 6:.1f}" font-size="12" '
                    f'fill="#e8743b">{src}｜{names[0]} {left:.0f}mm・{names[1]} {right:.0f}mm（模型）</text>')
     out.append("</g>")
     return out
