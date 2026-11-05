@@ -2103,6 +2103,6 @@ requestAnimationFrame(loop);
     const p = state.props.find((x) => x.alias === 'デモ用') || state.props[0];
     if (p) await openProperty(p.alias);
     else setStatus('見本の家がありません。仮名が「デモ用」か「見本」で始まる物件だけが出ます', 'err');
-  } else if (!state.props.length) setStatus('物件がまだありません。「ファイル」→「新しく読み込む」で glb を選んで読み込んでください（README の手順5のように local_paths.yaml に書いても登録できます）');
+  } else if (!state.props.length) setStatus('物件がまだありません。「ファイル」→「新しく読み込む」で glb を選んで読み込んでください');
   applyHash();
 })();

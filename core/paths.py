@@ -169,7 +169,7 @@ def detect_jww(folder: Path, with_pdf: bool = True) -> tuple[dict[str, Path], li
 
 def load_local_paths(path: Path = LOCAL_PATHS) -> dict:
     if not path.exists():
-        raise FileNotFoundError("data/local_paths.yaml がありません。README の手順5を見てください。")
+        raise FileNotFoundError("data/local_paths.yaml がありません。「ファイル」→「新しく読み込む」で物件を登録してください。")
     return parse_local_paths(path.read_text(encoding="utf-8"))
 
 

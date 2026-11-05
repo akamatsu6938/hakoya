@@ -26,7 +26,8 @@ hiddenimports = [
 # pdfplumber・pdfminer（PDF の日本語の文字の表 cmap を含む）・pypdfium2（pdfplumber が使う部品）：高性能読み込みの PDF の図面（11/4）
 for pkg in ("manifold3d", "shapely", "trimesh", "pygltflib", "anthropic", "keyring", "ezjww",
             "pdfplumber", "pdfminer", "pypdfium2", "pypdfium2_raw", "mcp", "mcp_types"):
-    d, b, h = collect_all(pkg)
+    # mcp.cli（mcp コマンド。typer が要り、ないと読み込みの途中で止まる）は使わないので入れない（★11/5）
+    d, b, h = collect_all(pkg, filter_submodules=lambda name: not name.startswith("mcp.cli"))
     datas += d
     binaries += b
     hiddenimports += h
