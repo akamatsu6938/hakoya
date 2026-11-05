@@ -629,6 +629,9 @@ function applyView(st) {
     b.hidden = !(st.views || []).includes(b.dataset.mode);         // 社外用の版では自社利用用を出さない
     b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
   });
+  if (!(st.views || []).includes('own')) {                          // 社外用の版：選べない「自社利用用」を説明に出さない
+    $('#set-view .hint').textContent = '上の帯の右で切り替えます。見本確認用＝審査・動画用（見本の家だけ・手順の帯）。他社利用用＝ふだんの使い方（AI は API キーと AI なしだけ）。';
+  }
   applyConnections(st.connections || []);
   $('#steps').hidden = st.view !== 'sample';
   const chip = $('#company-chip');

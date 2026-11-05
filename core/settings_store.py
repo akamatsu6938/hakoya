@@ -37,7 +37,7 @@ def settings_path():
 def _stored() -> dict:
     """ファイルに書いてある値（なければ既定）。見え方・版に合わせて直す前のもの。"""
     p = settings_path()
-    data = dict(DEFAULTS)
+    data = dict(DEFAULTS, view=default_view())        # 見え方の既定は、版と自社の会社ルールの有無で決まる（default_view）
     try:
         if p.exists():
             raw = json.loads(p.read_text(encoding="utf-8"))
@@ -86,9 +86,15 @@ def edition() -> str:
 def check_connection(connection: str) -> None:
     """この版・見え方で使えない接続なら、日本語の ValueError（社外用では Claude のプランの接続は使えない。SPEC §7-4）。"""
     if connection == "claude_code" and "claude_code" not in available_connections():
-        if edition() == "external":
-            raise ValueError("この版では Claude（自分のプラン）の接続は使えません。API キーか、AI なしを選んでください")
-        raise ValueError("いまの見え方（他社利用用）では Claude（自分のプラン）の接続は使えません。API キーか、AI なしを選んでください")
+        if _in_other_view():
+            raise ValueError("いまの見え方（他社利用用）では Claude（自分のプラン）の接続は使えません。API キーか、AI なしを選んでください")
+        raise ValueError("この版では Claude（自分のプラン）の接続は使えません。API キーか、AI なしを選んでください")
+
+
+def _in_other_view() -> bool:
+    """プランの接続が使えない理由が「見え方（他社利用用）」か。社外用の版や、接続の部品がないときは版の理由にする。"""
+    view = _stored()["view"]
+    return edition() != "external" and (view if view in available_views() else default_view()) == "other"
 
 
 def _connections(view: str) -> list[str]:
@@ -110,7 +116,11 @@ def available_views() -> list[str]:
 
 
 def default_view() -> str:
-    return "other" if edition() == "external" else "own"
+    """既定の見え方。社外用の版と、自社の会社ルール（rules/jisha.yaml）がない版（提出用の公開リポジトリ）は他社利用用。"""
+    from core.rules import DEFAULT_COMPANY, RULES_DIR
+    if edition() == "external" or not (RULES_DIR / f"{DEFAULT_COMPANY}.yaml").exists():
+        return "other"
+    return "own"
 
 
 def set_view(view: str) -> dict:
@@ -157,9 +167,9 @@ def set_auto_inspect(value: str, cost_ack: bool = False) -> dict:
     if value not in AUTO_CHOICES:
         raise ValueError("組み立てたあとの検品は claude_code・api_key・off・none のどれかです")
     if value not in available_connections():
-        if edition() == "external":
-            raise ValueError("この版では、その検品のしかたは選べません（社外用の版では Claude のプランの接続は使えません）")
-        raise ValueError("いまの見え方（他社利用用）では、その検品のしかたは選べません（Claude のプランの接続は使えません）")
+        if _in_other_view():
+            raise ValueError("いまの見え方（他社利用用）では、その検品のしかたは選べません（Claude のプランの接続は使えません）")
+        raise ValueError("この版では、その検品のしかたは選べません（社外用の版では Claude のプランの接続は使えません）")
     data = _stored()
     if value == "api_key" and not (cost_ack or data["api_cost_ack"]):
         raise ValueError("API キーで自動の検品をするには、費用の確認が要ります")

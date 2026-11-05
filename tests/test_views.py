@@ -37,7 +37,7 @@ def client(data_dir, monkeypatch):
 
 
 def test_view_is_saved_and_unknown_is_refused(data_dir):
-    assert ss.load()["view"] == "own"                                         # 既定は自社利用用（今までどおり）
+    assert ss.load()["view"] == ss.default_view()                             # 既定：自社利用用（自社の会社ルールがない版は他社利用用）
     assert ss.set_view("sample")["view"] == "sample"
     assert json.loads((data_dir / "settings.json").read_text(encoding="utf-8"))["view"] == "sample"
     with pytest.raises(ValueError, match="見え方"):
@@ -84,6 +84,17 @@ def test_external_edition_cannot_choose_own(data_dir, monkeypatch):
     assert ss.load()["view"] == "other"
     assert ss.set_view("sample")["view"] == "sample"
     assert "claude_code" not in ss.available_connections()
+
+
+def test_public_edition_without_own_rules_starts_in_other_view(data_dir, tmp_path, monkeypatch):
+    """提出用の公開リポジトリ（自社の会社ルール rules/jisha.yaml がない）は、他社利用用で始まる。自社利用用も選べる。"""
+    import core.rules
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    (rules / "bkoumuten.yaml").write_text((RULES_DIR / "bkoumuten.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(core.rules, "RULES_DIR", rules)
+    assert ss.default_view() == "other" and ss.load()["view"] == "other"
+    assert ss.set_view("own")["view"] == "own"                                # 選べば自社利用用にもできる
 
 
 def test_sample_aliases():
