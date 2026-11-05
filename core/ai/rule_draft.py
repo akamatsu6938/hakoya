@@ -217,7 +217,7 @@ RULE_TOOL_SPECS = {
                        "schema": {"type": "object", "properties": {"ids": _S}, "additionalProperties": False}},
     "get_company_rules": {"fn": get_company_rules, "description": "いまの会社ルール（学べる項目の値・yaml の文・会社の Skill の文・学んだルール・却下した案）。",
                           "schema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    "get_answers": {"fn": get_answers, "description": "人（作者）の答え。id を answer_ids に引ける。",
+    "get_answers": {"fn": get_answers, "description": "人の答え。id を answer_ids に引ける。",
                     "schema": {"type": "object", "properties": {}, "additionalProperties": False}},
     "get_property": {"fn": get_property, "description": "1つの物件の要約（階・壁と開口の数・屋根・glb の例外・会社ルールと比べた結果）。",
                      "schema": {"type": "object", "properties": {"alias": {"type": "string"}}, "required": ["alias"],

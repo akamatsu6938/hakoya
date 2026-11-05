@@ -1,6 +1,6 @@
 """社外の会社の Claude Code から HAKOYA を動かす道具（MCP の中身）。入り口は app/mcp_server.py。
 
-- 他社利用用の HAKOYA を使う会社の人が、自分の Claude Code（自分の Claude のプラン）をつなぐ。
+- 他社用の HAKOYA を使う会社の人が、自分の Claude Code（自分の Claude のプラン）をつなぐ。
   **HAKOYA は Claude を呼ばない。道具を渡すだけ**（Claude Code は、その会社の人の認証とプランで動く。SPEC §7-4）。
 - 調べる道具は、アプリの Claude と同じ道具（core/ai/tools.py の TOOL_SPECS・call_tool）を包む。呼ぶたびに家を読み直す。
 - 守ること：
@@ -371,7 +371,7 @@ def _rebuild_or_undo(alias: str, override_id: str | None) -> dict:
 
 
 def hakoya_port() -> int:
-    """HAKOYA の画面の口の番号：HAKOYA_PORT → 見え方（HAKOYA_MODE：own・other・sample）→ 他社利用用の口。"""
+    """HAKOYA の画面の口の番号：HAKOYA_PORT → 起動のモード（HAKOYA_MODE：own・other・sample）→ 他社用の口。"""
     v = os.environ.get("HAKOYA_PORT", "").strip()
     if v.isdigit() and 0 < int(v) < 65536:
         return int(v)

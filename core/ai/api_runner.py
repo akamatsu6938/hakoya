@@ -87,7 +87,7 @@ def japanese_error(e: BaseException) -> str:
         return str(e)
     import anthropic
     if isinstance(e, anthropic.AuthenticationError):
-        return "API キーが正しくありません。「設定」タブで入れ直してください。"
+        return "API キーが正しくありません。「ファイル」→「環境設定」で入れ直してください。"
     if isinstance(e, anthropic.PermissionDeniedError):
         return "この API キーでは、決めたモデルを使えません。キーの権限を確かめてください。"
     if isinstance(e, anthropic.RateLimitError):
@@ -104,7 +104,7 @@ def make_client():
     from core.secret_store import get_api_key
     key = get_api_key()
     if not key:
-        raise RuntimeError("API キーが設定されていません。「設定」タブで API キーを入れてください。")
+        raise RuntimeError("API キーが設定されていません。「ファイル」→「環境設定」で API キーを入れてください。")
     import anthropic
     return anthropic.AsyncAnthropic(api_key=key)
 

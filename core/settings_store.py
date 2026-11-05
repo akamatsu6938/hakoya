@@ -141,10 +141,11 @@ def set_last_alias(alias: str, known: list[str] | None = None) -> dict:
 
 
 def companies() -> list[dict]:
-    """選べる会社ルール：rules/ の yaml のうち会社の決まりのもの（AI の設定 ai_models.yaml は除く）。[{"code", "name"}]"""
-    from core.rules import RULES_DIR
+    """選べる会社ルール：rules/ の yaml のうち会社の決まりのもの（AI の設定 ai_models.yaml は除く）。[{"code", "name"}]
+    自社の会社ルール（DEFAULT_COMPANY）がいちばん上、ほかは名前順（★11/5 呼び名を jisha に変えても、並びを前と同じにする）。"""
+    from core.rules import DEFAULT_COMPANY, RULES_DIR
     out = []
-    for p in sorted(RULES_DIR.glob("*.yaml")):
+    for p in sorted(RULES_DIR.glob("*.yaml"), key=lambda q: (q.stem != DEFAULT_COMPANY, q.stem)):
         try:
             data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError):

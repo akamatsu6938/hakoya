@@ -535,7 +535,7 @@ def start_inspection(alias: str, connection: str = "claude_code"):
         raise HTTPException(400, "connection は claude_code・api_key・off のどれかです")
     _check_edition(connection)
     if connection == "api_key" and not secret_store.has_api_key():
-        raise HTTPException(409, "API キーが設定されていません。「設定」タブで API キーを入れてください")
+        raise HTTPException(409, "API キーが設定されていません。「ファイル」→「環境設定」で API キーを入れてください")
     with RUNS_LOCK:
         if RUNS.get(alias, {}).get("running"):
             raise HTTPException(409, "この物件はいま検品中です")
@@ -655,7 +655,7 @@ def lasso_ask(alias: str, body: LassoIn):
         raise HTTPException(400, "connection は claude_code・api_key・off のどれかです")
     _check_edition(body.connection)
     if body.connection == "api_key" and not secret_store.has_api_key():
-        raise HTTPException(409, "API キーが設定されていません。「設定」タブで API キーを入れてください")
+        raise HTTPException(409, "API キーが設定されていません。「ファイル」→「環境設定」で API キーを入れてください")
     if RUNS.get(alias, {}).get("running"):
         raise HTTPException(409, "この物件はいま検品中です。検品が終わってから頼んでください")
     from core.ai.lasso import run_lasso
@@ -732,7 +732,7 @@ def rule_draft(company: str, body: RuleDraftIn):
         raise HTTPException(400, "connection は claude_code・api_key・off のどれかです")
     _check_edition(body.connection)
     if body.connection == "api_key" and not secret_store.has_api_key():
-        raise HTTPException(409, "API キーが設定されていません。「設定」タブで API キーを入れてください")
+        raise HTTPException(409, "API キーが設定されていません。「ファイル」→「環境設定」で API キーを入れてください")
     if not RULE_DRAFTING.acquire(blocking=False):
         raise HTTPException(409, "いま会社ルールの案を作っています。終わってからもう一度押してください")
     try:
