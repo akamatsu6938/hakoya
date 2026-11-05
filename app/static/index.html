@@ -9,20 +9,86 @@
 {"imports": {"three": "/static/vendor/three/three.module.js", "three/addons/": "/static/vendor/three/addons/"}}
 </script>
 </head>
-<body>
-<header>
-  <div class="brand">HAKOYA <span>箱家</span></div>
-  <label>物件 <select id="alias"></select></label>
-  <button id="build" class="primary">読み込んで組み立てる</button>
-  <div id="status" class="status">物件を選んでください</div>
-  <button id="company-chip" class="chip" hidden title="会社ルールを選ぶ（設定タブ）"></button>
-  <span class="hlabel" aria-hidden="true">見え方</span>
-  <div id="views" class="seg" role="radiogroup" aria-label="見え方">
-    <button role="radio" aria-checked="false" data-mode="sample" title="審査・動画用：見本の家だけを出し、手順の帯を出します">見本確認用</button>
-    <button role="radio" aria-checked="false" data-mode="own" title="自分の会社で使う：全部の機能を出します">自社利用用</button>
-    <button role="radio" aria-checked="false" data-mode="other" title="ほかの会社で使う：AI は API キーと AI なしだけ。会社ルールを選びます">他社利用用</button>
+<body data-ws="model" data-mode="own" data-pane="3d" data-open="0">
+<!-- 線のアイコン（16 角・外から読み込まない） -->
+<svg class="icon-sprite" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-new" viewBox="0 0 16 16"><path d="M4 1.75h5l3 3v9.5H4z"/><path d="M9 1.75v3h3"/><path d="M8 7.25v4.5M5.75 9.5h4.5"/></symbol>
+    <symbol id="i-open" viewBox="0 0 16 16"><path d="M1.75 12.75V3.5c0-.4.3-.75.75-.75h3.5l1.5 1.75h5.25c.4 0 .75.35.75.75v1.5"/><path d="M1.75 12.75 3.6 7.6c.1-.3.4-.5.7-.5h9.2c.5 0 .85.5.7.95l-1.6 4.7H1.75z"/></symbol>
+    <symbol id="i-save" viewBox="0 0 16 16"><path d="M2.75 2.75h8.5l2 2v8.5H2.75z"/><path d="M5 2.75v3.5h5v-3.5"/><path d="M5 13.25V9.5h6v3.75"/></symbol>
+    <symbol id="i-print" viewBox="0 0 16 16"><path d="M5.75 1.75h4.5v3.5L9 6.75H7L5.75 5.25z"/><path d="M8 6.75v2"/><path d="M5.5 10.75h5"/><path d="M2 13.25h12"/></symbol>
+    <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+    <symbol id="i-prefs" viewBox="0 0 16 16"><path d="M2.5 4.5h6.25M12.75 4.5h.75M2.5 11.5h.75M7.25 11.5h6.25"/><circle cx="10.75" cy="4.5" r="1.75"/><circle cx="5.25" cy="11.5" r="1.75"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+    <symbol id="i-down" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 16 16"><path d="M1.5 8S3.9 3.5 8 3.5 14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 16 16"><path d="M6.2 3.75A6.6 6.6 0 0 1 8 3.5C12.1 3.5 14.5 8 14.5 8a12 12 0 0 1-1.9 2.5M10 11.9a6 6 0 0 1-2 .6C3.9 12.5 1.5 8 1.5 8a12 12 0 0 1 2.4-3"/><path d="M2.5 2.5l11 11"/></symbol>
+    <symbol id="i-rebuild" viewBox="0 0 16 16"><path d="M13.25 8A5.25 5.25 0 1 1 11.7 4.3"/><path d="M13 2.25v3h-3"/></symbol>
+    <symbol id="i-iso" viewBox="0 0 16 16"><path d="M8 1.75l5.5 3v6.5L8 14.25l-5.5-3v-6.5z"/><path d="M2.5 4.75 8 7.75l5.5-3M8 7.75v6.5"/></symbol>
+    <symbol id="i-front" viewBox="0 0 16 16"><path d="M1.75 13.5h12.5"/><path d="M3.25 13.5V7.25L8 3.25l4.75 4v6.25"/><path d="M6.75 13.5v-3.25h2.5v3.25"/></symbol>
+    <symbol id="i-side" viewBox="0 0 16 16"><path d="M1.75 13.5h12.5"/><path d="M3.25 13.5V6.75L12.75 4v9.5"/><path d="M5.5 9h2.25v2H5.5z"/></symbol>
+    <symbol id="i-top" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx=".5"/><path d="M2.5 8.5h6M8.5 2.5v11"/></symbol>
+    <symbol id="i-explode" viewBox="0 0 16 16"><path d="M2.5 4.25 8 1.75l5.5 2.5L8 6.75z"/><path d="M2.5 11.25 8 8.75l5.5 2.5L8 13.75z"/><path d="M8 6.75v.75M8 8v.4" stroke-dasharray="1 1"/></symbol>
+    <symbol id="i-lasso" viewBox="0 0 16 16"><path d="M5.2 10.1C3.2 9.5 2 8.3 2 6.9 2 4.7 4.7 3 8 3s6 1.7 6 3.9-2.7 3.9-6 3.9c-.6 0-1.2 0-1.7-.1" stroke-dasharray="2.2 1.4"/><path d="M5.3 10c-.9.7-1.1 1.9-.3 2.7.5.5 1.3.6 2 .3"/></symbol>
+    <symbol id="i-table" viewBox="0 0 16 16"><rect x="2.25" y="3" width="11.5" height="10" rx=".5"/><path d="M2.25 6.25h11.5M2.25 9.6h11.5M6.25 6.25V13"/></symbol>
+    <symbol id="i-history" viewBox="0 0 16 16"><path d="M2.75 8A5.25 5.25 0 1 0 4.3 4.3"/><path d="M2.5 2.25v2.5H5"/><path d="M8 5.25V8l1.9 1.4"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 16 16"><path d="M5.5 4.25 2.75 7 5.5 9.75"/><path d="M2.75 7H10a3.25 3.25 0 0 1 0 6.5H7"/></symbol>
+    <symbol id="i-inspect" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 13.75 13.75"/><path d="M5.1 7.1l1.3 1.3 2.5-2.6"/></symbol>
+    <symbol id="i-key" viewBox="0 0 16 16"><circle cx="5.25" cy="10.75" r="2.75"/><path d="M7.2 8.8 13 3M11.1 4.9l1.6 1.6M9.4 6.6l1.3 1.3"/></symbol>
+    <symbol id="i-checks" viewBox="0 0 16 16"><path d="M2.25 4.5l1.25 1.25L5.75 3.5M2.25 10.5l1.25 1.25 2.25-2.25"/><path d="M8 4.75h5.75M8 10.75h5.75"/></symbol>
+    <symbol id="i-download" viewBox="0 0 16 16"><path d="M8 2.5V10M4.75 6.75 8 10l3.25-3.25M2.75 11v2.25h10.5V11"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 16 16"><path d="M2.75 8A5.25 5.25 0 1 0 4.3 4.3"/><path d="M3 2.25v3h3"/></symbol>
+    <symbol id="i-target" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4.25"/><circle cx="8" cy="8" r=".9"/><path d="M8 1.5v2.25M8 12.25v2.25M1.5 8h2.25M12.25 8h2.25"/></symbol>
+    <symbol id="i-image" viewBox="0 0 16 16"><rect x="2.25" y="3" width="11.5" height="10" rx="1"/><path d="M2.5 11.25 6 7.75l3 3 1.5-1.5 3 3"/><circle cx="10.5" cy="6.1" r="1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.25"/><path d="M10.25 10.25 13.5 13.5"/></symbol>
+    <symbol id="i-wall" viewBox="0 0 16 16"><path d="M2.25 4h11.5v8H2.25zM2.25 8h11.5M6 4v4M10 8v4"/></symbol>
+    <symbol id="i-opening" viewBox="0 0 16 16"><rect x="3.25" y="2.25" width="9.5" height="11.5" rx=".5"/><path d="M8 2.25v11.5M3.25 8h9.5"/></symbol>
+    <symbol id="i-roof" viewBox="0 0 16 16"><path d="M1.5 9 8 3.25 14.5 9"/><path d="M3.75 7.25v5.5h8.5v-5.5"/></symbol>
+    <symbol id="i-parts" viewBox="0 0 16 16"><path d="M2.5 5.25 8 2.5l5.5 2.75L8 8z"/><path d="M2.5 8 8 10.75 13.5 8M2.5 10.75 8 13.5l5.5-2.75"/></symbol>
+    <symbol id="i-split" viewBox="0 0 16 16"><path d="M8 1.75v12.5" stroke-dasharray="2 1.5"/><path d="M5.5 5.5 3 8l2.5 2.5M10.5 5.5 13 8l-2.5 2.5"/></symbol>
+    <symbol id="i-help" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.4 6.3A1.7 1.7 0 0 1 9.7 6.8c0 1.2-1.7 1.4-1.7 2.6M8 11.3v.1"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 2.25 14.25 13H1.75z"/><path d="M8 6.5v3.25M8 11.3v.1"/></symbol>
+    <symbol id="i-ok" viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></symbol>
+    <symbol id="i-house" viewBox="0 0 16 16"><path d="M2 7.5 8 2.25l6 5.25"/><path d="M3.5 6.25v7.5h9v-7.5"/></symbol>
+  </defs>
+</svg>
+
+<!-- ======== 上の帯：ファイル・作業のタブ・モード ======== -->
+<header class="menubar">
+  <div class="brand" title="HAKOYA（箱家）"><span class="mark" aria-hidden="true"></span><span>HAKOYA</span></div>
+  <div class="menu" id="file-menu">
+    <button id="file-btn" class="menu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="file-pop">ファイル<svg class="ic ic-s"><use href="#i-down"/></svg></button>
+    <div id="file-pop" class="menu-pop" role="menu" hidden>
+      <button role="menuitem" data-cmd="new" id="cmd-new"><svg class="ic"><use href="#i-new"/></svg><span>新しく読み込む…</span><kbd></kbd></button>
+      <button role="menuitem" data-cmd="open"><svg class="ic"><use href="#i-open"/></svg><span>過去の物件を開く…</span><kbd>Ctrl+O</kbd></button>
+      <div class="menu-group" id="recent-group">
+        <div class="menu-label">最近の物件</div>
+        <div id="recent-list"></div>
+      </div>
+      <hr>
+      <button role="menuitem" data-cmd="save" data-need="alias"><svg class="ic"><use href="#i-save"/></svg><span>保存</span><kbd>Ctrl+S</kbd></button>
+      <button role="menuitem" data-cmd="print" data-need="alias"><svg class="ic"><use href="#i-print"/></svg><span>印刷…</span><kbd>Ctrl+P</kbd></button>
+      <button role="menuitem" data-cmd="close" data-need="alias"><svg class="ic"><use href="#i-close"/></svg><span>閉じる</span><kbd></kbd></button>
+      <hr>
+      <button role="menuitem" data-cmd="prefs"><svg class="ic"><use href="#i-prefs"/></svg><span>環境設定…</span><kbd>Ctrl+,</kbd></button>
+    </div>
+  </div>
+  <nav class="ws-tabs" role="tablist" aria-label="作業">
+    <button role="tab" data-ws="model" aria-selected="true" class="on">模型</button>
+    <button role="tab" data-ws="fix" aria-selected="false">修正<span class="count" hidden></span></button>
+    <button role="tab" data-ws="inspect" aria-selected="false">検品<span class="count" hidden></span></button>
+    <button role="tab" data-ws="print" aria-selected="false">印刷<span class="count" hidden></span></button>
+    <button role="tab" data-ws="rules" aria-selected="false" class="own-only">会社ルール</button>
+  </nav>
+  <div class="menubar-end">
+    <button id="company-chip" class="chip" hidden title="会社ルールを選ぶ（環境設定）"></button>
+    <span id="mode-badge" class="mode-badge"></span>
+    <span id="doc-name" class="doc-name" title="開いている物件"></span>
   </div>
 </header>
+
+<!-- 手順の帯（見本用だけ） -->
 <nav id="steps" class="steps" aria-label="手順" hidden>
   <button data-step="1"><span class="n">1</span>組み立てる</button>
   <button data-step="2"><span class="n">2</span>検品する</button>
@@ -30,201 +96,299 @@
   <button data-step="4"><span class="n">4</span>書き出す</button>
   <span id="step-hint" class="step-hint"></span>
 </nav>
-<main>
-  <section class="viewer">
-    <nav class="tabs" data-group="view">
-      <button data-tab="v3d" class="on">3D</button>
-      <button data-tab="vplan">平面図</button>
-    </nav>
-    <div id="v3d" class="pane on">
-      <div class="toolbar">
-        <span class="label">表示：</span>
-        <span id="part-toggles"><label><input type="checkbox" data-part="foundation" checked>基礎</label>
-        <label><input type="checkbox" data-part="floor1" checked>1階（床・内壁）</label>
-        <label><input type="checkbox" data-part="exterior1" checked>外壁</label>
-        <label><input type="checkbox" data-part="roof roof_ext" checked>屋根（天井より上の壁・ポーチの天井を含む）</label></span>
-        <span class="sep"></span>
-        <button data-view="iso">斜め</button>
-        <button data-view="front">正面（南）</button>
-        <button data-view="side">横（西）</button>
-        <button data-view="top">上</button>
-        <button data-view="explode" id="explode">パーツを離す</button>
-        <button id="lasso3d-toggle">囲む</button>
+
+<!-- ======== 道具の帯（タブごと） ======== -->
+<div class="toolstrip">
+  <div class="strip" data-ws="model" role="toolbar" aria-label="模型の道具">
+    <button id="build" class="tb tb-main" data-need="alias" title="glb を読み直して、模型を組み立て直します（人の直しは、そのまま当て直します）"><svg class="ic"><use href="#i-rebuild"/></svg><span id="build-label">読み込み直す</span></button>
+    <span class="tsep"></span>
+    <span class="tlabel">視点</span>
+    <button class="tb" data-view="iso" title="斜めから見る"><svg class="ic"><use href="#i-iso"/></svg><span>斜め</span></button>
+    <button class="tb" data-view="front" title="南から見る"><svg class="ic"><use href="#i-front"/></svg><span>正面（南）</span></button>
+    <button class="tb" data-view="side" title="西から見る"><svg class="ic"><use href="#i-side"/></svg><span>横（西）</span></button>
+    <button class="tb" data-view="top" title="上から見る"><svg class="ic"><use href="#i-top"/></svg><span>上</span></button>
+    <span class="tsep"></span>
+    <button class="tb" data-view="explode" id="explode" aria-pressed="false" title="基礎・1階・屋根を離して、中の壁を見せます"><svg class="ic"><use href="#i-explode"/></svg><span>パーツを離す</span></button>
+    <span class="thint">部品の表示は左の一覧の目のボタン</span>
+  </div>
+  <div class="strip" data-ws="fix" role="toolbar" aria-label="修正の道具" hidden>
+    <button class="tb" id="fix-table" title="窓・ドア、壁、階、屋根の値を表で直します"><svg class="ic"><use href="#i-table"/></svg><span>表で直す</span></button>
+    <button class="tb" id="lasso-btn" aria-pressed="false" title="いま出ている図（3D か平面図）で、直したい部材をぐるっと囲みます"><svg class="ic"><use href="#i-lasso"/></svg><span id="lasso-btn-label">囲んで直す</span></button>
+    <span class="tsep"></span>
+    <button class="tb" id="fix-history" title="直しの記録（新しいものが上）"><svg class="ic"><use href="#i-history"/></svg><span>直しの履歴</span></button>
+    <button class="tb" id="undo-last" disabled title="いちばん新しい直しを取り消して、模型を組み直します"><svg class="ic"><use href="#i-undo"/></svg><span>取り消す</span></button>
+    <span class="thint" id="fix-hint">左の一覧で部材を選ぶと、右の欄で直せます</span>
+  </div>
+  <div class="strip" data-ws="inspect" role="toolbar" aria-label="検品の道具" hidden>
+    <button id="inspect-ai" class="tb tb-main" data-need="alias" title="Claude が6つの面を同時に見比べます（5分ほど・自分のプランの利用枠を使います）"><svg class="ic"><use href="#i-inspect"/></svg><span>Claude に検品してもらう</span></button>
+    <button id="inspect-api" class="tb" data-need="alias" title="API キーで Claude に検品してもらいます（キーの持ち主に料金がかかります）"><svg class="ic"><use href="#i-key"/></svg><span>API キーで検品する</span></button>
+    <button id="inspect-off" class="tb" data-need="alias" title="AI を使わず、コードの検査だけをします（無料）"><svg class="ic"><use href="#i-checks"/></svg><span>コードの検査だけ（AI なし）</span></button>
+    <span class="tsep"></span>
+    <span class="thint" id="inspect-hint">指摘の見出しを押すと、模型のその場所が光ります</span>
+  </div>
+  <div class="strip" data-ws="print" role="toolbar" aria-label="印刷の道具" hidden>
+    <a id="dl-main" class="tb tb-main" href="#" download aria-disabled="true"><svg class="ic"><use href="#i-download"/></svg><span id="dl-main-label">3MF を保存（Bambu Studio 形式）</span></a>
+    <span class="tsep"></span>
+    <button class="tb" id="split-reset" hidden title="人が動かした分け目をやめて、自動の分け目で書き出し直します"><svg class="ic"><use href="#i-reset"/></svg><span>分け目を自動に戻す</span></button>
+    <span class="thint split-hint" id="split-hint" hidden>平面図のオレンジの点線は本体の分け目です。つかんで動かせます</span>
+  </div>
+  <div class="strip" data-ws="rules" role="toolbar" aria-label="会社ルールの道具" hidden>
+    <select id="rules-conn" title="案を書く AI のつなぎ方">
+      <option value="claude_code">Claude（自分のプラン）</option>
+      <option value="api_key">Claude（API キー）</option>
+      <option value="off">AI なし（コードの候補だけ）</option>
+    </select>
+    <input id="rules-text" type="text" placeholder="一言（なくてもよい。例：壁の決まりを中心に）">
+    <button id="rules-draft" class="tb tb-main"><svg class="ic"><use href="#i-inspect"/></svg><span>案を書いてもらう</span></button>
+  </div>
+</div>
+
+<!-- ======== 作業の場所：左の一覧・真ん中の 3D／平面図・右の欄 ======== -->
+<main class="workspace">
+  <aside class="outliner" aria-label="部品と部材">
+    <div class="pane-title">
+      <span>部品と部材</span>
+      <label class="tree-find" title="番号か種類で探す"><svg class="ic ic-s"><use href="#i-search"/></svg><input id="tree-filter" type="search" placeholder="W12・窓 など" spellcheck="false" autocomplete="off"></label>
+    </div>
+    <div id="tree" class="tree" role="tree" aria-label="部品と部材"></div>
+  </aside>
+
+  <section class="viewport" id="viewport">
+    <div class="vp-bar">
+      <div class="seg" id="pane-switch" role="tablist" aria-label="表示">
+        <button role="tab" data-pane="3d" class="on" aria-selected="true">3D</button>
+        <button role="tab" data-pane="plan" aria-selected="false">平面図</button>
       </div>
+      <select id="plan-level" hidden title="平面図の階">
+        <option value="1F">1階</option>
+        <option value="2F">2階</option>
+      </select>
+      <label class="vp-check plan-only" title="位置を合わせた図面（jww）の線を重ねます"><input type="checkbox" id="plan-drawing">図面を重ねる</label>
+    </div>
+    <div id="lasso-chip" class="lasso-chip" hidden><span id="lasso-chip-text">直したい部材をぐるっと囲んでください</span><button id="lasso-cancel" type="button">やめる</button></div>
+    <div id="v3d" class="vpane on">
       <div id="canvas"><svg id="lasso3d-overlay"></svg></div>
+      <svg id="gizmo" class="gizmo" viewBox="-50 -50 100 100" role="group" aria-label="向き（押すとその向きから見る）"></svg>
+      <div id="scalebar" class="scalebar" aria-hidden="true"></div>
     </div>
-    <div id="vplan" class="pane">
-      <div class="toolbar">
-        <select id="plan-level" hidden>
-          <option value="1F">1階</option>
-          <option value="2F">2階</option>
-        </select>
-        <button id="lasso-toggle">囲む</button>
-        <label><input type="checkbox" id="plan-drawing">図面を重ねる</label>
-        <span class="label" id="lasso-hint">「囲む」を押してから、平面図の上で直したい壁や窓をぐるっと囲んでください。</span>
-        <span class="sep"></span>
-        <span class="label split-hint" id="split-hint" hidden>オレンジの点線は本体の分け目です。つかんで動かせます</span>
-        <button id="split-reset" hidden>分け目を自動に戻す</button>
+    <div id="vplan" class="vpane"><div id="plan" class="plan"></div></div>
+    <div id="empty" class="empty" hidden>
+      <div class="empty-card">
+        <p class="empty-lead" id="empty-lead">ファイル → 新しく読み込む／過去の物件を開く</p>
+        <div class="empty-acts" id="empty-acts">
+          <button id="empty-new" class="tb-main tb"><svg class="ic"><use href="#i-new"/></svg><span>新しく読み込む…</span></button>
+          <button id="empty-open" class="tb"><svg class="ic"><use href="#i-open"/></svg><span>過去の物件を開く…</span></button>
+          <button id="empty-build" class="tb-main tb" hidden><svg class="ic"><use href="#i-rebuild"/></svg><span>読み込んで組み立てる</span></button>
+        </div>
+        <div class="empty-recent" id="empty-recent" hidden><div class="menu-label">最近の物件</div><div id="empty-recent-list"></div></div>
       </div>
-      <div id="plan" class="plan">まだ組み立てていません</div>
-    </div>
-    <!-- 囲んで直すの欄：平面図と 3D の両方で使う -->
-    <div id="lasso-panel" class="lasso-panel" hidden>
-      <div id="lasso-picked" class="picked"></div>
-      <textarea id="lasso-text" rows="2" placeholder="一言（例：この壁厚だけおかしい。ほかとそろえて／図面だと軒がもう少し出ている）"></textarea>
-      <div class="lasso-actions">
-        <select id="lasso-conn">
-          <option value="claude_code">Claude（自分のプラン）</option>
-          <option value="api_key">Claude（API キー）</option>
-        </select>
-        <button id="lasso-ask" class="primary">Claude に頼む</button>
-        <button id="lasso-table">表で直す（AI なし）</button>
-        <button id="lasso-clear" class="quiet">囲みを消す</button>
-      </div>
-      <div id="lasso-result"></div>
     </div>
   </section>
-  <aside class="side">
-    <nav class="tabs rail" data-group="side" role="tablist" aria-orientation="vertical" aria-label="作業の欄">
-      <button data-tab="sinsp" role="tab" aria-selected="false"><span class="t">検品</span><span class="count" hidden></span></button>
-      <button data-tab="sedit" role="tab" aria-selected="true" class="on"><span class="t">表で<wbr>直す</span></button>
-      <button data-tab="shist" role="tab" aria-selected="false"><span class="t">修正の<wbr>履歴</span><span class="count" hidden></span></button>
-      <button data-tab="schk" role="tab" aria-selected="false"><span class="t">検査</span><span class="count" hidden></span></button>
-      <button data-tab="sout" role="tab" aria-selected="false"><span class="t">書き<wbr>出し</span></button>
-      <button data-tab="srules" role="tab" aria-selected="false" class="cfg-first"><span class="t">会社<wbr>ルール</span></button>
-      <button data-tab="sset" role="tab" aria-selected="false"><span class="t">設定</span></button>
-    </nav>
-    <div id="sinsp" class="pane" role="tabpanel">
-      <div class="pane-head">
-        <h2>検品</h2>
-        <p class="lead">Claude が東・西・南・北・平面・印刷の6つの面を同時に見比べ、食い違いを根拠つきで挙げます。直す案は「承認」すると修正として記録され、模型が組み直されます。</p>
-      </div>
-      <div class="inspect-actions">
-        <button id="inspect-ai" class="primary">Claude に検品してもらう</button>
-        <button id="inspect-api">API キーで検品する</button>
-        <button id="inspect-off" class="quiet">コードの検査だけ（AI なし）</button>
-      </div>
-      <div id="inspect-progress" class="progress"></div>
-      <p id="inspect-summary" class="hint"></p>
-      <h3>Claude の指摘</h3>
-      <ul id="findings" class="list"></ul>
-      <h3>Claude からの質問</h3>
-      <ul id="questions" class="list"></ul>
-      <h3>コードの検査の結果</h3>
-      <ul id="code-findings" class="list"></ul>
+
+  <aside class="inspector" aria-label="性質とタブの欄">
+    <!-- 選んだ部材（左の一覧・指摘の見出しで選ぶ）。修正タブでは直せる -->
+    <section id="sel-panel" class="sel" hidden aria-label="選んだ部材"></section>
+
+    <!-- 模型 -->
+    <div class="ws-panel" data-ws="model">
+      <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>模型</summary>
+        <div class="sec-body" id="model-info"><p class="muted">物件を開くと、模型の大きさと部品が出ます。</p></div>
+      </details>
     </div>
-    <div id="sedit" class="pane on" role="tabpanel">
-      <div class="pane-head">
-        <h2>表で直す</h2>
-        <p class="lead">値を変えて理由を書き、「承認」を押すと修正として記録され、模型が組み直されます。数値は mm（実寸）です。</p>
-      </div>
-      <h3>階</h3>
-      <p class="hint">床の高さや階高を変えると、その階より上のもの（壁・窓・部屋・屋根）が同じだけ上下します。基礎はそのままです。</p>
-      <table id="levels"></table>
-      <h3>窓・ドア</h3>
-      <table id="openings"></table>
-      <h3>壁</h3>
-      <table id="walls"></table>
-      <h3>屋根</h3>
-      <p class="hint">軒の出は、外壁の外の面から屋根の先までの長さです（板金・樋は含めません）。模型では、どの辺にも板金の分 1mm を外に足します。<br>
-      勾配は軒先（屋根の上の面のいちばん低い所）を動かさずに変わります。軒先の高さを変えると屋根全体が上下します。低い側は片流れの屋根だけ変えられます。屋根まで届いていた壁は一緒に動きます。軒天の高さ（GL から）は、glb に軒天がある屋根だけ出ます。</p>
-      <table id="roofs"></table>
-      <h3>軒の出（mm）</h3>
-      <table id="roof-eaves"></table>
+
+    <!-- 修正：囲んで直す・表で直す・直しの履歴 -->
+    <div class="ws-panel" data-ws="fix" hidden>
+      <details class="sec" id="sec-lasso" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>囲んで直す</summary>
+        <div class="sec-body">
+          <div id="lasso-panel" class="lasso-panel" hidden>
+            <div id="lasso-picked" class="picked"></div>
+            <textarea id="lasso-text" rows="2" placeholder="一言（例：この壁厚だけおかしい。ほかとそろえて／図面だと軒がもう少し出ている）"></textarea>
+            <div class="lasso-actions">
+              <select id="lasso-conn">
+                <option value="claude_code">Claude（自分のプラン）</option>
+                <option value="api_key">Claude（API キー）</option>
+              </select>
+              <button id="lasso-ask" class="primary">Claude に頼む</button>
+              <button id="lasso-table">表で直す（AI なし）</button>
+              <button id="lasso-clear" class="quiet">囲みを消す</button>
+            </div>
+            <div id="lasso-result"></div>
+          </div>
+          <p class="muted" id="lasso-idle">道具の帯の「囲んで直す」を押してから、3D か平面図で直したい部材をぐるっと囲んでください。</p>
+        </div>
+      </details>
+      <details class="sec" id="sec-tables" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>表で直す<span class="sec-note">数値は mm（実寸）</span></summary>
+        <div class="sec-body tables">
+          <p class="fine">値を変えて理由を書き、「承認」を押すと修正として記録され、模型が組み直されます。</p>
+          <details class="sub" open><summary>階<span class="help" tabindex="0" title="床の高さや階高を変えると、その階より上のもの（壁・窓・部屋・屋根）が同じだけ上下します。基礎はそのままです。"><svg class="ic ic-s"><use href="#i-help"/></svg></span></summary>
+            <div class="tscroll"><table id="levels"></table></div></details>
+          <details class="sub" open><summary>窓・ドア</summary><div class="tscroll"><table id="openings"></table></div></details>
+          <details class="sub" open><summary>壁</summary><div class="tscroll"><table id="walls"></table></div></details>
+          <details class="sub" open><summary>屋根<span class="help" tabindex="0" title="軒の出は、外壁の外の面から屋根の先までの長さです（板金・樋は含めません）。模型では、どの辺にも板金の分 1mm を外に足します。&#10;勾配は軒先（屋根の上の面のいちばん低い所）を動かさずに変わります。軒先の高さを変えると屋根全体が上下します。低い側は片流れの屋根だけ変えられます。屋根まで届いていた壁は一緒に動きます。軒天の高さ（GL から）は、glb に軒天がある屋根だけ出ます。"><svg class="ic ic-s"><use href="#i-help"/></svg></span></summary>
+            <div class="tscroll"><table id="roofs"></table></div></details>
+          <details class="sub" open><summary>軒の出（mm）</summary><div class="tscroll"><table id="roof-eaves"></table></div></details>
+        </div>
+      </details>
+      <details class="sec" id="sec-history" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>直しの履歴<span class="sec-count" id="hist-count"></span></summary>
+        <div class="sec-body"><p class="fine">表で直した値と、承認した直す案の記録です。新しいものが上です。「取り消す」を押すと、その修正をやめて模型を組み直します。</p><ul id="history" class="list hist"></ul></div>
+      </details>
     </div>
-    <div id="shist" class="pane" role="tabpanel">
-      <div class="pane-head">
-        <h2>修正の履歴</h2>
-        <p class="lead">表で直した値と、承認した直す案の記録です。新しいものが上です。「取り消す」を押すと、その修正をやめて模型を組み直します。</p>
-      </div>
-      <ul id="history" class="list"></ul>
+
+    <!-- 検品：進み具合・指摘・質問・コードの検査 -->
+    <div class="ws-panel" data-ws="inspect" hidden>
+      <details class="sec" id="sec-progress" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>進み具合<span class="help" tabindex="0" title="Claude が東・西・南・北・平面・印刷の6つの面を同時に見比べ、食い違いを根拠つきで挙げます。直す案は「承認」すると修正として記録され、模型が組み直されます。"><svg class="ic ic-s"><use href="#i-help"/></svg></span></summary>
+        <div class="sec-body"><div id="inspect-progress" class="progress"></div><p id="inspect-summary" class="summary"></p></div>
+      </details>
+      <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>Claude の指摘<span class="sec-count" id="n-findings"></span></summary>
+        <div class="sec-body flush"><ul id="findings" class="cards"></ul></div>
+      </details>
+      <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>Claude からの質問<span class="sec-count" id="n-questions"></span></summary>
+        <div class="sec-body"><ul id="questions" class="list qs"></ul></div>
+      </details>
+      <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>コードの検査の結果<span class="sec-count" id="n-code"></span></summary>
+        <div class="sec-body flush"><ul id="code-findings" class="cards"></ul></div>
+      </details>
     </div>
-    <div id="schk" class="pane" role="tabpanel">
-      <div class="pane-head">
-        <h2>検査</h2>
-        <p class="lead">コードが模型を調べた結果です。会社ルールや図面と比べた結果と、部品ごとの形・大きさを並べます。黄と赤の印が付いた行は、確かめる所です。</p>
-      </div>
-      <ul id="checks" class="list"></ul>
+
+    <!-- 印刷：書き出し・分け目・Bambu Studio・検査 -->
+    <div class="ws-panel" data-ws="print" hidden>
+      <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>書き出し</summary>
+        <div class="sec-body"><p class="fine">3D プリンターに送るファイルです。ふつうは、いちばん上の 3MF（Bambu Studio 形式）を保存して開きます。</p><ul id="downloads" class="dl"></ul></div>
+      </details>
+      <details class="sec" id="sec-split" open hidden><summary><svg class="ic chev"><use href="#i-chev"/></svg>本体の分け目</summary>
+        <div class="sec-body"><p class="fine" id="split-info"></p>
+          <div class="row-acts"><button id="split-show-plan" class="small"><svg class="ic"><use href="#i-top"/></svg><span>平面図で分け目を見る</span></button></div></div>
+      </details>
+      <details class="sec"><summary><svg class="ic chev"><use href="#i-chev"/></svg>Bambu Studio で開くとき</summary>
+        <div class="sec-body"><p class="fine">「Bambu Studio 形式」の 3MF を開くと、外壁の部品にだけファジースキン（外側の輪郭）が設定されています。ファジースキンは形には出ません。スライスしてプレビューで外壁を拡大すると、線が細かく波打って見えます。</p>
+          <p class="fine">ふつうの形式の 3MF は形だけ読まれるので、外壁の部品（1階の外壁・屋根の外壁）を選び、「その他」→「ファジースキン」→「外側の輪郭」にしてください。2つ目以降のパーツはプレートの外に置いてあります。プレートを足して「並べる」で配置してください。</p></div>
+      </details>
+      <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>検査<span class="sec-count" id="n-checks"></span><span class="help" tabindex="0" title="コードが模型を調べた結果です。会社ルールや図面と比べた結果と、部品ごとの形・大きさを並べます。黄と赤の印が付いた行は、確かめる所です。"><svg class="ic ic-s"><use href="#i-help"/></svg></span></summary>
+        <div class="sec-body"><ul id="checks" class="list checks"></ul></div>
+      </details>
     </div>
-    <div id="sout" class="pane" role="tabpanel">
-      <div class="pane-head">
-        <h2>書き出し</h2>
-        <p class="lead">3D プリンターに送るファイルです。ふつうは、いちばん上の 3MF（Bambu Studio 形式）を保存して開きます。</p>
-      </div>
-      <ul id="downloads" class="list"></ul>
-      <h3>Bambu Studio で開くとき</h3>
-      <p class="hint">「Bambu Studio 形式」の 3MF を開くと、外壁の部品にだけファジースキン（外側の輪郭）が設定されています。ファジースキンは形には出ません。スライスしてプレビューで外壁を拡大すると、線が細かく波打って見えます。<br>ふつうの形式の 3MF は形だけ読まれるので、外壁の部品（1階の外壁・屋根の外壁）を選び、「その他」→「ファジースキン」→「外側の輪郭」にしてください。2つ目以降のパーツはプレートの外に置いてあります。プレートを足して「並べる」で配置してください。</p>
-    </div>
-    <div id="sset" class="pane" role="tabpanel">
-      <div class="pane-head">
-        <h2>設定</h2>
-        <p class="lead">ここで変えた設定は、この PC の HAKOYA 全体に効きます（物件ごとではありません）。</p>
-      </div>
-      <section class="set-block" id="set-view">
-      <h3>見え方</h3>
-      <p class="hint">上の帯の右で切り替えます。見本確認用＝審査・動画用（見本の家だけ・手順の帯）。自社利用用＝全部の機能。他社利用用＝ほかの会社で使う形（AI は API キーと AI なしだけ）。</p>
-      </section>
-      <section class="set-block" id="set-registry" data-hide-in="sample">
-      <h3>物件の登録</h3>
-      <p class="hint">Walk in home の glb（と図面のフォルダ）を選び、仮名を付けて登録します。元のファイルは読むだけで、書き換えもコピーもしません。ファイル名や場所（施主名が入ることがあります）は画面に出しません。<br>ふだんは glb だけで組み立て・検査・検品します。「高性能読み込み」を入にした物件だけ、図面とも突き合わせます（窓の注記の照合・平面図に図面を重ねる・図面を見せた検品）。スキャンした PDF は読めません。</p>
-      <table id="registry-list" class="registry"></table>
-      <div class="registry-form">
-        <label>仮名 <input id="reg-alias" type="text" maxlength="20"></label>
-        <div><button id="reg-pick-glb">glb を選ぶ</button> <span id="reg-glb-status" class="hint">まだ選んでいません</span></div>
-        <div><button id="reg-pick-dwg">図面のフォルダを選ぶ</button> <span id="reg-dwg-status" class="hint">なくても登録できます（jww か、jww・Walk in home から書き出した文字を選べる PDF。名前の「平面」「立面」「断面」「2階」で種類を分けます）</span></div>
-        <details><summary>選ぶ窓が出ないとき（場所を貼り付ける）</summary>
-          <input id="reg-glb-path" type="text" placeholder="glb の場所（ファイルか、glb が1つだけ入ったフォルダ）" spellcheck="false">
-          <input id="reg-dwg-path" type="text" placeholder="図面（jww）のフォルダの場所（なくてもよい）" spellcheck="false">
-        </details>
-        <label>出してはいけない言葉（施主名・住所など。1行に1つ。姓だけ・名前だけも1行ずつ。数字だけ（番地だけ）は入れない）<textarea id="reg-ng" rows="2" spellcheck="false"></textarea></label>
-        <div><button id="reg-submit" class="primary">登録する</button> <span id="reg-msg"></span></div>
-      </div>
-      </section>
-      <section class="set-block" id="set-company">
-      <h3>会社ルール</h3>
-      <p class="hint other-only" id="company-callout">あなたの会社の決まりを選んでください。まだ選んでいないときは、B工務店（架空）の決まりで組み立てます。</p>
-      <select id="company"></select>
-      <p class="hint">「読み込んで組み立てる」で使う会社の決まり（壁の厚み・屋根板の出・外壁の仕上げ・標準の高さ・検品の考え方）。切り替えたあと、物件を選んで「読み込んで組み立てる」を押すと、その会社の決まりで作り直します。B工務店は、会社ごとに切り替えられることを見せるための架空の会社です。</p>
-      </section>
-      <section class="set-block" id="set-auto" data-hide-in="sample">
-      <h3>組み立てたあとの検品</h3>
-      <select id="auto-inspect"></select>
-      <p class="hint">「読み込んで組み立てる」のあと、自動で検品を始めます。Claude（自分のプラン）はプランの利用枠を、Claude（API キー）はキーの持ち主の料金を使います。</p>
-      </section>
-      <section class="set-block" id="set-apikey">
-      <h3>API キー（「API キーで検品する」に使う）</h3>
-      <p id="apikey-state" class="hint"></p>
-      <div class="apikey">
-        <input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="API キーを貼り付ける">
-        <button id="apikey-save" class="primary">保存</button>
-        <button id="apikey-del" class="quiet">消す</button>
-      </div>
-      <p class="hint">キーは Windows の資格情報マネージャーに保存します。画面・ファイル・記録には出しません。<br>API キーで検品すると、キーの持ち主に Claude の API の料金がかかります。1回の上限は rules/ai_models.yaml の max_budget_usd（いまは $3.00）で、超えそうになると止まります。</p>
-      </section>
-    </div>
-    <div id="srules" class="pane" role="tabpanel">
-      <div class="pane-head">
-        <h2>会社ルール</h2>
-        <p class="lead">家・会社によって変わる値（窓の高さ・屋根の勾配など）は、物件ごとに glb から作ります。物件によらず同じ値（壁厚など）と細かい決まりを「会社ルール」として残し、困ったとき（glb が読めない・いつもと違う・新しい形）の予防に使います。</p>
-      </div>
-      <h3 id="rules-title">集計（コードが全物件から計算）</h3>
-      <table id="rules-stats" class="rules-stats"></table>
-      <h3>会社ルールの案</h3>
-      <div class="lasso-actions">
-        <select id="rules-conn">
-          <option value="claude_code">Claude（自分のプラン）</option>
-          <option value="api_key">Claude（API キー）</option>
-          <option value="off">AI なし（コードの候補だけ）</option>
-        </select>
-        <button id="rules-draft" class="primary">案を書いてもらう</button>
-      </div>
-      <input id="rules-text" type="text" placeholder="一言（なくてもよい。例：壁の決まりを中心に）">
-      <div id="rules-proposals"></div>
-      <h3>学んだ会社ルール（承認したもの）</h3>
-      <ul id="rules-learned" class="list"></ul>
+
+    <!-- 会社ルール（自社用だけ） -->
+    <div class="ws-panel" data-ws="rules" hidden>
+      <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg><span id="rules-title">集計（コードが全物件から計算）</span><span class="help" tabindex="0" title="家・会社によって変わる値（窓の高さ・屋根の勾配など）は、物件ごとに glb から作ります。物件によらず同じ値（壁厚など）と細かい決まりを「会社ルール」として残し、困ったとき（glb が読めない・いつもと違う・新しい形）の予防に使います。"><svg class="ic ic-s"><use href="#i-help"/></svg></span></summary>
+        <div class="sec-body"><table id="rules-stats" class="rules-stats"></table></div>
+      </details>
+      <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>会社ルールの案</summary>
+        <div class="sec-body"><div id="rules-proposals"></div></div>
+      </details>
+      <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>学んだ会社ルール（承認したもの）</summary>
+        <div class="sec-body"><ul id="rules-learned" class="list"></ul></div>
+      </details>
     </div>
   </aside>
 </main>
+
+<!-- ======== 下の帯 ======== -->
+<footer class="statusbar">
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+  <div class="sb">
+    <span id="sb-saved" class="sb-item" title="直すたびに自動で保存しています" hidden></span>
+    <span class="sb-item" title="模型の寸法＝実寸 mm ÷ 50">縮尺 1/50</span>
+    <span id="sb-fit" class="sb-item" title="3D プリンターの造形範囲（256mm 角）" hidden></span>
+    <span id="sb-parts" class="sb-item" title="印刷する部品の数（分けた屋根・本体は分けた数）" hidden></span>
+    <button id="sb-ai" class="sb-item sb-btn" title="AI のつなぎ方（押すと環境設定）"></button>
+  </div>
+</footer>
+
+<!-- ======== 小窓：過去の物件を開く ======== -->
+<dialog id="dlg-open" class="dlg dlg-open" aria-labelledby="dlg-open-title">
+  <div class="dlg-frame">
+    <header class="dlg-head"><h2 id="dlg-open-title">過去の物件を開く</h2><button class="icon-btn" data-close title="閉じる"><svg class="ic"><use href="#i-close"/></svg></button></header>
+    <div class="dlg-tools">
+      <label class="find"><svg class="ic ic-s"><use href="#i-search"/></svg><input id="open-filter" type="search" placeholder="仮名で絞り込む" spellcheck="false" autocomplete="off"></label>
+      <span id="open-count" class="muted"></span>
+    </div>
+    <div class="dlg-body flush"><ul id="open-list" class="plist" role="listbox" aria-label="物件"></ul></div>
+    <footer class="dlg-foot"><span class="muted">新しい順。ダブルクリックでも開けます</span><button id="open-go" class="primary" disabled>開く</button><button data-close>やめる</button></footer>
+  </div>
+</dialog>
+
+<!-- ======== 小窓：新しく読み込む（前は設定タブの「物件の登録」） ======== -->
+<dialog id="dlg-new" class="dlg dlg-new" aria-labelledby="dlg-new-title">
+  <div class="dlg-frame">
+    <header class="dlg-head"><h2 id="dlg-new-title">新しく読み込む</h2><button class="icon-btn" data-close title="閉じる"><svg class="ic"><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body">
+      <div class="form-grid registry-form">
+        <span class="flabel">glb</span>
+        <div class="fctl"><button id="reg-pick-glb" type="button">glb を選ぶ…</button><span id="reg-glb-status" class="hint">まだ選んでいません</span></div>
+        <span class="flabel">図面のフォルダ</span>
+        <div class="fctl"><button id="reg-pick-dwg" type="button">フォルダを選ぶ…</button><span id="reg-dwg-status" class="hint">なくても読み込めます</span></div>
+        <span class="flabel"></span>
+        <details class="fctl paste"><summary>選ぶ窓が出ないとき（場所を貼り付ける）</summary>
+          <input id="reg-glb-path" type="text" placeholder="glb の場所（ファイルか、glb が1つだけ入ったフォルダ）" spellcheck="false">
+          <input id="reg-dwg-path" type="text" placeholder="図面（jww）のフォルダの場所（なくてもよい）" spellcheck="false">
+        </details>
+        <label class="flabel" for="reg-alias">仮名</label>
+        <div class="fctl"><input id="reg-alias" type="text" maxlength="20" spellcheck="false"><span class="hint">画面やファイルでは、この名前で呼びます</span></div>
+        <label class="flabel" for="reg-ng">出してはいけない言葉</label>
+        <div class="fctl"><textarea id="reg-ng" rows="3" spellcheck="false" placeholder="施主名・住所など。1行に1つ"></textarea>
+          <span class="hint">姓だけ・名前だけも1行ずつ。数字だけ（番地だけ）は入れない</span></div>
+      </div>
+      <details class="fine-more"><summary>読み込むものについて</summary>
+        <p class="fine">Walk in home の glb（と図面のフォルダ）を選び、仮名を付けて読み込みます。元のファイルは読むだけで、書き換えもコピーもしません。ファイル名や場所（施主名が入ることがあります）は画面に出しません。</p>
+        <p class="fine">図面は jww か、jww・Walk in home から書き出した文字を選べる PDF。名前の「平面」「立面」「断面」「2階」で種類を分けます。ふだんは glb だけで組み立て・検査・検品します。「高性能読み込み」（環境設定の物件の一覧）を入にした物件だけ、図面とも突き合わせます。スキャンした PDF は読めません。</p>
+      </details>
+    </div>
+    <footer class="dlg-foot"><span id="reg-msg" class="msg"></span><button id="reg-submit" class="primary">読み込む</button><button data-close>やめる</button></footer>
+  </div>
+</dialog>
+
+<!-- ======== 小窓：環境設定（前の設定タブ） ======== -->
+<dialog id="dlg-prefs" class="dlg dlg-prefs" aria-labelledby="dlg-prefs-title">
+  <div class="dlg-frame">
+    <header class="dlg-head"><h2 id="dlg-prefs-title">環境設定</h2><button class="icon-btn" data-close title="閉じる"><svg class="ic"><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body prefs">
+      <nav class="prefs-nav" aria-label="環境設定の項目">
+        <button data-jump="set-ai">AI のつなぎ方</button>
+        <button data-jump="set-apikey">API キー</button>
+        <button data-jump="set-auto">組み立てたあとの検品</button>
+        <button data-jump="set-company" class="other-first">会社ルール</button>
+        <button data-jump="set-registry">物件の一覧</button>
+      </nav>
+      <div class="prefs-body" id="prefs-body">
+        <p class="fine prefs-lead">ここで変えた設定は、この PC の HAKOYA 全体に効きます（物件ごとではありません）。</p>
+        <section class="set-block" id="set-ai">
+          <h3>AI のつなぎ方</h3>
+          <ul id="ai-conns" class="conns"></ul>
+        </section>
+        <section class="set-block" id="set-apikey">
+          <h3>API キー（「API キーで検品する」に使う）</h3>
+          <p id="apikey-state" class="fine"></p>
+          <div class="apikey">
+            <input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="API キーを貼り付ける">
+            <button id="apikey-save" class="primary">保存</button>
+            <button id="apikey-del" class="quiet danger">消す</button>
+          </div>
+          <p class="fine">キーは Windows の資格情報マネージャーに保存します。画面・ファイル・記録には出しません。API キーで検品すると、キーの持ち主に Claude の API の料金がかかります。1回の上限は rules/ai_models.yaml の max_budget_usd（いまは <span id="budget">$3.00</span>）で、超えそうになると止まります。</p>
+        </section>
+        <section class="set-block" id="set-auto">
+          <h3>組み立てたあとの検品</h3>
+          <select id="auto-inspect"></select>
+          <p class="fine">「読み込み直す」のあと、自動で検品を始めます。Claude（自分のプラン）はプランの利用枠を、Claude（API キー）はキーの持ち主の料金を使います。</p>
+        </section>
+        <section class="set-block" id="set-company">
+          <h3>会社ルール</h3>
+          <p class="fine callout" id="company-callout">あなたの会社の決まりを選んでください。まだ選んでいないときは、B工務店（架空）の決まりで組み立てます。</p>
+          <select id="company"></select>
+          <p class="fine">「読み込み直す」で使う会社の決まり（壁の厚み・屋根板の出・外壁の仕上げ・標準の高さ・検品の考え方）。切り替えたあと、物件を開いて「読み込み直す」を押すと、その会社の決まりで作り直します。B工務店は、会社ごとに切り替えられることを見せるための架空の会社です。</p>
+        </section>
+        <section class="set-block" id="set-registry">
+          <h3>物件の一覧</h3>
+          <p class="fine">ふだんは glb だけで組み立て・検査・検品します。「高性能読み込み」を入にした物件だけ、図面とも突き合わせます（窓の注記の照合・平面図に図面を重ねる・図面を見せた検品）。</p>
+          <div class="tscroll"><table id="registry-list" class="registry"></table></div>
+          <p id="registry-msg" class="fine msg"></p>
+        </section>
+      </div>
+    </div>
+    <footer class="dlg-foot"><span></span><button data-close class="primary">閉じる</button></footer>
+  </div>
+</dialog>
+
 <script type="module" src="/static/app.js"></script>
 </body>
 </html>
