@@ -141,8 +141,21 @@ def sleeve_walls(walls: list[dict], outline: Polygon, fl: float) -> tuple[list[d
     ★11/5 作者「袖壁は屋根ではなく家に付くように」「袖壁全体で 180 の厚み」：どちらも天井で分けず、まるごと1階の部品に入れる
     （前は屋根まで届く袖壁を屋根の部品に入れていて、袖壁の一部が屋根に付いて見えた。梁は屋根から 4mm 離れて浮いていた）。
     ポーチの垂れ壁など、ほかの途中から始まる壁は今までどおり屋根の部品。"""
-    sleeves = [w for w in walls if w["kind"] == "standalone" and float(w["bottom_mm"]) < fl + UPPER_WALL_ABOVE_FL
-               and outside_house(w, outline)]
+    cand = [w for w in walls if w["kind"] == "standalone" and float(w["bottom_mm"]) < fl + UPPER_WALL_ABOVE_FL
+            and outside_house(w, outline)]
+    # 家に接している袖壁だけ（袖壁どうしでつながるものも含む）。★11/6 物件A：家から約 2m 離れて立つポーチの壁まで
+    # 1階の部品に入れると、家とつながらない離れた塊になった。家から離れて立つ壁は、今までどおり（屋根まで届けば屋根の部品）
+    house = Polygon(outline.exterior)
+    sleeves, rest = [], list(cand)
+    grew = True
+    while grew:
+        grew = False
+        for w in list(rest):
+            r = wall_rect(w)
+            if r.distance(house) <= SLEEVE_TOUCH_MM or any(r.distance(wall_rect(a)) <= SLEEVE_TOUCH_MM for a in sleeves):
+                sleeves.append(w)
+                rest.remove(w)
+                grew = True
     rects = [wall_rect(w) for w in sleeves]
     beams = [w for w in walls if rects and w["kind"] == "standalone" and float(w["bottom_mm"]) >= fl + UPPER_WALL_ABOVE_FL
              and outside_house(w, outline)

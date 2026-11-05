@@ -337,3 +337,15 @@ def test_wall_height_can_be_proposed_and_applied():
     assert [r["status"] for r in res] == ["applied", "applied", "failed", "failed"]
     w = {x["id"]: x for x in applied["walls"]}
     assert w["W7"]["height"] == "to_roof" and w["W8"]["height"] == 3500
+
+
+def test_free_standing_wall_away_from_the_house_is_not_a_sleeve():
+    """★11/6 物件A：家から約 2m 離れて立つポーチの壁（屋根まで届く）は、家の部品に入れない（家とつながらない離れた塊になるため）。
+    家に接する袖壁と、それにつながる袖壁・梁だけが家（1階）の部品。"""
+    from core.builder import sleeve_walls
+    house = Polygon([(0, 0), (6000, 0), (6000, 4000), (0, 4000)])
+    touching = {"id": "W6", "kind": "standalone", "start": [-900, 90], "end": [0, 90], "thickness_mm": 180, "bottom_mm": 480}
+    chained = {"id": "W7", "kind": "standalone", "start": [-1800, 90], "end": [-900, 90], "thickness_mm": 180, "bottom_mm": 480}
+    far = {"id": "W9", "kind": "standalone", "start": [-2100, 500], "end": [-2100, 3500], "thickness_mm": 180, "bottom_mm": 480}
+    sleeves, beams = sleeve_walls([touching, chained, far], house, 624.0)
+    assert [w["id"] for w in sleeves] == ["W6", "W7"] and beams == []
