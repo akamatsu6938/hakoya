@@ -1,6 +1,6 @@
 # HAKOYA を自分の Claude Code から使う（MCP）
 
-HAKOYA（他社利用用）を使う会社の方が、**自分の Claude Code** を HAKOYA につないで、物件の確認・検品・直す・書き出しまでを
+HAKOYA（他社用）を使う会社の方が、**自分の Claude Code** を HAKOYA につないで、物件の確認・検品・直す・書き出しまでを
 Claude と話しながら進めるための説明です。
 
 ## 1. これは何か
@@ -63,7 +63,7 @@ cd C:\HAKOYA_claude
 claude mcp add --scope project hakoya -e HAKOYA_MODE=other -- "C:\HAKOYA_external\HAKOYA_external.exe" --mcp
 ```
 
-- `HAKOYA_MODE=other`：他社利用用の HAKOYA につなぎます（画面の口は 8766）。
+- `HAKOYA_MODE=other`：他社用の HAKOYA につなぎます（画面の口は 8766）。
 - `PYTHONPATH`：Python 版だけ。HAKOYA のフォルダを書きます（Claude Code がどのフォルダでサーバーを起動しても動くように）。
 - データを別の場所に置いているときは `-e HAKOYA_DATA_DIR=<データのフォルダ>` を足します。
 - `--scope project` にすると、作業用フォルダに `.mcp.json` ができます（次の 4-3）。初めて使うとき、Claude Code が「このフォルダの MCP サーバーを使うか」を聞くので、許可してください。
