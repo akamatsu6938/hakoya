@@ -15,11 +15,18 @@ from pathlib import Path
 
 import yaml
 
-from core.paths import DATA_DIR
-
 RULES_DIR = Path(__file__).resolve().parents[1] / "rules"
 DEFAULT_COMPANY = "jisha"      # 自社の会社ルール。公開の版には入れない（そのときは default_company() が B工務店（架空）にする）
-LEARNED_DIR = DATA_DIR / "rules"
+# 学んだルールの置き場所。None のときは DATA_DIR/rules（起動のしかたで変わる。learned_dir()）。テストではここを差し替える。
+# ★11/5：core/paths.py が起動のしかたを決めるのに DEFAULT_COMPANY を読むので、ここでは読み込みのときに paths を使わない（循環しない）
+LEARNED_DIR: Path | None = None
+
+
+def learned_dir() -> Path:
+    if LEARNED_DIR is not None:
+        return LEARNED_DIR
+    from core import paths
+    return paths.DATA_DIR / "rules"
 # 学んでよい項目（会社で変わらない値）。模型の作り方（model.*）と内壁の厚み（作者の決め）は学ばない
 LEARNABLE = ("levels.gl_to_foundation_top_mm", "levels.gl_to_1fl_mm", "levels.ceiling_height_mm",
              "levels.story_height_choices_mm", "walls.exterior_thickness_mm", "openings.door_top_fl_mm",
@@ -58,7 +65,7 @@ def learned_enabled() -> bool:
 
 
 def learned_path(company: str) -> Path:
-    return LEARNED_DIR / f"{company}.learned.json"
+    return learned_dir() / f"{company}.learned.json"
 
 
 def load_learned(company: str) -> dict:
@@ -147,7 +154,7 @@ def learned_skill_section(company: str) -> str:
 
 def _answer_files() -> list[tuple[str, Path]]:
     """人の答えの記録：開発中に書いた rules/answers.jsonl（番号 A）と、アプリが足す DATA_DIR/rules/answers.jsonl（番号 D）。"""
-    return [("A", RULES_DIR / "answers.jsonl"), ("D", LEARNED_DIR / "answers.jsonl")]
+    return [("A", RULES_DIR / "answers.jsonl"), ("D", learned_dir() / "answers.jsonl")]
 
 
 def load_answers() -> list[dict]:
@@ -165,7 +172,7 @@ def load_answers() -> list[dict]:
 def add_answer(question: str, answer: str, property: str = "全体", evidence: str = "") -> dict:
     """人の答えを DATA_DIR/rules/answers.jsonl に足す（rules/ は書き換えない）。"""
     import datetime as dt
-    p = LEARNED_DIR / "answers.jsonl"
+    p = learned_dir() / "answers.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
     rec = {"property": property, "question": question, "answer": answer, "applied_as": "", "evidence": evidence,
            "at": dt.date.today().isoformat()}

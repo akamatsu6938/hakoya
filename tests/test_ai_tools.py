@@ -128,3 +128,46 @@ def test_roof_eave_proposals_use_only_human_numbers():
     items = call_tool(ctx, "get_elements", {"ids": ["Y1"]})["elements"]
     assert items[0]["eave_mm"]["S"] == 300 and "footprint" not in items[0]
     assert call_tool(ctx, "get_elements", {"ids": ["Y1:S"]})["elements"][0]["id"] == "Y1"   # 軒の番号でも屋根が返る
+
+
+def test_view_images_are_redrawn_after_the_model_changes(tmp_path, monkeypatch):
+    """★11/5：面の図は検品を始めるときに作る。承認で組み直したら（checks.json が新しくなったら）、次に頼まれたときに作り直す。
+    画面が続けて頼んでも、作り直すのは1回だけ。図を作る道具は差し替える（実データ・glb は使わない）。"""
+    import os
+    import threading
+    import time
+
+    from PIL import Image
+
+    import core.render
+    from core import paths
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path)
+    ctx = _ctx()
+    d = tmp_path / "out" / "物件T" / "inspect"
+    calls = []
+
+    def fake_render_all(alias):
+        calls.append(alias)
+        time.sleep(0.2)                                   # 作るのに時間がかかる（その間に、ほかの頼みが来る）
+        d.mkdir(parents=True, exist_ok=True)
+        for source in ("model", "glb"):
+            Image.new("RGB", (4, 4), "white").save(d / f"S_{source}.png")
+    monkeypatch.setattr(core.render, "render_all", fake_render_all)
+    assert call_tool(ctx, "render_view", {"view": "S"})["image_path"].endswith("S_model.png") and len(calls) == 1   # ないので作る
+    call_tool(ctx, "render_view", {"view": "S", "source": "glb"})
+    assert len(calls) == 1                                                       # あるので作らない
+    checks = tmp_path / "out" / "物件T" / "model" / "checks.json"
+    checks.parent.mkdir(parents=True)
+    checks.write_text("{}", encoding="utf-8")                                    # 承認で模型を書き出し直した
+    old = checks.stat().st_mtime - 100
+    for p in d.glob("*.png"):
+        os.utime(p, (old, old))
+    threads = [threading.Thread(target=call_tool, args=(ctx, "render_view", {"view": "S", "source": s}))
+               for s in ("model", "glb", "model")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 2                                                       # 3つ頼まれても、作り直すのは1回
+    call_tool(ctx, "render_view", {"view": "S"})
+    assert len(calls) == 2

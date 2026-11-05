@@ -18,6 +18,7 @@ from __future__ import annotations
 import collections
 import json
 import re
+import threading
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -165,15 +166,35 @@ def get_elements(ctx: ToolContext, view: str | None = None, kind: str | None = N
     return {"count": len(out), "elements": out}
 
 
+_RENDER_LOCK = threading.Lock()      # 面の図の作り直しは同時に1つだけ（画面の「図を見る」が続けて頼んでも、1回だけ作る）
+
+
+def _image_stale(ctx: ToolContext, src: Path) -> bool:
+    """面の図がないか、図を作ったあとに模型を書き出し直した（model/checks.json の方が新しい）か。
+    ★11/5：図は検品を始めるときに作るので、承認で組み直すと「図を見る」の図が古いままだった。"""
+    try:
+        made = src.stat().st_mtime_ns
+    except OSError:
+        return True
+    try:
+        exported = (out_dir(ctx.alias) / "model" / "checks.json").stat().st_mtime_ns
+    except OSError:
+        return False
+    return exported > made
+
+
 def render_view(ctx: ToolContext, view: str, highlight: list[str] | None = None, source: str = "model") -> dict:
-    """面の画像（PNG のパス）。source="model" は模型、"glb" は元の形。highlight の部材を赤い枠で強調する。"""
+    """面の画像（PNG のパス）。source="model" は模型、"glb" は元の形。highlight の部材を赤い枠で強調する。
+    図がないか、模型の方が新しければ、作り直してから返す。"""
     _check_view(ctx, view)
     if source not in ("model", "glb"):
         raise ToolError('source は "model" か "glb" です')
     src = ctx.inspect_dir / f"{view}_{source}.png"
-    if not src.exists():
-        from core.render import render_all
-        render_all(ctx.alias)
+    if _image_stale(ctx, src):
+        with _RENDER_LOCK:
+            if _image_stale(ctx, src):           # 待っているあいだに、ほかの頼みが作り直したかもしれない
+                from core.render import render_all
+                render_all(ctx.alias)
     if not highlight:
         return {"image_path": str(src), "view": view, "source": source}
     info = json.loads((ctx.inspect_dir / f"{view}.json").read_text(encoding="utf-8"))

@@ -17,6 +17,7 @@ import math
 BAND_FIELD = "lintel_band_mm"
 BAND_RANGE_MM = (0.0, 500.0)    # 帯の高さの範囲（実寸。0 は帯なし）
 LINTEL_MARGIN_MM = 100.0        # 帯を、並びの両端の開口からさらに伸ばす長さ（実寸）
+SIDE_TITLE = {"S": "南", "N": "北", "E": "東", "W": "西"}     # 指摘の見出し（例「南の窓の間の柱が折れやすい」）
 
 
 def band_of(w: dict) -> float:
@@ -130,7 +131,9 @@ def fragile_post_findings(b: dict, rules: dict) -> list[dict]:
                f"直す案：{what}の上に帯（模型 {to / scale:g}mm）を残す")
         reason = (f"{what} {'・'.join(ids)} の間の柱の上を、1階の部品の中でつなぐ（上端＋{to:g}mm まで外壁を残し、"
                   "屋根の部品の外壁から同じ所を除く）")
-        out.append({"view": _side_of_wall(w, center), "kind": "print", "severity": "中", "message": msg,
+        side = _side_of_wall(w, center)
+        out.append({"view": side, "kind": "print", "severity": "中", "message": msg,
+                    "title": f"{SIDE_TITLE.get(side, '')}の{what}の間の柱が折れやすい",
                     "targets": [w["id"]] + ids, "evidence": ["コードの検査（窓の間の柱）"], "source": "code",
                     "proposal": {"target": w["id"], "field": BAND_FIELD, "from": band_of(w), "to": to,
                                  "value_source": "rule:model.lintel_band_mm", "reason": reason}})

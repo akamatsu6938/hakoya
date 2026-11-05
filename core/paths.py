@@ -17,14 +17,66 @@ import yaml
 
 # 同梱物（rules/・skills/・app/static/）の場所。exe のときは PyInstaller が展開した場所（sys._MEIPASS）
 REPO_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
-# 使う人のデータ（local_paths.yaml・書き出し）の場所。exe のときは exe の隣の data/（exe の中だと書き出しが消えるため）。
-# HAKOYA_DATA_DIR で変えられる
-if os.environ.get("HAKOYA_DATA_DIR"):
-    DATA_DIR = Path(os.environ["HAKOYA_DATA_DIR"])
-elif getattr(sys, "frozen", False):
-    DATA_DIR = Path(sys.executable).resolve().parent / "data"
-else:
-    DATA_DIR = REPO_ROOT / "data"
+
+# ---------------------------------------------------------------- 起動のしかた（★11/5：3つを別々に起動する。画面では切り替えない）
+# own＝自社用（start.bat・HAKOYA.exe）：全部の機能。データは data/
+# other＝他社用（start_other.bat・HAKOYA_external.exe）：AI は API キーと AI なしだけ。データは data/other/（最初は空）
+# sample＝見本用（start_sample.bat・HAKOYA.exe --mode sample）：審査・動画用。見本の家だけ。データは data/sample/
+# 決め方：HAKOYA_MODE（own・other・sample）。なければ、社外用の版と自社の会社ルールがない版（公開リポジトリ）は other、ほかは own。
+# 社外用の版は、いつも other（HAKOYA_MODE でも変えられない）。データの置き場所は HAKOYA_DATA_DIR で変えられる
+MODES = ("own", "other", "sample")
+MODE_FOLDERS = {"own": "", "other": "other", "sample": "sample"}     # 自社用の data/ の中のフォルダ（own は data/ そのもの）
+EDITION_FILE = "EDITION"        # 社外用の exe に同梱する印（中身は "external"）。packaging/hakoya_external.spec
+
+
+def edition() -> str:
+    """版：self（自分用。AI の接続3つ）／external（社外用。API キーと AI なしだけ）。
+    exe の中に印のファイルがあれば、それを使う（環境変数で自分用に戻せないように）。開発中は HAKOYA_EDITION。
+    起動のしかたを決めるのに使うので、ここに置く（core/settings_store.edition はこれを呼ぶ）。"""
+    mark = REPO_ROOT / EDITION_FILE
+    if mark.exists():
+        return mark.read_text(encoding="utf-8").strip() or "external"
+    return os.environ.get("HAKOYA_EDITION", "self")
+
+
+def default_mode() -> str:
+    """HAKOYA_MODE がないときの起動のしかた。社外用の版と、自社の会社ルールがない版（提出用の公開リポジトリ）は他社用。"""
+    if edition() == "external":
+        return "other"
+    from core.rules import DEFAULT_COMPANY, RULES_DIR      # core.rules は読み込みのときに paths を使わない（循環しない）
+    return "own" if (RULES_DIR / f"{DEFAULT_COMPANY}.yaml").exists() else "other"
+
+
+def launch_mode() -> str:
+    """起動のしかた（own・other・sample）。社外用の版はいつも other。知らない値は日本語の ValueError（取り違えて
+    自社のデータを開かないように、黙って既定にはしない）。"""
+    if edition() == "external":
+        return "other"
+    m = (os.environ.get("HAKOYA_MODE") or "").strip().lower()
+    if not m:
+        return default_mode()
+    if m not in MODES:
+        raise ValueError("HAKOYA_MODE は own（自社用）・other（他社用）・sample（見本用）のどれかにしてください")
+    return m
+
+
+def own_data_dir() -> Path:
+    """自社用のデータの場所。exe のときは exe の隣の data/（exe の中だと書き出しが消えるため）、開発中はリポジトリの data/。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "data"
+    return REPO_ROOT / "data"
+
+
+def mode_data_dir(mode: str) -> Path:
+    """起動のしかたごとのデータの場所（local_paths.yaml・書き出し・設定）。HAKOYA_DATA_DIR があれば、それ。"""
+    if os.environ.get("HAKOYA_DATA_DIR"):
+        return Path(os.environ["HAKOYA_DATA_DIR"])
+    sub = MODE_FOLDERS[mode]
+    return own_data_dir() / sub if sub else own_data_dir()
+
+
+MODE = launch_mode()
+DATA_DIR = mode_data_dir(MODE)
 LOCAL_PATHS = DATA_DIR / "local_paths.yaml"
 
 
@@ -175,6 +227,80 @@ def cache_dir(alias: str) -> Path:
 
 def out_dir(alias: str) -> Path:
     return DATA_DIR / "out" / alias
+
+
+REPLACE_TRIES = 20          # 入れ替えのやり直しの回数（Windows では、ほかのプロセスが読んでいる最中のファイルは入れ替えられない）
+
+
+def write_bytes_atomic(path: Path, data: bytes) -> None:
+    """同じフォルダの一時ファイルに書いてから入れ替える（途中で止まっても、読む側が書きかけのファイルを読まない）。
+    ★11/5：MCP の道具（別のプロセス）と画面のサーバーが同じ物件のファイルを読み書きするため。
+    Windows では読んでいる最中のファイルを入れ替えられない（PermissionError）ので、少し待って何回かやり直す。"""
+    import tempfile
+    import time
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        for i in range(REPLACE_TRIES):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if i == REPLACE_TRIES - 1:
+                    raise
+                time.sleep(0.05)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    write_bytes_atomic(path, text.encode("utf-8"))
+
+
+# ---------------------------------------------------------------- 見本用のデータ（★11/5）
+DEMO_ALIAS = "デモ用"        # 見本用に写す、組み立て済みの見本の家（自社用のデータから。ほかの物件は写さない）
+
+
+def ensure_sample_data(src: Path | None = None, dst: Path | None = None) -> str:
+    """見本用のデータ（data/sample/）を用意する。dst に local_paths.yaml がなければ、自社用のデータ（src）の組み立て済みの
+    「デモ用」の out/デモ用/ を丸ごと写し、local_paths.yaml には「デモ用」だけを書く（glb・図面の場所はそのまま同じ。
+    出してはいけない言葉も写す：見本用でも、画面に送る前の見張りが同じ言葉で止めるように）。
+    返り値："copied"（写した）・"ready"（もう用意してある）・"missing"（自社用に組み立て済みのデモ用がない。何もしない。画面が案内を出す）。
+    場所は表示しない・記録に書かない。"""
+    src = Path(src) if src is not None else own_data_dir()
+    dst = Path(dst) if dst is not None else DATA_DIR
+    target = dst / "local_paths.yaml"
+    if target.exists():
+        return "ready"
+    if src.resolve() == dst.resolve():          # 自社用のデータそのものには書かない
+        return "missing"
+    conf_path = src / "local_paths.yaml"
+    if not conf_path.exists():
+        return "missing"
+    conf = load_local_paths(conf_path)
+    entry = conf.get(DEMO_ALIAS)
+    built = src / "out" / DEMO_ALIAS
+    if not isinstance(entry, dict) or not entry.get("glb") or not (built / "building.json").is_file():
+        return "missing"
+    keep = {"ng_words": conf["ng_words"]} if conf.get("ng_words") is not None else {}
+    text = ("# 見本用（start_sample.bat）の物件。HAKOYA が自社用の local_paths.yaml から「デモ用」だけを写した\n"
+            + yaml.safe_dump({**keep, DEMO_ALIAS: entry}, allow_unicode=True, sort_keys=False))
+    back = parse_local_paths(text)              # 書く前に、読み直して同じになるか確かめる
+    if [k for k, v in back.items() if isinstance(v, dict)] != [DEMO_ALIAS] or back[DEMO_ALIAS] != entry:
+        raise ValueError("見本用の local_paths.yaml を作れませんでした（自社用の local_paths.yaml の「デモ用」の書き方を確かめてください）")
+    out = dst / "out" / DEMO_ALIAS
+    if out.exists():                            # 前に途中で止まった写し（local_paths.yaml は最後に書くので、ないときは写し直す）
+        shutil.rmtree(out)
+    shutil.copytree(built, out)
+    write_text_atomic(target, text)
+    return "copied"
 
 
 def glb_working_copy(files: PropertyFiles) -> Path:

@@ -25,7 +25,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
-from core.paths import out_dir
+from core.paths import out_dir, write_text_atomic
 
 COLLECTIONS = {"W": "walls", "O": "openings", "R": "rooms", "P": "porches", "S": "porch_soffits", "Y": "roofs"}
 DELETE = "_delete"
@@ -56,9 +56,8 @@ def load(alias: str) -> list[dict]:
 
 
 def save(alias: str, items: list[dict]) -> None:
-    p = overrides_path(alias)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    """一時ファイルに書いてから入れ替える（★11/5：MCP の道具など別のプロセスが同時に読んでも、書きかけを読まない）。"""
+    write_text_atomic(overrides_path(alias), json.dumps(items, ensure_ascii=False, indent=2))
 
 
 def _find(building: dict, target: str) -> dict | None:

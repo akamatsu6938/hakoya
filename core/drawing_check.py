@@ -22,6 +22,7 @@ CODE_WIDTH_ADD_MM = 40.0
 SIZE_TOL_MM = 100.0
 PLAN_KIND = {0: "plan", 1: "plan_2f"}
 VIEW_OF = {"plan": "plan", "plan_2f": "plan2"}
+WHAT_JA = {"head": "上端", "width": "幅", "height": "高さ"}     # 注記と違う所（指摘の見出しに使う）
 
 
 def window_notes(d) -> list[dict]:
@@ -210,6 +211,7 @@ def findings(alias: str, b: dict) -> list[dict]:
     for row in s.get("levels", []):
         for m in row.get("mismatches", []):
             f = {"view": VIEW_OF.get(row["kind"], "plan"), "kind": "opening", "severity": "中",
+                 "title": f"{m['opening']} の{WHAT_JA.get(m.get('what'), '大きさ')}が図面の注記と違う",
                  "message": f"図面の注記と違う：{m['message']}",
                  "targets": [m["opening"]], "evidence": [f"jww:{row['kind']}:{m['note_id']}"], "source": "code"}
             if m.get("what") == "head":       # 上端は注記の数値そのもの（コードが読む）で直せる。幅・高さは目安なので案にしない
@@ -219,6 +221,7 @@ def findings(alias: str, b: dict) -> list[dict]:
             out.append(f)
         for n in row.get("unmatched_notes", []):  # noqa: B007
             out.append({"view": VIEW_OF.get(row["kind"], "plan"), "kind": "opening", "severity": "低",
+                        "title": "図面の注記の窓が模型にない",
                         "message": f"平面図に窓・テラスドアの注記（品番 {n['code']}、FL+{n['head_fl_mm']}）があるが、"
                                    f"近く（{MATCH_MAX_MM / 1000:.1f}m 以内）に模型の開口がない。図面だけにある窓か、注記が離れて書かれているか（要確認）",
                         "targets": [], "evidence": [f"jww:{row['kind']}:{n['note_id']}"], "source": "code"})
@@ -226,6 +229,7 @@ def findings(alias: str, b: dict) -> list[dict]:
         for m in row.get("mismatches", []):
             # 1/100 の立面図は平面図ほど正確でないことがあるので「低」（★物件A の東の窓 O6 は立面図で 11〜18cm 高く描かれていた）
             out.append({"view": row["view"], "kind": "opening", "severity": "低",
+                        "title": f"{m['opening']} が{VIEW_JA.get(row['view'], '')}の立面図と合わない",
                         "message": f"{m['opening']} の{'・'.join(m['edges'])}が、立面図（{VIEW_JA[row['view']]}）の窓・ドアの線と合わない"
                                    f"（{ELEV_WINDOW_TOL_CELLS * 20}mm より離れている）。図面と glb のどちらが正しいか確かめる",
                         "targets": [m["opening"]], "evidence": [f"jww:elevation（{VIEW_JA[row['view']]}の面、位置合わせの点数 {row['score']}）"],

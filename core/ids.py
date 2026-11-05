@@ -5,15 +5,48 @@
 - 開口：glb の出どころが同じ。なければ、種類が同じで中心が OPENING_TOL 以内。
 - 部屋：glb の出どころが同じ。
 新しいものには続きの番号を振る。前回あって今回ないものの番号は id_changes.removed に残す。
+
+指摘の対象の番号の確かめ（★11/5 target_ids・check_targets）：Claude が書いた targets のうち、この家にある番号だけを残す。
 """
 from __future__ import annotations
 
 import math
 import re
+import unicodedata
 
 POS_TOL = 30.0        # 壁の中心線のずれ（mm）
 OVERLAP_MIN = 0.5     # 短いほうの長さに対する重なりの割合
 OPENING_TOL = 150.0   # 開口の中心のずれ（mm）
+EAVE_SIDES = ("S", "N", "E", "W")
+# 指摘の対象の番号：壁 W・開口 O・屋根 Y と、屋根の軒（Y1:S など）。後ろに説明が付いていても番号だけを読む（「O3（南の窓）」）
+TARGET_RE = re.compile(r"([WOY]\d+)(?::([SNEW]))?(?![0-9A-Z])")
+
+
+def target_ids(b: dict) -> set[str]:
+    """指摘の対象に使える番号：壁 W・開口 O・屋根 Y と、軒の出のある辺の軒（Y1:S など）。
+    core/pick.py が 3D で選べる形を作る番号と同じ書き方（画面がその部材を強調・選択できる）。"""
+    ids = {x["id"] for coll in ("walls", "openings", "roofs") for x in b.get(coll, []) if x.get("id")}
+    for r in b.get("roofs", []):
+        if r.get("id"):
+            ids |= {f"{r['id']}:{s}" for s in (r.get("eave_mm") or {}) if s in EAVE_SIDES}
+    return ids
+
+
+def check_targets(targets, valid: set[str]) -> tuple[list[str], list[str]]:
+    """Claude が書いた対象の番号を、家にあるものだけにする。返り値：(残す番号, 家にない番号＝元の書き方のまま)。
+    全角・小文字・前後の空白はそろえる。軒の向きがその屋根にないとき（Y1:E など）は、屋根そのもの（Y1）にする。"""
+    keep, unknown = [], []
+    for t in targets if isinstance(targets, list) else []:
+        m = TARGET_RE.match(unicodedata.normalize("NFKC", str(t)).strip().upper())
+        tid = m.group(0) if m else None
+        if m and tid not in valid and m.group(2) and m.group(1) in valid:
+            tid = m.group(1)
+        if tid in valid:
+            if tid not in keep:
+                keep.append(tid)
+        else:
+            unknown.append(str(t))
+    return keep, unknown
 
 
 def _num(i: str) -> int:

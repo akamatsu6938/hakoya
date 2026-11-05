@@ -67,6 +67,7 @@ def test_finding_proposes_band_for_posts_between_windows(rules):
     assert len(out) == 1
     f = out[0]
     assert f["severity"] == "中" and f["view"] == "S" and f["targets"] == ["W1", "O3", "O4", "O5"]
+    assert f["title"] == "南の窓の間の柱が折れやすい"                          # 見出し（★11/5）
     assert "外壁 W1 の窓 O3・O4・O5 の間の柱（2 本、幅 模型 2.4mm" in f["message"]
     assert "1階の部品の中で上がつながっていません" in f["message"] and "帯（模型 2mm）" in f["message"]
     assert f["proposal"] == {"target": "W1", "field": "lintel_band_mm", "from": 0.0, "to": 100.0,

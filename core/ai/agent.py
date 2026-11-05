@@ -24,8 +24,11 @@ from typing import Any
 import yaml
 
 from core.ai.tools import TOOL_SPECS, ToolContext, call_tool, propose_override, ToolError
-from core.findings import code_findings
+from core.findings import code_findings, title_of
+from core.findings import save as save_findings
+from core.ids import check_targets, target_ids
 from core.paths import REPO_ROOT, out_dir
+from core.privacy import PrivacyError, assert_clean
 from core.rules import default_company
 
 SERVER = "hakoya"
@@ -52,6 +55,8 @@ FINDINGS_SCHEMA = {
                 "view": {"type": "string", "enum": list(FACES) + [PLAN2]},
                 "kind": {"type": "string", "enum": ["shape", "opening", "roof", "outline", "rule", "print"]},
                 "severity": {"type": "string", "enum": ["高", "中", "低"]},
+                # 見出し（★11/5）：何が・どこで・どうおかしいかを20字くらいで（例「西の窓の間の柱が細い」）。message は1〜2文の説明
+                "title": {"type": "string"},
                 "message": {"type": "string"},
                 "targets": {"type": "array", "items": {"type": "string"}},
                 "evidence": {"type": "array", "items": {"type": "string"}},
@@ -64,7 +69,7 @@ FINDINGS_SCHEMA = {
                     "evidence": {"type": "string"}}, "required": ["question", "options"]}]},
                 "confidence": {"type": "string", "enum": ["高", "中", "低"]},
             },
-            "required": ["view", "kind", "severity", "message", "targets", "evidence", "confidence"],
+            "required": ["view", "kind", "severity", "title", "message", "targets", "evidence", "confidence"],
         }},
         "summary": {"type": "string"},
     },
@@ -87,7 +92,9 @@ def build_server(ctx, specs: dict | None = None, call=None):
 
 
 def make_tools(ctx, specs: dict | None = None, call=None) -> list:
-    """道具ごとの Agent SDK の道具（@tool）。画像は Claude に見せ、パスは渡さない。"""
+    """道具ごとの Agent SDK の道具（@tool）。画像は Claude に見せ、パスは渡さない。
+    ★11/5：Claude に返す前に、出してはいけない言葉がないか見張る（api_key 接続の api_runner.tool_result と同じ）。
+    入っていたら、中身（文・画像）は渡さず、言葉を入れないエラーだけを返す。"""
     from claude_agent_sdk import tool
     specs = specs or TOOL_SPECS
 
@@ -95,8 +102,13 @@ def make_tools(ctx, specs: dict | None = None, call=None) -> list:
         @tool(name, spec["description"], spec["schema"])
         async def handler(args: dict[str, Any]) -> dict[str, Any]:
             res = (call or call_tool)(ctx, name, dict(args or {}))
-            content: list[dict] = [{"type": "text", "text": json.dumps(
-                {k: v for k, v in res.items() if k != "image_path"}, ensure_ascii=False)}]
+            text = json.dumps({k: v for k, v in res.items() if k != "image_path"}, ensure_ascii=False)
+            try:
+                assert_clean(text, "Claude に送るデータ")
+            except PrivacyError as e:         # 文には言葉そのものは入らない（何番目の言葉かだけ）
+                return {"content": [{"type": "text", "text": json.dumps({"error": str(e)}, ensure_ascii=False)}],
+                        "is_error": True}
+            content: list[dict] = [{"type": "text", "text": text}]
             if "image_path" in res:  # 画像は Claude に見せる（パスは渡さない）
                 data = base64.b64encode(Path(res["image_path"]).read_bytes()).decode("ascii")
                 content.append({"type": "image", "data": data, "mimeType": "image/png"})
@@ -137,8 +149,10 @@ def face_agents(models: dict, multi: bool = False) -> dict:
         out[f"inspect-{face}"] = AgentDefinition(
             description=f"模型の検品担当：{label}",
             prompt=(f"あなたは住宅模型の検品担当で、担当は「{label}」。Skill の inspection・model-rules・会社ルールに従う。{how}"
-                    "食い違いを見つけたら、指摘を Skill の書き方（view・kind・severity・message・targets・evidence・proposal・question・confidence）で、"
-                    "日本語の箇条書きで返す。直す案は propose_override で試し、数値は自分で書かない。見つからなければ「指摘なし」と返す。"),
+                    "食い違いを見つけたら、指摘を Skill の書き方（view・kind・severity・title・message・targets・evidence・proposal・question・confidence）で、"
+                    "日本語の箇条書きで返す。title は「何が・どこで・どうおかしいか」を20字くらいの見出しに（例「西の窓の間の柱が細い」）、"
+                    "message は1〜2文の説明。targets は get_elements が返した部材の番号（W○・O○・Y○・Y○:S など）だけ。"
+                    "直す案は propose_override で試し、数値は自分で書かない。見つからなければ「指摘なし」と返す。"),
             tools=tool_names(), model=m["model"], effort=m["effort"],
         )
     return out
@@ -179,6 +193,8 @@ def build_options(ctx: ToolContext, connection: str = "claude_code"):
         system_prompt=("あなたは住宅模型（1/50、3D プリント）の検品のまとめ役。日本語で考え、日本語で書く。"
                        "まず get_building で家の要約を読み、6人の検品担当（inspect-S・inspect-N・inspect-E・inspect-W・inspect-plan・inspect-print）を"
                        "同時に呼ぶ。返ってきた指摘の重複を除き、根拠のないものは捨て、重要度（高・中・低）順に並べて、決められた JSON で返す。"
+                       "指摘ごとに title（何が・どこで・どうおかしいかを20字くらいの見出し。例「西の窓の間の柱が細い」）と、"
+                       "message（1〜2文の説明）を書く。targets は部材の番号（W○・O○・Y○・Y○:S など）だけ。"
                        "直す案は数値を書かず value_source（majority:種類 / rule:項目 / glb / number）で指定する。決まらないことは question にする。"),
         model=merge["model"], effort=merge["effort"],
         mcp_servers={SERVER: build_server(ctx)},
@@ -194,14 +210,21 @@ def build_options(ctx: ToolContext, connection: str = "claude_code"):
 
 
 def finalize(ctx: ToolContext, raw_findings: list[dict]) -> list[dict]:
-    """指摘に番号を振り、直す案の数値をコードで計算し直す（出どころが使えない案は質問に回す）。"""
+    """指摘に番号を振り、直す案の数値をコードで計算し直す（出どころが使えない案は質問に回す）。
+    ★11/5：対象の番号（targets）は、この家にある部材の番号（W・O・Y・Y1:S など。core/ids.target_ids）だけを残し、
+    ない番号は unknown_targets に残す（画面で強調できない番号を出さない）。見出し（title）がなければ message から作る。"""
     out = []
     multi = len(ctx.building.get("levels", [])) > 1
+    valid = target_ids(ctx.building)
     for i, f in enumerate(raw_findings, 1):
         f = dict(f)
         f["id"] = f"F{i}"
         if f.get("view") == PLAN2 and not multi:     # 平屋に2階の平面はない
             f["view"] = "plan"
+        f["targets"], unknown = check_targets(f.get("targets"), valid)
+        if unknown:
+            f["unknown_targets"] = unknown
+        f["title"] = title_of(f)
         f["status"] = "未確認"
         p = f.get("proposal")
         if p:
@@ -295,7 +318,7 @@ async def run_inspection(alias: str, connection: str = "claude_code", on_event=N
               "turns": result.num_turns, "permission_denials": result.permission_denials or [],
               "questions": ctx.questions,   # 検品担当が ask_question で出した質問（人の答えを待つもの）
               "code_findings": code_findings(alias)}   # コードの検査からの指摘（glb の例外・未解決の所・検査の警告）
-    (out_dir(alias) / "findings.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    save_findings(alias, report)                    # 一時ファイルに書いてから入れ替える
     return report
 
 

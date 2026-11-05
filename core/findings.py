@@ -10,12 +10,60 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from pathlib import Path
 
 from core import overrides as ov
-from core.paths import out_dir
+from core.paths import out_dir, write_text_atomic
 
 STATUSES = {"approve": "承認", "reject": "却下", "later": "あとで"}
+TITLE_MAX = 30          # 見出しの長さの上限（目安は20字くらい。長すぎたら切る）
+# glb の整合性の検査（core/consistency.py）の種類ごとの見出し。{0}・{1} は対象の番号
+CONSISTENCY_TITLES = {"walls_overlap": "{0} と {1} の壁が重なる", "opening_protrudes": "{0} が壁の端からはみ出す",
+                      "opening_above_top": "{0} の上端が高すぎる", "openings_overlap": "{0} と {1} が重なる",
+                      "short_wall": "{0} の壁が短すぎる"}
+# コードの検査（checks.json）の項目ごとの見出し。{name} は部品の名前
+CHECK_TITLES = {"empty": "{name}の形がない", "watertight": "{name}が閉じた立体でない", "islands": "{name}に離れた塊がある",
+                "build_volume": "{name}が造形範囲を超える", "opening_count": "建具と開口の数が合わない",
+                "unresolved": "未解決の所がある", "overlap": "部品どうしが組むとぶつかる",
+                "support": "{name}にサポートが要りそう", "print_split": "{name}の分け方に注意", "body_split": "本体の分け目に注意"}
+
+
+def _clip(text: str) -> str:
+    return text if len(text) <= TITLE_MAX else text[:TITLE_MAX - 1] + "…"
+
+
+def title_of(f: dict) -> str:
+    """指摘の見出し（★11/5：何が・どこで・どうおかしいかを20字くらいで。例「西の窓の間の柱が細い」）。
+    title があればそれ（長すぎたら切る）。なければ message の最初の文から作る（かっこの中は外す）。"""
+    t = str(f.get("title") or "").strip()
+    if not t:
+        msg = str(f.get("message") or "").strip()
+        t = re.split(r"[。\n]", msg, maxsplit=1)[0]
+        while True:                                   # 入れ子のかっこも外す
+            shorter = re.sub(r"（[^（）]*）|\([^()]*\)", "", t)
+            if shorter == t:
+                break
+            t = shorter
+        t = t.strip(" 　：:、") or msg or "指摘"
+    return _clip(t)
+
+
+def _formatted(template: str, targets: list, **kw) -> str | None:
+    try:
+        return template.format(*targets, **kw)
+    except (IndexError, KeyError):
+        return None
+
+
+def _check_title(c: dict) -> str | None:
+    """checks.json の1行の見出し。部品の名前は message の「名前：」から（かっこの中は外す）。"""
+    msg = str(c.get("message") or "")
+    name = msg.split("：", 1)[0].split("（")[0].strip() if "：" in msg else ""
+    template = CHECK_TITLES.get(c.get("item"))
+    if not template or ("{name}" in template and not name):
+        return None
+    return _formatted(template, [], name=name)
 
 
 def findings_path(alias: str) -> Path:
@@ -27,8 +75,10 @@ def load(alias: str) -> dict | None:
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
-def save(alias: str, report: dict) -> None:
-    findings_path(alias).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+def save(alias: str, report: dict, path: Path | None = None) -> None:
+    """一時ファイルに書いてから入れ替える（★11/5：MCP の道具など別のプロセスが同時に読んでも、書きかけを読まない）。
+    path を渡すと、そこに書く（試験で書き出し先を変えるとき）。"""
+    write_text_atomic(path or findings_path(alias), json.dumps(report, ensure_ascii=False, indent=2))
 
 
 def code_findings(alias: str) -> list[dict]:
@@ -40,7 +90,7 @@ def code_findings(alias: str) -> list[dict]:
               "door_above_floor": "床より高い所から始まる戸", "stairs_area": "階段の所", "eave_soffit": "軒天",
               "door_without_wall": "戸のまわりに壁の面がない所"}
     for e in b.get("glb_exceptions", []):
-        out.append({"view": "plan", "kind": "shape", "severity": "低",
+        out.append({"view": "plan", "kind": "shape", "severity": "低", "title": f"glb の例外：{labels.get(e['kind'], e['kind'])}",
                     "message": f"glb の例外（{labels.get(e['kind'], e['kind'])}）：{e['note']}",
                     "targets": [x for x in (e.get("wall"), e.get("opening")) if x],   # 開口の例外は開口を指す（★11/4）
                     "evidence": [e.get("source") or "glb"], "source": "code"})
@@ -51,27 +101,32 @@ def code_findings(alias: str) -> list[dict]:
         upper = [lv["name"] for lv in applied.get("levels", [])[1:]]
         for c in find_all(applied):
             out.append({"view": "plan2" if levels.get(c["targets"][0]) in upper else "plan", "kind": "shape", "severity": "低",
+                        "title": _formatted(CONSISTENCY_TITLES.get(c.get("kind"), ""), c["targets"]) or "glb の形の食い違い（要確認）",
                         "message": f"glb の整合性（要確認）：{c['message']}", "targets": c["targets"],
                         "evidence": ["コードの検査（glb の整合性）"], "source": "code"})
     except Exception as e:  # noqa: BLE001  整合性の検査の失敗で、ほかの指摘を止めない（★11/4：失敗したことは知らせる）
         out.append({"view": "plan", "kind": "shape", "severity": "低", "targets": [], "source": "code",
+                    "title": "glb の整合性の検査が止まった",
                     "message": f"glb の整合性の検査が途中で止まりました（{type(e).__name__}）。ほかの検査の結果は出ています",
                     "evidence": ["コードの検査（glb の整合性）"]})
     for u in b.get("unresolved", []):
-        out.append({"view": "plan", "kind": "shape", "severity": "中", "message": f"未解決の所 {u['id']}：{u['note']}",
+        out.append({"view": "plan", "kind": "shape", "severity": "中", "title": f"未解決の所 {u['id']}",
+                    "message": f"未解決の所 {u['id']}：{u['note']}",
                     "targets": [], "evidence": ["壁の作り直し（unresolved）"], "source": "code"})
     # 予防：会社ルールと比べて「いつもと違う」所（会社ルールの言語化。家ごとに変わる値は比べない）
     from core.rule_check import differences
     from core.rules import default_company, load_rules
     company = load_rules(b.get("source", {}).get("company_rules", default_company()))
     for d in differences(b, company):
-        out.append({"view": "plan", "kind": "rule", "severity": "中", "message": d["message"],
+        out.append({"view": "plan", "kind": "rule", "severity": "中", "title": f"{d['label']}が会社ルールと違う",
+                    "message": d["message"],
                     "targets": [], "evidence": [f"会社ルール {d['rule_key']}"], "source": "code"})
     try:   # 窓の間の柱が、1階の部品の中で上がつながらない所（決定 2-4：直す案にして人が決める。平屋だけ。core/lintel.py）
         from core.lintel import fragile_post_findings
         out += fragile_post_findings(ov.apply(b, ov.load(alias))[0], company)
     except Exception as e:  # noqa: BLE001  この検査の失敗で、ほかの指摘を止めない（失敗したことは知らせる）
         out.append({"view": "plan", "kind": "print", "severity": "低", "targets": [], "source": "code",
+                    "title": "窓の間の柱の検査が止まった",
                     "message": f"窓の間の柱の検査が途中で止まりました（{type(e).__name__}）。ほかの検査の結果は出ています",
                     "evidence": ["コードの検査（窓の間の柱）"]})
     try:
@@ -87,21 +142,25 @@ def code_findings(alias: str) -> list[dict]:
             out += drawing_findings(alias, ov.apply(b, ov.load(alias))[0])
         except Exception as e:  # noqa: BLE001  図面の読み取りの失敗で検品全体を止めない（★11/4：失敗したことは知らせる）
             out.append({"view": "plan", "kind": "opening", "severity": "低", "targets": [], "source": "code",
+                        "title": "図面との照合が止まった",
                         "message": f"図面（jww）との照合が途中で止まりました（{type(e).__name__}）。ほかの検査の結果は出ています",
                         "evidence": ["図面との照合"]})
     for s in b.get("skipped", []):
         if "見つからない" in s.get("reason", ""):
-            out.append({"view": "plan", "kind": "opening", "severity": "中", "message": f"{s['source']}：{s['reason']}",
+            out.append({"view": "plan", "kind": "opening", "severity": "中", "title": s["reason"].removeprefix("この"),
+                        "message": f"{s['source']}：{s['reason']}",
                         "targets": [], "evidence": [s["source"]], "source": "code"})
     checks = out_dir(alias) / "model" / "checks.json"
     if checks.exists():
         for c in json.loads(checks.read_text(encoding="utf-8"))["checks"]:
             if c["level"] in ("高", "中"):
-                out.append({"view": "print", "kind": "print", "severity": c["level"], "message": c["message"],
+                out.append({"view": "print", "kind": "print", "severity": c["level"], "title": _check_title(c),
+                            "message": c["message"],
                             "targets": [], "evidence": ["コードの検査"], "source": "code"})
     for i, f in enumerate(out, 1):
         f.setdefault("id", f"C{i}")
         f.setdefault("status", "未確認")
+        f["title"] = title_of(f)                      # 見出しのない指摘（作れなかったもの）は message の最初の文から
     return out
 
 

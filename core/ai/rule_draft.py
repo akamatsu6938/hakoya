@@ -259,7 +259,7 @@ def draft_prompt(ctx: RuleContext, text: str = "") -> str:
 def _log(company: str, rec: dict) -> None:
     text = json.dumps(rec, ensure_ascii=False, default=str)
     assert_clean(text, "会社ルールの言語化の記録")
-    p = rules_mod.LEARNED_DIR / f"{company}.draft_log.jsonl"
+    p = rules_mod.learned_dir() / f"{company}.draft_log.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:
         f.write(text + "\n")
@@ -340,14 +340,14 @@ async def run_draft(company: str, connection: str, text: str = "", *, client=Non
     _log(company, {"at": out["at"], "connection": connection, "text": text, "properties": ctx.aliases,
                    "proposals": ctx.proposals, "questions": ctx.questions, "message": out["message"],
                    "cost_usd": out["cost_usd"], "duration_s": round(time.time() - started, 1)})
-    p = rules_mod.LEARNED_DIR / f"{company}.draft.json"
+    p = rules_mod.learned_dir() / f"{company}.draft.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(out, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return out
 
 
 def last_draft(company: str) -> dict | None:
-    p = rules_mod.LEARNED_DIR / f"{company}.draft.json"
+    p = rules_mod.learned_dir() / f"{company}.draft.json"
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 

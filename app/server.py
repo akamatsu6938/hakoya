@@ -31,6 +31,7 @@ from core.privacy import assert_clean
 from tools.plan_preview import render_svg
 
 HOST, PORT = "127.0.0.1", 8765
+MODE_PORTS = {"own": PORT, "other": 8766, "sample": 8767}    # 起動のしかたごとの口の番号（★11/5。3つを同時に開ける）
 STATIC = Path(__file__).resolve().parent / "static"
 MODEL_FILES = {"model.glb": "model/gltf-binary", "model.3mf": "application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
                "model_bambu.3mf": "application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
@@ -103,6 +104,15 @@ def _check_alias(alias: str) -> None:
         raise HTTPException(404, "その物件はありません")
 
 
+def _visible_aliases() -> list[str]:
+    """画面の一覧に出す物件。見本用で起動したときは、見本の家（仮名が「デモ用」か「見本」で始まる）だけ（★11/5 審査・動画用）。"""
+    from core import settings_store
+    names = _aliases()
+    if settings_store.mode() == "sample":
+        names = [a for a in names if settings_store.is_sample_alias(a)]
+    return names
+
+
 def _building_path(alias: str) -> Path:
     return out_dir(alias) / "building.json"
 
@@ -126,18 +136,136 @@ def index() -> HTMLResponse:
     return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"))
 
 
+def _mtime_ns(p: Path) -> int | None:
+    try:
+        return p.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _iso(ns: int | None) -> str | None:
+    """ファイルの更新時刻（ns）を、この PC の時刻の ISO の文字にする（例 2026-11-05T14:19:00+09:00）。"""
+    if ns is None:
+        return None
+    import datetime as dt
+    return dt.datetime.fromtimestamp(ns / 1e9).astimezone().isoformat(timespec="seconds")
+
+
+def _read_json(p: Path):
+    """読めなければ None（書きかけ・壊れたファイルで一覧を止めない）。"""
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _findings_stale(alias: str) -> bool:
+    """検品のあとに「読み込んで組み立てる」で作り直したか（building.json が findings.json より新しい）。
+    building.json を書くのは組み立てだけで、承認は書かない。"""
+    b, f = _mtime_ns(_building_path(alias)), _mtime_ns(fd.findings_path(alias))
+    return b is not None and f is not None and b > f
+
+
+# 物件の進み具合に使うファイル（out/<物件>/ の中）：組み立て・人の修正・検品・書き出し
+STATUS_FILES = {"built_at": "building.json", "edited_at": "overrides.json", "inspected_at": "findings.json",
+                "exported_at": "model/checks.json"}
+DECIDED = ("承認", "却下")
+
+
+def _status(alias: str) -> tuple[dict, int]:
+    """物件の進み具合（★11/5）。ファイルの更新時刻と数だけで、形の計算はしない（一覧を軽く保つ）。
+    返り値：(status, いちばん新しい時刻 ns。何もなければ 0)。"""
+    d = out_dir(alias)
+    ns = {k: _mtime_ns(d / rel) for k, rel in STATUS_FILES.items()}
+    ovs = _read_json(d / "overrides.json") if ns["edited_at"] else None
+    rep = _read_json(d / "findings.json") if ns["inspected_at"] else None
+    chk = _read_json(d / "model" / "checks.json") if ns["exported_at"] else None
+    items = [f for k in ("findings", "code_findings") for f in (rep.get(k) or [])] if isinstance(rep, dict) else []
+    checks = (chk.get("checks") or []) if isinstance(chk, dict) else []
+    status = {k: _iso(v) for k, v in ns.items()}
+    status.update(fixes=len(ovs) if isinstance(ovs, list) else 0,
+                  open_findings=sum(1 for f in items if isinstance(f, dict) and f.get("status") not in DECIDED),
+                  high=sum(1 for c in checks if isinstance(c, dict) and c.get("level") == "高"),
+                  stale=_findings_stale(alias))
+    return status, max((v for v in ns.values() if v is not None), default=0)
+
+
 @app.get("/api/properties")
 def properties():
-    """物件の一覧。見え方が見本確認用のときは、見本の家（仮名が「デモ用」か「見本」で始まる）だけ（★11/5 審査・動画用）。"""
-    from core import settings_store
-    sample_only = settings_store.load()["view"] == "sample"
-    out = []
-    for a in _aliases():
-        if sample_only and not settings_store.is_sample_alias(a):
-            continue
+    """物件の一覧。見本用で起動したときは、見本の家（仮名が「デモ用」か「見本」で始まる）だけ（★11/5 審査・動画用）。
+    行ごとに進み具合（status：組み立て・修正・検品・書き出しの時刻、修正の数、まだ決めていない指摘の数、検査の「高」の数、
+    検品が古いか）と、小さな絵（thumb）があるか。いちばん新しく触った物件が上（触っていない物件は登録の順で下）。"""
+    rows = []
+    for a in _visible_aliases():
         f = property_files(a)
-        out.append({"alias": a, "has_glb": bool(f.glb and f.glb.exists()), "built": _building_path(a).exists()})
-    return _safe_json(out)
+        status, newest = _status(a)
+        rows.append((newest, {"alias": a, "has_glb": bool(f.glb and f.glb.exists()), "built": _building_path(a).exists(),
+                              "status": status, "thumb": _thumb_path(a).is_file()}))
+    rows.sort(key=lambda r: r[0], reverse=True)          # 並べ替えは安定なので、同じ時刻（触っていない物件）は登録の順のまま
+    return _safe_json([r for _, r in rows])
+
+
+# ---------------------------------------------------------------- 物件の小さな絵（★11/5：一覧に出す。画面の 3D から作って送る）
+THUMB_MAX_BYTES = 800 * 1024
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+DATA_URL_PNG = "data:image/png;base64,"
+
+
+def _thumb_path(alias: str) -> Path:
+    return out_dir(alias) / "thumb.png"
+
+
+class ThumbIn(BaseModel):
+    png: str          # "data:image/png;base64,..."
+
+
+@app.post("/api/thumb/{alias}")
+def thumb_save(alias: str, body: ThumbIn):
+    """物件の小さな絵（PNG）を out/<物件>/thumb.png に保存する（一時ファイルに書いてから入れ替える）。"""
+    import base64
+    import binascii
+    from core.paths import write_bytes_atomic
+    _check_alias(alias)
+    text = body.png.strip()
+    if not text.startswith(DATA_URL_PNG):
+        raise HTTPException(400, "絵は PNG（data:image/png;base64,…）で送ってください")
+    if len(text) > len(DATA_URL_PNG) + (THUMB_MAX_BYTES + 2) // 3 * 4 + 8:        # 読む前に大きさを確かめる
+        raise HTTPException(413, f"絵が大きすぎます（{THUMB_MAX_BYTES // 1024}KB まで）。小さくして送ってください")
+    try:
+        data = base64.b64decode(text[len(DATA_URL_PNG):], validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(400, "絵の中身が読めません（base64 の形が違います）") from None
+    if not data.startswith(PNG_SIGNATURE):
+        raise HTTPException(400, "絵が PNG ではありません")
+    if len(data) > THUMB_MAX_BYTES:
+        raise HTTPException(413, f"絵が大きすぎます（{THUMB_MAX_BYTES // 1024}KB まで）。小さくして送ってください")
+    write_bytes_atomic(_thumb_path(alias), data)
+    return _safe_json({"thumb": True, "bytes": len(data)})
+
+
+@app.get("/api/thumb/{alias}")
+def thumb_get(alias: str):
+    """物件の小さな絵（image/png）。まだなければ 404。"""
+    _check_alias(alias)
+    try:
+        data = _thumb_path(alias).read_bytes()
+    except OSError:
+        raise HTTPException(404, "この物件の絵はまだありません") from None
+    return Response(data, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+# ---------------------------------------------------------------- 物件のファイルが変わったか（★11/5：画面が数秒ごとに見て、変わったら読み直す）
+STATE_FILES = ("building.json", "overrides.json", "findings.json", "print_split.json", "model/checks.json")
+
+
+@app.get("/api/state/{alias}")
+def state(alias: str):
+    """組み立て・修正・検品・分け目・書き出しのファイルの、いちばん新しい更新時刻。MCP の道具（別のプロセス）が
+    書き換えたときも、画面が気づいて読み直せるように。version は ns の数（比べるだけに使う）、saved_at はその時刻（なければ null）。"""
+    _check_alias(alias)
+    d = out_dir(alias)
+    newest = max((ns for ns in (_mtime_ns(d / rel) for rel in STATE_FILES) if ns is not None), default=None)
+    return _safe_json({"saved_at": _iso(newest), "version": newest or 0})
 
 
 @app.post("/api/build/{alias}")
@@ -435,10 +563,11 @@ def inspection_status(alias: str):
 def findings(alias: str):
     _check_alias(alias)
     rep = fd.load(alias) or {"findings": [], "code_findings": [], "summary": "まだ検品していません"}
-    # 検品のあとに「読み込んで組み立てる」で作り直したか（見本確認用の手順の帯を「検品する」に戻す。
-    # building.json を書くのは組み立てだけで、承認は書かない）
-    fp, bp = fd.findings_path(alias), _building_path(alias)
-    rep["stale"] = fp.exists() and bp.exists() and bp.stat().st_mtime > fp.stat().st_mtime
+    for f in [*(rep.get("findings") or []), *(rep.get("code_findings") or [])]:
+        if isinstance(f, dict):
+            f["title"] = fd.title_of(f)          # ★11/5 より前の検品には見出しがないので、message から作る（ファイルは書き換えない）
+    # 検品のあとに「読み込んで組み立てる」で作り直したか（見本用の手順の帯を「検品する」に戻す）
+    rep["stale"] = _findings_stale(alias)
     return _safe_json(rep)
 
 
@@ -707,11 +836,19 @@ def registry_list():
     return _safe_json(rg.list_properties())
 
 
+def _check_import_allowed() -> None:
+    """見本用では物件を登録しない（data/sample/ は見本の家だけ。画面で隠すだけにしない）。"""
+    from core import settings_store
+    if not settings_store.features()["import"]:
+        raise HTTPException(400, "見本用では物件を登録できません。登録は自社用（start.bat）か他社用（start_other.bat）で起動してください")
+
+
 @app.post("/api/registry/pick")
 def registry_pick(body: PickIn):
     """Windows の「選ぶ」窓を出す（glb＝ファイル、folder＝図面のフォルダ）。返すのは番号と、見つかったものの種類だけ。"""
     import secrets as _secrets
     from core import registry as rg
+    _check_import_allowed()
     if body.what not in rg.PICK_DIALOGS:
         raise HTTPException(400, "選ぶものが分かりません")
     try:
@@ -742,6 +879,7 @@ def _chosen(token: str | None, pasted: str | None) -> str | None:
 def registry_add(body: RegisterIn):
     """物件を登録する（local_paths.yaml の最後に書き足す。元のファイルは読むだけ）。"""
     from core import registry as rg
+    _check_import_allowed()
     glb = _chosen(body.glb_token, body.glb_path) or ""
     drawings = _chosen(body.drawings_token, body.drawings_path)
     if not glb.strip():
@@ -786,13 +924,38 @@ def settings():
     except secret_store.SecretStoreError as e:
         raise HTTPException(500, str(e))
     st = settings_store.load()
+    mode = settings_store.mode()
+    try:
+        visible = _visible_aliases()
+    except ValueError:              # local_paths.yaml の書き間違い（一覧のほうで日本語の説明が出る）。設定の画面は開けるようにする
+        visible = []
     return _safe_json({"api_key_set": key, "auto_inspect": st["auto_inspect"], "api_cost_ack": st["api_cost_ack"],
                        "connections": settings_store.available_connections(),
                        "max_budget_usd": float(load_ai_models()["limits"]["max_budget_usd"]),
                        "company": st["company"], "companies": settings_store.companies(),
-                       "default_company": default_company(),        # 会社ルールの書いていない模型に使う会社（jisha。なければ B工務店（架空））
-                       "company_chosen": st["company_chosen"], "view": st["view"], "views": settings_store.available_views(),
+                       "default_company": default_company(),        # 会社ルールの書いていない模型に使う会社（自社の会社ルール。なければ B工務店（架空））
+                       "company_chosen": st["company_chosen"],
+                       # 起動のしかた（★11/5：own・other・sample。起動したときに決まり、画面では切り替えない）。view・views は前の画面のため
+                       "mode": mode, "mode_label": settings_store.mode_label(mode), "view": mode, "views": [mode],
+                       "features": settings_store.features(),
+                       # 最後に開いた物件・最近開いた物件（いまの一覧にないものは出さない）
+                       "last_alias": st["last_alias"] if st["last_alias"] in visible else None,
+                       "recent": [a for a in st["recent"] if a in visible],
                        "edition": settings_store.edition()})
+
+
+class LastAliasIn(BaseModel):
+    alias: str
+
+
+@app.post("/api/settings/last_alias")
+def save_last_alias(body: LastAliasIn):
+    """最後に開いた物件を残す（次に起動したとき、その物件を開く）。最近開いた物件（5つまで）の先頭にもする。"""
+    from core import settings_store
+    visible = _visible_aliases()
+    if body.alias not in visible:
+        raise HTTPException(404, "その物件はありません")
+    return _safe_json(settings_store.set_last_alias(body.alias, known=visible))
 
 
 class CompanyIn(BaseModel):
@@ -816,13 +979,10 @@ class ViewIn(BaseModel):
 
 @app.post("/api/settings/view")
 def save_view(body: ViewIn):
-    """画面の見え方（見本確認用・自社利用用・他社利用用）を保存する。社外用の版では自社利用用は選べない（400）。"""
-    from core import settings_store
-    try:
-        st = settings_store.set_view(body.view)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    return _safe_json({"view": st["view"], "company": st["company"], "connections": settings_store.available_connections()})
+    """前の「見え方の切り替え」。★11/5 から起動のしかた（自社用・他社用・見本用）は起動したときに決まるので、いつも 400。"""
+    raise HTTPException(400, "使い方（自社用・他社用・見本用）は起動のしかたで決まるので、画面では切り替えられません。"
+                             "別の使い方にするときは、その起動のファイル（自社用は start.bat、他社用は start_other.bat、"
+                             "見本用は start_sample.bat）から起動し直してください")
 
 
 class AutoInspectIn(BaseModel):
@@ -872,17 +1032,40 @@ def _port_in_use(port: int) -> bool:
         return s.connect_ex((HOST, port)) == 0
 
 
+def _prepare_sample_data() -> None:
+    """見本用：初めて起動したときに、自社用のデータから組み立て済みの「デモ用」だけを写す（場所は出さない）。"""
+    from core.paths import ensure_sample_data
+    try:
+        state = ensure_sample_data()
+    except ValueError as e:                  # local_paths.yaml の書き間違い（HAKOYA が書いた文だけを出す）
+        print(f"見本用のデータを用意できませんでした：{_user_message(e) or type(e).__name__}")
+        return
+    except Exception as e:  # noqa: BLE001  エラーの文には場所が入ることがあるので、種類だけ出す（見本用は起動は続ける）
+        print(f"見本用のデータを用意できませんでした（{type(e).__name__}。空き容量や権限を確かめてください）")
+        return
+    if state == "copied":
+        print("見本用のデータを用意しました（自社用のデータから、組み立て済みの「デモ用」だけを写しました）")
+    elif state == "missing":
+        print("見本用の家がまだありません。自社用（start.bat）で「デモ用」を組み立ててから、もう一度起動してください")
+
+
 def main() -> int:
     import uvicorn
     sys.stdout.reconfigure(encoding="utf-8")
-    port = int(os.environ.get("HAKOYA_PORT", PORT))       # 口の番号は HAKOYA_PORT で変えられる
+    from core import settings_store
+    mode = settings_store.mode()
+    label = settings_store.mode_label(mode)
+    # 口の番号は起動のしかたごとに別（3つを同時に開け、ブラウザの保存も別々になる）。HAKOYA_PORT で変えられる
+    port = int(os.environ.get("HAKOYA_PORT") or MODE_PORTS[mode])
     url = f"http://{HOST}:{port}/"
     if _port_in_use(port):
         # ★古い HAKOYA が開いたままだと、新しい方が起動できない（2026-11-02、試験で起きた）
-        print(f"口 {port} 番はもう使われています。HAKOYA がすでに起動しているかもしれません。"
+        print(f"口 {port} 番はもう使われています。HAKOYA（{label}）がすでに起動しているかもしれません。"
               f"前に開いた黒い画面を閉じてから、もう一度起動してください。")
         return 3
-    print(f"HAKOYA を起動しました → {url}（止めるときはこの画面で Ctrl+C）")
+    if mode == "sample":
+        _prepare_sample_data()
+    print(f"HAKOYA（{label}）を起動しました → {url}（止めるときはこの画面で Ctrl+C）")
     if not os.environ.get("HAKOYA_NO_BROWSER"):      # 試験のときはブラウザを開かない
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host=HOST, port=port, log_level="warning")

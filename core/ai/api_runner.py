@@ -24,6 +24,7 @@ from pathlib import Path
 from core.ai.agent import FACES, FINDINGS_SCHEMA, MULTI_PLAN_HOW, SKILLS_DIR, face_label, finalize, load_ai_models
 from core.ai.tools import TOOL_SPECS, ToolContext, call_tool
 from core.findings import code_findings
+from core.findings import save as save_findings
 from core.paths import out_dir
 from core.privacy import PrivacyError, assert_clean
 from core.rules import default_company
@@ -37,7 +38,9 @@ FACE_ROLE = ("あなたは住宅模型（1/50、3D プリント）の検品担�
              "数値の出どころ（value_source）を渡して、コードに計算させる。次の Skill（検品の決まり・模型のルール・会社のルール）に従う。")
 MERGE_ROLE = ("あなたは住宅模型（1/50、3D プリント）の検品のまとめ役。日本語で考え、日本語で書く。"
               "6人の検品担当（南・北・東・西・平面・印刷）の報告を読み、重複を除き、根拠のないものと Skill で「指摘しない」と"
-              "決まっているものは捨て、重要度（高・中・低）順に並べて、決められた JSON で返す。直す案は数値を書かず "
+              "決まっているものは捨て、重要度（高・中・低）順に並べて、決められた JSON で返す。"
+              "指摘ごとに title（何が・どこで・どうおかしいかを20字くらいの見出し。例「西の窓の間の柱が細い」）と、"
+              "message（1〜2文の説明）を書く。targets は部材の番号（W○・O○・Y○・Y○:S など）だけ。直す案は数値を書かず "
               "value_source（majority:種類 / rule:項目 / glb / number）で指定する。決まらないことは question にする。"
               "次の Skill（検品の決まり・模型のルール・会社のルール）に従う。")
 NUDGE = "道具を使えるのは次が最後です。ここまでに分かったことで、指摘をまとめて返してください。"
@@ -163,8 +166,10 @@ def face_prompt(face: str, multi: bool = False) -> str:
         how = (f"render_view で面 {face}（{label}）の模型の図（source=model）と glb の図（source=glb）を両方見比べ、"
                f"get_elements（view={face}）で部材の番号を確かめてください。")
     return (f"物件の模型を検品してください。あなたの担当は「{label}」です。{how}"
-            "食い違いを見つけたら、1件ずつ、面（view）・種類（kind）・重要度（severity）・内容（message）・対象の番号（targets）・"
-            "根拠（evidence）・直す案（proposal）・質問（question）・確からしさ（confidence）が分かるように、日本語の箇条書きで返してください。"
+            "食い違いを見つけたら、1件ずつ、面（view）・種類（kind）・重要度（severity）・見出し（title）・内容（message）・"
+            "対象の番号（targets）・根拠（evidence）・直す案（proposal）・質問（question）・確からしさ（confidence）が分かるように、"
+            "日本語の箇条書きで返してください。見出しは「何が・どこで・どうおかしいか」を20字くらいで（例「西の窓の間の柱が細い」）、"
+            "内容は1〜2文の説明にしてください。対象の番号は get_elements が返した番号（W○・O○・Y○・Y○:S など）だけにしてください。"
             "直す案は propose_override で試し、数値は自分で書かないでください。見つからなければ「指摘なし」と返してください。")
 
 
@@ -325,7 +330,7 @@ async def run_inspection_api(alias: str, *, client=None, ctx: ToolContext | None
               "tokens": meter.tokens, "models": {"inspect_face": fm["model"], "inspect_merge": mm["model"]}, "faces": faces,
               "questions": ctx.questions,      # 検品担当が ask_question で出した質問（人の答えを待つもの）
               "code_findings": code_findings(alias)}
-    (out / "findings.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    save_findings(alias, report, out / "findings.json")     # 一時ファイルに書いてから入れ替える
     return report
 
 

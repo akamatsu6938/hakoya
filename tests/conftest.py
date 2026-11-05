@@ -13,6 +13,9 @@ import pytest
 
 # 人が承認した「学んだルール」はテストでは使わない（結果が承認で変わらないように）。読み込みより先に決める
 os.environ.setdefault("HAKOYA_LEARNED_RULES", "off")
+# 起動のしかた（core/paths.py の MODE）は自社用に決める（見本用の黒い画面から試験を走らせても、data/ の実データの試験が同じに動くように）。
+# 起動のしかたの決め方そのものは tests/test_views.py が環境変数を変えて確かめる
+os.environ["HAKOYA_MODE"] = "own"
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
