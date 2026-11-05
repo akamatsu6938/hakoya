@@ -2,7 +2,8 @@
 
 - 指摘は1件ずつ「承認／却下／あとで」。承認すると直す案を人が承認した修正（overrides）として記録する。
 - 修正の履歴から取り消したら、その指摘は「未確認」に戻す。
-- コードの検査からも指摘を作る（code_findings）：glb の例外（背中合わせの外壁など）・未解決の所・検査の警告。
+- コードの検査からも指摘を作る（code_findings）：glb の例外（背中合わせの外壁など）・未解決の所・検査の警告・
+  窓の間の柱が1階の部品の中で上がつながらない所（直す案つき。core/lintel.py）。
   AI なし（off）のときは、これだけを出す（SPEC §9-2）。
 """
 from __future__ import annotations
@@ -62,9 +63,17 @@ def code_findings(alias: str) -> list[dict]:
     # 予防：会社ルールと比べて「いつもと違う」所（会社ルールの言語化。家ごとに変わる値は比べない）
     from core.rule_check import differences
     from core.rules import default_company, load_rules
-    for d in differences(b, load_rules(b.get("source", {}).get("company_rules", default_company()))):
+    company = load_rules(b.get("source", {}).get("company_rules", default_company()))
+    for d in differences(b, company):
         out.append({"view": "plan", "kind": "rule", "severity": "中", "message": d["message"],
                     "targets": [], "evidence": [f"会社ルール {d['rule_key']}"], "source": "code"})
+    try:   # 窓の間の柱が、1階の部品の中で上がつながらない所（決定 2-4：直す案にして人が決める。平屋だけ。core/lintel.py）
+        from core.lintel import fragile_post_findings
+        out += fragile_post_findings(ov.apply(b, ov.load(alias))[0], company)
+    except Exception as e:  # noqa: BLE001  この検査の失敗で、ほかの指摘を止めない（失敗したことは知らせる）
+        out.append({"view": "plan", "kind": "print", "severity": "低", "targets": [], "source": "code",
+                    "message": f"窓の間の柱の検査が途中で止まりました（{type(e).__name__}）。ほかの検査の結果は出ています",
+                    "evidence": ["コードの検査（窓の間の柱）"]})
     try:
         from core.paths import property_files
         has_drawings = bool(property_files(alias).jww)

@@ -37,6 +37,7 @@ model:
   roof_cut_smooth_mm: 1.5
   window_frames: false
   split_at_ceiling: true
+  lintel_band_mm: 100
   floor_joint: lower_blocks
   interior_wall_top: ceiling
   exterior_finish: none            # 外壁はサイディング：ざらざら（ファジースキン）にしない（架空。自社は塗り壁）

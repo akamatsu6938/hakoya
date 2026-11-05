@@ -21,6 +21,7 @@ from shapely.affinity import translate
 from shapely.geometry import LineString, Polygon, box
 from shapely.ops import nearest_points, unary_union
 
+from core.lintel import LINTEL_MARGIN_MM, band_of, seam_runs
 from core.roof_geom import MultiPlane, surfaces as roof_surfaces
 from core.print_split import roof_print_faces
 
@@ -528,12 +529,79 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
                                  head - 1, z_cut + 1))
         return out
 
+    # ずれ止めの三角を置く角（外壁の内側の角。四隅に近いもの）。内壁とぶつかる角は使わない（SPEC §8）。
+    # 窓の上の帯をこの三角から離すので、壁を分ける前に決める（三角そのものは下の「ずれ止めの三角」で作る）
+    ext_inner = unary_union([wall_rect(w) for w in ext_walls])
+    house_inside = Polygon(outline.exterior).difference(ext_inner)
+    house_inside = max(getattr(house_inside, "geoms", [house_inside]), key=lambda g: g.area)
+    avoid = unary_union([wall_rect(w) for w in int_walls + hanging]) if int_walls + hanging else None
+    r_corners = _pick_corners(house_inside, leg=leg, avoid=avoid)
+
+    def band_spans(w: dict) -> list[tuple[float, float, float, float]]:
+        """窓の上の帯（壁の lintel_band_mm > 0。決定 2-4）：(t0, t1, 下端, 上端)。t は壁の始点からの距離。
+        継ぎ目に上端が届く開口の並び（間に細い柱がある所）の両端から LINTEL_MARGIN_MM 伸ばした範囲で、
+        上端は「いちばん高い上端＋帯」。ずれ止めの三角（屋根から1階の角にはまる）からは、三角の辺＋はめあいの隙間＋最小の太さだけ離す。
+        帯の上に残る屋根の部品の壁が最小の太さより薄くなるときは、その所の壁の上（屋根の下の面）まで帯にする。"""
+        bw = band_of(w)
+        if z_cut is None or bw <= 0:
+            return []
+        s0, e0 = np.array(w["start"], float), np.array(w["end"], float)
+        L = float(np.linalg.norm(e0 - s0)) or 1.0
+        d = (e0 - s0) / L
+        rect = wall_rect(w)
+        pad = clearance + min_feat
+        zones = []
+        for v, e1, e2 in r_corners:
+            tri = Polygon([v, v + e1 * leg, v + e2 * leg])
+            if tri.distance(rect) < pad:
+                ts = [float((np.asarray(p, float) - s0) @ d) for p in tri.exterior.coords]
+                zones.append((min(ts) - pad, max(ts) + pad))
+        top_fixed = _wall_top(w)
+        spans = []
+        for run in seam_runs(openings_by_wall.get(w["id"], []), z_cut, min_feat):
+            t0, t1 = max(run["t0"] - LINTEL_MARGIN_MM, -1.0), min(run["t1"] + LINTEL_MARGIN_MM, L + 1.0)
+            for a, c in zones:
+                if c <= t0 or a >= t1:
+                    continue
+                if (a + c) / 2 <= (t0 + t1) / 2:
+                    t0 = max(t0, c)
+                else:
+                    t1 = min(t1, a)
+            if t1 - t0 < min_feat:
+                continue
+            top = run["head"] + max(bw, min_feat)
+            if top_fixed is not None:
+                wall_top = top_fixed
+            else:
+                wall_top = min(plane_z(rb, *(s0 + d * t)) for t in np.linspace(max(t0, 0.0), min(t1, L), 5))
+            if wall_top - top < min_feat:
+                top = roof_zmax
+            bottom = min(z_cut, run["head_min"]) - 1.0
+            if spans and t0 - spans[-1][1] < min_feat:          # 近い並びの帯はつなぐ（屋根の部品に細い壁を残さない）
+                p0, _, pb, pt = spans[-1]
+                spans[-1] = (p0, max(t1, spans[-1][1]), min(pb, bottom), max(pt, top))
+            else:
+                spans.append((t0, t1, bottom, top))
+        return spans
+
+    band_parts: list[Manifold] = []    # 1階の部品に残した帯（屋根の部品から同じ所を除く）
+    band_walls: list[str] = []
+
     def split_wall(w: dict) -> tuple[Manifold, Manifold]:
         s = wall_solid(w)
         lo = lower_part(s)
         cuts = lintel_slivers(w)
+        boxes = [prism(wall_rect(w, extra=40, t0=t0, t1=t1), z0, z1) for t0, t1, z0, z1 in band_spans(w)]
+        if cuts and boxes:
+            cuts = [union_all(cuts) - union_all(boxes)]   # 帯の下の細い壁は抜かない（帯とつながる）
         if cuts:
             lo = lo - union_all(cuts)
+        if boxes:
+            kept = s ^ union_all(boxes)
+            if not kept.is_empty():
+                lo = union_all([lo, kept])
+                band_parts.append(kept)
+                band_walls.append(w["id"])
         return lo, upper_part(s)
 
     # 1階の外壁（ファジースキンの部品）と、天井より上の外壁（屋根のオブジェクトの部品へ）
@@ -575,6 +643,9 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         notes["floor1"].append(f"土間（床が FL より低い部屋）{len(doma)} か所は床の板を抜き、基礎のパーツに土間を作った")
     if z_cut is not None:
         notes["floor1"].append(f"外壁は天井の高さ（{z_cut:.0f}）で分けた。それより上は屋根と一緒に印刷する")
+    if band_walls:
+        notes["floor1"].append("外壁 " + "・".join(band_walls) + " は、天井の高さに届く窓・ドアの並びの上に帯を残した"
+                               "（窓の間の柱の上を1階の部品の中でつなぐ。人の修正 lintel_band_mm）")
 
     # 基礎：外周の帯＋内壁の下の帯＋ポーチ＋土間＋袖壁などの下
     ring = outline.difference(outline.buffer(-band, join_style="mitre"))
@@ -621,7 +692,10 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         margin = float(m.get("fuzzy_skin_opening_margin_mm", 0.0)) * scale
         house = Polygon(outline.exterior)
         skin2d = house.difference(house.buffer(-band, join_style="mitre"))
-        skin = prism(skin2d, ftop - 1, (z_cut if z_cut is not None else roof_zmax) + 1)
+        skin_top = z_cut if z_cut is not None else roof_zmax
+        if band_parts:   # 窓の上の帯（天井の高さより上まで残した1階の外壁）の外の面も、同じ層をざらざらにする
+            skin_top = max(skin_top, max(p.bounding_box()[5] for p in band_parts))
+        skin = prism(skin2d, ftop - 1, skin_top + 1)
         keep_out = []
         for w in ext_walls:
             for o in openings_by_wall.get(w["id"], []):
@@ -729,12 +803,7 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         if split_ids:
             notes["roof"].append("天井の高さ（" + f"{z_cut:.0f}" + "）より上の部分を屋根の外壁に入れた壁：" + "・".join(split_ids))
 
-    # ずれ止めの三角：外壁の内側の角（四隅に近いもの）。内壁とぶつかる角は使わない（SPEC §8）
-    ext_inner = unary_union([wall_rect(w) for w in ext_walls])
-    house_inside = Polygon(outline.exterior).difference(ext_inner)
-    house_inside = max(getattr(house_inside, "geoms", [house_inside]), key=lambda g: g.area)
-    avoid = unary_union([wall_rect(w) for w in int_walls + hanging]) if int_walls + hanging else None
-    r_corners = _pick_corners(house_inside, leg=leg, avoid=avoid)
+    # ずれ止めの三角：外壁の内側の角（四隅に近いもの。角は壁を分ける前に r_corners で決めた）
     for v, e1, e2 in r_corners:
         tri = Polygon([v, v + e1 * leg, v + e2 * leg])
         tri_zones.append(tri.buffer(clearance + min_feat, join_style="mitre"))
@@ -749,6 +818,10 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     notes["roof"].append(f"ずれ止めの三角を {len(r_corners)} か所（外壁の内側の角" + ("、天井の高さで1階にはまる）" if z_cut else "）"))
     roof_ext = union_all(roof_ext_parts)
     roof_solid = union_all(roof_parts) - roof_ext          # 同じオブジェクトの部品どうしは重ねない
+    if band_parts:   # 窓の上の帯は1階の部品が受け持つ。屋根の部品からは同じ所をちょうど除く（重ねない・すき間も空けない）
+        band_all = union_all(band_parts)
+        roof_ext, roof_solid = roof_ext - band_all, roof_solid - band_all
+        notes["roof"].append("外壁 " + "・".join(band_walls) + " の窓の上の帯（1階の部品に残した所）は、屋根の外壁から除いた")
     if band_mm:   # 屋根の外壁も、窓・ドアのまわりはざらざらにしない（1階の外壁と同じ幅）
         fuzzy_walls = [w for w in walls if w["kind"] in ("exterior", "standalone")]
         margin_mm = m.get("fuzzy_skin_opening_margin_mm", 0.0)

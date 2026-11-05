@@ -16,6 +16,7 @@ field に "_delete" を指定すると、その部材を取り除く（to は使
 屋根の形は target "Y1" など、field "pitch"（勾配。10 に対する値）・"low_side"（低い側。片流れだけ）・
 "eave_tip_mm"（軒先の高さ＝屋根の上の面のいちばん低い所）。当てるときにコードが面の式を計算し直す。
 軒天の高さは field "soffit_z_mm"（GL から）。glb に軒天（typeESnok）がある屋根だけ。屋根を上下させると軒天も一緒に動く。
+窓の上の帯は、外壁・単独の壁の field "lintel_band_mm"（実寸 mm。building.json にはなく、ないときは 0＝帯なし。core/lintel.py）。
 """
 from __future__ import annotations
 
@@ -42,6 +43,7 @@ SOFFIT_FIELD = "soffit_z_mm"   # 軒天の高さ（GL から）。glb に軒天�
 PITCH_RANGE = (0.5, 12.0)                                 # 勾配（10 に対する値）
 SIDES = ("S", "N", "E", "W")
 REACH_ROOF_MM = 150.0                                     # 屋根の下の面からこれ以内に上端がある壁は「屋根まで届いている」
+LINTEL_FIELD = "lintel_band_mm"   # 窓の上の帯（外壁・単独の壁。ないときは 0。決定 2-4・core/lintel.py）
 
 
 def overrides_path(alias: str) -> Path:
@@ -75,10 +77,18 @@ def _is_roof(obj: dict) -> bool:
     return isinstance(obj, dict) and isinstance(obj.get("top_plane"), dict) and isinstance(obj.get("top_z_range_mm"), list)
 
 
+def _band_wall(obj: dict) -> bool:
+    """窓の上の帯を付けられる壁（外壁・単独の壁）。"""
+    return isinstance(obj, dict) and "start" in obj and "thickness_mm" in obj and obj.get("kind") in ("exterior", "standalone")
+
+
 def has_field(obj: dict, field: str) -> bool:
-    """項目があるか。"eave_mm.S" のような1段の入れ子も見る。屋根の形（勾配・低い側・軒先の高さ）は計算で出す。"""
+    """項目があるか。"eave_mm.S" のような1段の入れ子も見る。屋根の形（勾配・低い側・軒先の高さ）は計算で出す。
+    外壁・単独の壁の窓の上の帯（lintel_band_mm）は、building.json になくても「ある（0）」とみなす。"""
     if field in ROOF_GEOM_FIELDS and _is_roof(obj):
         return True                     # 向きを変えられない屋根（切妻・寄棟など）は、当てるときに理由つきで断る
+    if field == LINTEL_FIELD and _band_wall(obj):
+        return True
     head, _, tail = field.partition(".")
     if not tail:
         return field in obj
@@ -92,6 +102,8 @@ def get_field(obj: dict, field: str):
         if field == "eave_tip_mm":
             return float(obj["top_z_range_mm"][0])
         return obj.get("low_side")
+    if field == LINTEL_FIELD and _band_wall(obj):
+        return obj.get(LINTEL_FIELD, 0)
     head, _, tail = field.partition(".")
     return obj[head][tail] if tail else obj[field]
 
@@ -111,6 +123,11 @@ def check_value(field: str, to, target: str = "") -> None:
     家全体を見ないと決まらないもの（天井と屋根の間など）は level_problems で確かめる。"""
     if field == SOFFIT_FIELD and (not isinstance(to, (int, float)) or isinstance(to, bool) or not 500 <= float(to) <= 20000):
         raise ValueError("軒天の高さは GL からの mm（500〜20000）で入れてください")
+    if field == LINTEL_FIELD:
+        from core.lintel import BAND_RANGE_MM
+        lo, hi = BAND_RANGE_MM
+        if not isinstance(to, (int, float)) or isinstance(to, bool) or not lo <= float(to) <= hi:
+            raise ValueError(f"窓の上の帯は {lo:.0f}〜{hi:.0f}mm（実寸）の数値で入れてください（0 は帯なし）")
     if field.startswith(EAVE_PREFIX):
         lo, hi = EAVE_RANGE_MM
         if not isinstance(to, (int, float)) or not lo <= float(to) <= hi:
@@ -545,6 +562,8 @@ def add(alias: str, building: dict, target: str, field: str, to, value_source: s
         raise KeyError(f"階の {field} は直せません（直せるのは床の高さ fl_mm と天井の高さ ceiling_mm）。")
     if field != DELETE:
         check_value(field, to, target)
+    if field == LINTEL_FIELD and len(current.get("levels") or []) > 1:
+        raise ValueError("2階建ての家には、窓の上の帯（lintel_band_mm）はまだ作れません（平屋だけ）")
     if field in ROOF_GEOM_FIELDS and _is_roof(obj):
         check_roof_value(field, to)
     n = max([int(x["id"][2:]) for x in items if x["id"][2:].isdigit()] + [0]) + 1

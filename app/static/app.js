@@ -328,7 +328,8 @@ const VIEW_OF = { S: 'S', N: 'N', E: 'E', W: 'W', plan: 'plan', plan2: 'plan2', 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const FIELD = { thickness_mm: '厚み', width_mm: '幅', offset_mm: '壁の端からの位置', sill_fl_mm: '下端 FL+', head_fl_mm: '上端 FL+',
-  fl_mm: '床の高さ', ceiling_mm: '天井の高さ', pitch: '勾配（10 に対して）', low_side: '低い側', eave_tip_mm: '軒先の高さ', soffit_z_mm: '軒天の高さ' };
+  fl_mm: '床の高さ', ceiling_mm: '天井の高さ', pitch: '勾配（10 に対して）', low_side: '低い側', eave_tip_mm: '軒先の高さ', soffit_z_mm: '軒天の高さ',
+  lintel_band_mm: '窓の上の帯（実寸 mm）' };
 const LEVEL_JA = { '1F': '1階', '2F': '2階' };
 for (const s of 'WESN') FIELD[`eave_mm.${s}`] = `軒の出（${SIDE[s]}）`;
 

@@ -29,7 +29,8 @@ from core.paths import out_dir
 from core.rules import default_company, load_rules, rule
 
 VIEWS = ("S", "N", "E", "W", "plan", "plan2")    # plan2 は2階建ての2階の平面（平屋にはない）
-EDITABLE = {"walls": ("thickness_mm",), "openings": ("width_mm", "offset_mm", "sill_fl_mm", "head_fl_mm"),
+# 壁の lintel_band_mm：窓の上の帯（実寸 mm、ないときは 0。外壁・単独の壁だけ。平屋だけ。core/lintel.py）
+EDITABLE = {"walls": ("thickness_mm", "lintel_band_mm"), "openings": ("width_mm", "offset_mm", "sill_fl_mm", "head_fl_mm"),
             # 屋根の軒の出（外壁の外の面から屋根の先まで、板金・樋を除く）。模型は板金の分をさらに外に足す
             # 軒天の高さ（GL から）。glb に軒天がある屋根だけ（11/4 物件C）
             "roofs": tuple(f"eave_mm.{s}" for s in "WESN") + ("soffit_z_mm",)}
@@ -298,6 +299,10 @@ def propose_override(ctx: ToolContext, target: str, field: str, value_source: st
     else:
         if field not in EDITABLE.get(coll, ()):
             raise ToolError(f"{target} で直せる項目は {', '.join(EDITABLE.get(coll, ()))} です")
+        if field == "lintel_band_mm" and not ov.has_field(obj, field):
+            raise ToolError("窓の上の帯（lintel_band_mm）は外壁・単独の壁だけに付けられます")
+        if field == "lintel_band_mm" and len(ctx.building.get("levels") or []) > 1:
+            raise ToolError("2階建ての家には、窓の上の帯（lintel_band_mm）はまだ作れません（平屋だけ）")
         to = _value_from_source(ctx, coll, obj, field, value_source, number)
         now = ov.get_field(obj, field)
         if abs(to - float(now)) < 0.5:
@@ -343,7 +348,7 @@ TOOL_SPECS = {
                                       "required": ["view"], "additionalProperties": False}},
     "run_checks": {"fn": run_checks, "description": "コードの検査の結果（閉じた立体・離れた塊・造形範囲・glb との数の差）を返す。",
                    "schema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    "propose_override": {"fn": propose_override, "description": "直す案を1件つくる。数値は書かず、数値の出どころ value_source（majority:種類 / rule:項目 / glb / number）を指定する。数値はコードが計算する。number は人が書いた数値のときだけ。図面の寸法・注記は jww:plan:D3 のように番号で（get_drawing_region が返す）。屋根の軒の出は target=Y1・field=eave_mm.S のように辺を付ける（外壁の外の面から屋根の先まで、板金・樋を除く）。軒天の高さは target=Y1・field=soffit_z_mm（GL から。glb に軒天がある屋根だけ）。",
+    "propose_override": {"fn": propose_override, "description": "直す案を1件つくる。数値は書かず、数値の出どころ value_source（majority:種類 / rule:項目 / glb / number）を指定する。数値はコードが計算する。number は人が書いた数値のときだけ。図面の寸法・注記は jww:plan:D3 のように番号で（get_drawing_region が返す）。屋根の軒の出は target=Y1・field=eave_mm.S のように辺を付ける（外壁の外の面から屋根の先まで、板金・樋を除く）。軒天の高さは target=Y1・field=soffit_z_mm（GL から。glb に軒天がある屋根だけ）。天井の高さに届く窓が並ぶ外壁の、窓の間の柱の上をつなぐ帯は target=壁・field=lintel_band_mm・value_source=rule:model.lintel_band_mm（平屋だけ）。",
                          "schema": {"type": "object", "properties": {
                              "target": {"type": "string"}, "field": {"type": "string"}, "value_source": {"type": "string"},
                              "reason": {"type": "string"}, "number": {"type": "number"}, "finding": {"type": "string"}},
