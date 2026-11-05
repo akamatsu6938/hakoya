@@ -88,7 +88,9 @@ def house_axis(b: dict) -> np.ndarray:
     pts = np.array([p for w in walls for p in (w["start"], w["end"])], float) if walls else np.zeros((2, 2))
     ext = lambda d: float((pts @ d).max() - (pts @ d).min())
     u = d1 if ext(d1) >= ext(d2) else d2
-    if u[0] < -1e-9 or (abs(u[0]) <= 1e-9 and u[1] < 0):
+    # 向きの符号：大きい方の成分を正にする。前は x の成分で決めていたので、南北に長い家では、外壁のごく小さな傾き
+    # （building.json の丸めの 0.1mm でも）で向きが反転し、保存した分け目が鏡の位置になった（★11/5 見直し）
+    if u[0 if abs(u[0]) >= abs(u[1]) else 1] < 0:
         u = -u
     return u
 
@@ -243,23 +245,24 @@ def _face_positions(solid, u: np.ndarray, t: float, reach: float) -> list[float]
 
 
 def _island_ok(solid, u: np.ndarray, cuts: list[float]) -> bool:
-    """切ったせいで、どの部品にも新しく大きな離れた塊ができないか。"""
-    before = len([x for x in solid.decompose() if x.volume() > 1000.0])
+    """切ったせいで、どの部品にも新しく大きな離れた塊ができないか。もとの塊ごとに調べる：1つの塊は、どの部品の中でも
+    大きなかけら1つまで。前は部品の塊の数を「全体の塊の数」と比べていたので、もとから離れた塊がある部品（物件G の基礎など）
+    では、切ってできた新しい離れた塊を見逃した（★11/5 見直し）。"""
     u3, nu3 = (float(u[0]), float(u[1]), 0.0), (-float(u[0]), -float(u[1]), 0.0)
     edges = [None] + sorted(cuts) + [None]
-    for a, z in zip(edges[:-1], edges[1:]):
-        x = solid
-        if a is not None:
-            x = x.trim_by_plane(u3, a)
-        if z is not None:
-            x = x.trim_by_plane(nu3, -z)
-        if x.is_empty():
-            continue
-        bodies = [y for y in x.decompose() if y.volume() > 1000.0]
-        total = sum(y.volume() for y in bodies) or 1.0
-        big = [y for y in bodies if y.volume() >= ISLAND_SHARE * total]
-        if len(big) > max(1, before):
-            return False
+    for body in (x for x in solid.decompose() if x.volume() > 1000.0):
+        for a, z in zip(edges[:-1], edges[1:]):
+            x = body
+            if a is not None:
+                x = x.trim_by_plane(u3, a)
+            if z is not None:
+                x = x.trim_by_plane(nu3, -z)
+            if x.is_empty():
+                continue
+            parts = [y for y in x.decompose() if y.volume() > 1000.0]
+            total = sum(y.volume() for y in parts) or 1.0
+            if len([y for y in parts if y.volume() >= ISLAND_SHARE * total]) > 1:
+                return False
     return True
 
 
@@ -389,6 +392,8 @@ def choose(b: dict, parts: dict, rules: dict, saved: dict | None = None) -> Hous
     if saved and saved.get("source") == "human":
         su = np.array(saved["u"], float)
         cuts = [float(t) for t in saved["cuts"]]
+        if float(su @ u) < 0:                     # 保存したときと向きの符号が逆なら、位置も裏返す（同じ所を指すように）
+            cuts = sorted(-t for t in cuts)
         if len(cuts) == n and abs(float(su @ u)) > 0.999 and _pieces_fit(polys, u, cuts, limit):
             probs = [p for t in cuts for p in hard_problems(b, u, t, walls, keep_out, margin)]
             got = per_object(cuts, human=True)

@@ -208,3 +208,26 @@ def test_thin_cap_is_not_a_standalone_wall():
     wall = np.concatenate([_quad((0, 0), (2000, 0), 480, 2824, (0, -1)), _quad((0, 180), (2000, 180), 480, 2824, (0, 1))])
     w = wl.standalone_wall(wall, "glb:typeEKabe#51")
     assert w is not None and abs(w.thickness - 180) < 1e-6 and abs(w.length - 2000) < 1e-6
+
+
+@pytest.mark.parametrize("gap", [300.0, 380.0, 450.0, 520.0])
+def test_l_corner_end_is_not_pushed_across_a_gap_in_the_second_pass(gap):
+    """★11/5 見直し：L 字の角で相手の外の面まで伸ばした端（1回目）から、2回目に新しく線を引くと、その先の平行な壁まで
+    すき間を渡って伸びた（glb にない壁ができる）。2回目からは、もう交わる壁に触れている端を伸ばさない（walkinhome と同じ回し方）。"""
+    F, TI, TE = 72.5, 130.0, 162.0
+
+    def W(a, b, th=TI, kind="interior"):
+        return wl.Wall(start=np.array(a, float), end=np.array(b, float), thickness=th, kind=kind, bottom=624.0, top=3024.0)
+
+    ext = [W(a, b, TE, "exterior") for a, b in (((0, 0), (6000, 0)), ((6000, 0), (6000, 6000)), ((6000, 6000), (0, 6000)), ((0, 6000), (0, 0)))]
+    interior = [W((0, 3000), (3000 - F, 3000)), W((3000, 6000), (3000, 3000 + F)), W((3000 + gap, 0), (3000 + gap, 3500))]
+    from shapely.ops import unary_union
+    zone = unary_union([w.rect() for w in ext + interior]).buffer(5, join_style="mitre")
+    for k in range(2):
+        wl.extend_to_junctions(interior, ext + interior, zone=zone, skip_joined=k > 0)
+        interior = wl.merge_collinear(interior, None)
+    arm = next(w for w in interior if abs(w.start[1] - 3000) < 1 and abs(w.end[1] - 3000) < 1)
+    assert max(arm.start[0], arm.end[0]) == pytest.approx(3000 + TI / 2, abs=0.5)      # 角は相手の外の面まで（すき間は渡らない）
+    up = next(w for w in interior if abs(w.start[0] - 3000) < 1 and abs(w.end[0] - 3000) < 1)
+    corner = box(3000 - TI / 2, 3000 - TI / 2, 3000 + TI / 2, 3000 + TI / 2)
+    assert unary_union([arm.rect(), up.rect()]).buffer(0.01).contains(corner)              # 角はふさがる（すき間も欠けもない）

@@ -214,3 +214,52 @@ def test_screen_can_move_and_reset_the_split_line(tmp_path, monkeypatch):
     assert c.post("/api/split/物件Z", json={"cuts_mm": [9000.0]}).status_code == 404
     assert c.delete("/api/split/物件T").json()["house_cut"]["source"] == "auto"
     assert server.PIECE_STL.match("floor1_p2.stl") and not server.PIECE_STL.match("../floor1_p2.stl")
+
+
+def test_new_island_is_found_even_when_the_part_already_has_a_detached_body():
+    """★11/5 見直し：もとから離れた塊（離れて立つ塀など）がある部品では、切ってできた新しい離れた塊を見逃していた
+    （部品の塊の数を「全体の塊の数」と比べていたため）。塊ごとに調べるので、塀があってもなくても同じ所で切る。"""
+    def house(detached):
+        b = _long_house()
+        b["walls"].append({"id": "W95", "level": "1F", "kind": "interior", "start": [3000.0, 6000.0], "end": [3000.0, 7000.0],
+                           "thickness_mm": 130.0, "bottom_mm": 624, "height": 3024})     # W91 に T 字でつく短い間仕切り
+        if detached:
+            b["walls"].append({"id": "W96", "level": "1F", "kind": "standalone", "start": [W + 1500.0, 1000.0],
+                               "end": [W + 1500.0, 3000.0], "thickness_mm": 120.0, "bottom_mm": 480, "height": 2000})
+        return b
+    plain = bs.choose(house(False), build_model(house(False), RULES), RULES)
+    b = house(True)
+    parts = build_model(b, RULES)
+    with_wall = bs.choose(b, parts, RULES)
+    assert with_wall.objects["foundation"] == plain.objects["foundation"]                # 塀があっても、離れた塊を作る所では切らない
+    for key in with_wall.objects:
+        whole = bs._union(bs.body_objects(parts)[key])
+        assert bs._island_ok(whole, with_wall.u, with_wall.objects[key])
+
+
+def test_axis_sign_does_not_flip_with_a_tiny_tilt_and_saved_cut_keeps_its_place():
+    """★11/5 見直し：南北に長い家で、外壁のごく小さな傾き（0.1mm）で向きの符号が反転し、保存した分け目が鏡の位置になった。"""
+    def shifted(dx_end):
+        b = _long_house()
+        ox, oy = -W / 2, -L / 2                                                           # Walk in home のように原点をまたぐ
+
+        def mv(q):
+            return [q[0] + ox, q[1] + oy]
+        for w in b["walls"]:
+            w["start"], w["end"] = mv(w["start"]), mv(w["end"])
+        for o in b["openings"]:
+            o["center"] = mv(o["center"])
+        b["foundation"]["outline"] = [mv(q) for q in b["foundation"]["outline"]]
+        for r in [b["roof"]] + b["roofs"]:
+            r["footprint"] = [mv(q) for q in r["footprint"]]
+            for k in ("top_plane", "bottom_plane"):
+                r[k]["c"] = r[k]["c"] - r[k]["a"] * ox - r[k]["b"] * oy
+        east = next(w for w in b["walls"] if w["kind"] == "exterior" and abs(w["start"][0] - w["end"][0]) < 1 and w["start"][0] > 0)
+        east["end"] = [east["end"][0] + dx_end, east["end"][1]]
+        return b
+    ua, ub = bs.house_axis(shifted(+0.1)), bs.house_axis(shifted(-0.1))
+    assert float(ua @ ub) > 0.999                                                        # 傾きの向きで反転しない
+    b = shifted(-0.1)
+    saved = {"u": [float(-ub[0]), float(-ub[1])], "cuts": [-1500.0], "source": "human"}     # 逆向きで保存した、y=+1500 の分け目
+    h = bs.choose(b, build_model(b, RULES), RULES, saved)
+    assert h.source == "human" and abs(h.cuts[0] * float(h.u[1]) - 1500.0) < 1.0          # 同じ所（y=+1500）を指す

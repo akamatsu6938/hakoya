@@ -415,8 +415,8 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
                 interior.remove(w)
                 skipped.append({"source": (w.sources or ["glb"])[0], "reason": "床の穴（階段）のまわりの手すり壁（造作）なので壁にしない"})
     zone = unary_union([region, exterior_fp] + door_fps).buffer(5, join_style="mitre")
-    for _ in range(2):  # つないだ後にもう一度：つながった壁の端も、ぶつかる壁まで伸ばす
-        wl.extend_to_junctions(interior, outer + interior, zone=zone)
+    for k in range(2):  # つないだ後にもう一度：つながった壁の端も、ぶつかる壁まで伸ばす（もう触れている端は伸ばさない）
+        wl.extend_to_junctions(interior, outer + interior, zone=zone, skip_joined=k > 0)
         interior = wl.merge_collinear(interior, region)
     # ★11/4 デモの家・物件C〜M：床から天井までの戸の所に壁の面がなく、つないでも壁ごと抜けていた → 戸の枠に合わせて壁を足し、
     # もう一度つなぐ（ふだんどおりつながった戸には足さない）
@@ -426,7 +426,7 @@ def reconstruct(model: GlbModel, level: dict, rules: dict, band: tuple = (None, 
         near = unary_union([w.rect().buffer(DOOR_WALL_NEAR_MM) for w in added])
         for _ in range(2):   # 伸ばすのは、足した壁と、その近くに端がある壁だけ（ほかの壁は1回目のまま）
             movers = [w for w in interior if near.contains(Point(w.start)) or near.contains(Point(w.end))]
-            wl.extend_to_junctions(movers, outer + interior, zone=zone)
+            wl.extend_to_junctions(movers, outer + interior, zone=zone, skip_joined=True)
             interior = wl.merge_collinear(interior, region)
     kept = wl.drop_covered(outer + interior, keep_kinds=("exterior", "standalone"), ratio=0.5)
     interior = [w for w in kept if w.kind == "interior"]

@@ -619,8 +619,16 @@ def _combine(members: list[Wall], start: np.ndarray, end: np.ndarray) -> Wall:
 JOIN_TOL_MM = 40.0     # L 字の角で、相手の壁の端の先をどこまで「ぶつかる」と見るか（厚みの半分＋これ）
 
 
+def _touching_crossing(w: Wall, p: np.ndarray, targets: list[Wall]) -> list[Wall]:
+    """端 p がもう触れている、交わる向きの壁（平行でない壁）。つないだ後の端なら1つ以上ある。"""
+    pt = Point(p)
+    return [t for t in targets
+            if t is not w and abs(float(np.dot(t.direction, w.direction))) < 0.999 and t.rect().distance(pt) <= 1.0]
+
+
 def extend_to_junctions(walls: list[Wall], targets: list[Wall], zone: Polygon | None = None,
-                        short_ext: float = 400.0, max_ext: float = 2000.0, zone_ratio: float = 0.9) -> None:
+                        short_ext: float = 400.0, max_ext: float = 2000.0, zone_ratio: float = 0.9,
+                        skip_joined: bool = False) -> None:
     """内壁の端を、ぶつかる壁の中心線まで伸ばす（壁どうしをすき間なくつなぐため）。
 
     short_ext までは無条件に伸ばす（部屋の角から交わる壁の中心線まで）。
@@ -630,10 +638,16 @@ def extend_to_junctions(walls: list[Wall], targets: list[Wall], zone: Polygon | 
     （中心線から 72.5mm）で止まっていて、相手の線を厚みの半分（65）延ばしても届かず、7.5mm のすき間が残っていた。
     → 相手の線を「厚みの半分＋JOIN_TOL_MM」まで延ばして当たりを探し、相手の端の先に当たったとき（L 字）は、
     相手の外の面まで伸ばす（中心線で止めると、角の外側に厚みの半分の四角い欠けが残るため）。
+    skip_joined（2回目からのつなぎ）：もう交わる壁に触れている端を、その壁を突き抜けて伸ばすときは、近くても
+    （short_ext 以内でも）伸ばす所が zone（内壁の範囲・ドアの位置）の中か確かめる。
+    ★11/5 見直し：1回目で L 字の角の相手の外の面まで伸ばした端から、2回目に新しく線を引くと、その壁を突き抜けて、
+    先 400mm 以内の平行な壁まで、部屋の中のすき間を渡って伸びた（glb にない壁ができる）。
+    ドアの所を渡ってつなぐのは今までどおり（物件H などで、ドアの入る壁をこれで作っている）。
     """
     for w in walls:
         for which in ("start", "end"):
             p = getattr(w, which)
+            touching = _touching_crossing(w, p, targets) if skip_joined else []
             d = -w.direction if which == "start" else w.direction
             ray = LineString([p, p + d * max_ext])
             hits = []
@@ -659,7 +673,10 @@ def extend_to_junctions(walls: list[Wall], targets: list[Wall], zone: Polygon | 
                         continue      # 前は当たらなかった所（L 字の角のためだけの当たり）は、遠くまで伸ばす決まりに使わない
                 hits.append((dist, q))
             for dist, q in sorted(hits, key=lambda h: h[0]):
-                if dist <= short_ext:
+                # もう触れている壁を突き抜けて伸ばすときは、近くても「伸ばす所が内壁の範囲・ドアの位置か」を確かめる
+                # （ドアの所はつなぐ。部屋の中のすき間は渡らない）
+                through = bool(touching) and not any(t.rect().buffer(1.0).contains(Point(q)) for t in touching)
+                if dist <= short_ext and not through:
                     setattr(w, which, q)
                     break
                 if zone is None:
