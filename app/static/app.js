@@ -1848,7 +1848,7 @@ function fixCard(req) {
 }
 
 const proposalElementId = (p) => { const f = String(p.field || ''); return f.startsWith('eave_mm.') ? `${p.target}:${f.slice(8)}` : String(p.target); };
-const changeText = (p) => (p.field === '_delete' ? '取り除いた' : `${FIELD[p.field] || p.field} ${p.from} → ${p.to}`);
+const changeText = (p) => (p.field === '_delete' ? '取り除いた' : `${FIELD[p.field] || p.field} ${valText(p.from)} → ${valText(p.to)}`);
 const doneText = (p) => `${p.target} ${changeText(p)}`;
 
 function propEl(req, p, i) {                   // 直す案のカード：押すと光る。承認・却下・直した印
