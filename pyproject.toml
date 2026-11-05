@@ -29,6 +29,8 @@ packages = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# ★11/5：失敗の表示に、関数に渡した値（物件のファイルの場所＝施主名入り）が出ないように、短い表示にする
+addopts = "--tb=short"
 markers = [
     "slow: 時間のかかるテスト（編集のたびの自動テストでは飛ばす）",
     "realdata: data/ の実データを使うテスト（data/ がなければ飛ばす）",

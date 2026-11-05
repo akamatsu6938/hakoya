@@ -25,8 +25,9 @@ def test_b_koumuten_has_every_item_of_jisha():
     b = yaml.safe_load((RULES_DIR / "bkoumuten.yaml").read_text(encoding="utf-8"))
     assert _keys(a) - {"company", "name_ja"} == _keys(b) - {"company", "name_ja"}
     diff = {k for k in _keys(a) - {"company", "name_ja"} if _get(a, k) != _get(b, k)}
-    assert {"walls.exterior_thickness_mm", "walls.interior_thickness_mm", "model.roof_overhang_mm", "model.exterior_finish",
+    assert {"walls.exterior_thickness_mm", "walls.interior_thickness_mm", "model.exterior_finish",
             "openings.door_top_fl_mm", "levels.gl_to_foundation_top_mm", "levels.gl_to_1fl_mm"} <= diff
+    assert _get(b, "model.roof_overhang_mm") == _get(a, "model.roof_overhang_mm")    # ★11/5 作者「板の出は今までと一緒」
 
 
 def _get(d: dict, dotted: str):
@@ -71,7 +72,7 @@ def test_company_screen(data_dir):
 
 @pytest.mark.realdata
 def test_same_house_is_rebuilt_with_b_koumuten_rules():
-    """物件A を B工務店の決まりで作ると、壁の厚み・屋根板の出・外壁の仕上げが変わり、「いつもと違う」も変わる。"""
+    """物件A を B工務店の決まりで作ると、壁の厚み・外壁の仕上げが変わり、「いつもと違う」も変わる（屋根板の出は同じ。11/5）。"""
     from core.paths import aliases
     if "物件A" not in aliases():
         pytest.skip("物件A がありません")
@@ -85,7 +86,7 @@ def test_same_house_is_rebuilt_with_b_koumuten_rules():
     assert th(a, "interior") == {130} and th(b, "interior") == {150}
     rb = load_rules("bkoumuten")
     parts = build_model(b, rb)
-    assert any("2.0mm" in n for n in parts["roof"].notes)                          # 屋根板の出（破風・鼻隠しの分）
+    assert any("1.0mm" in n for n in parts["roof"].notes)                          # 屋根板の出（自社と同じ）
     rows_a = {r["rule_key"]: r["match"] for r in check_property(a, load_rules("jisha")) if "rule_key" in r}
     rows_b = {r["rule_key"]: r["match"] for r in check_property(b, rb) if "rule_key" in r}
     assert rows_a != rows_b and any(v is False for v in rows_b.values())

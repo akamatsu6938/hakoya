@@ -22,6 +22,7 @@ def repo(tmp_path):
     (tmp_path / "old.md").write_text(f"昔のメモ：{WORD}", encoding="utf-8")
     (tmp_path / "sjis.txt").write_bytes(WORD.encode("cp932"))                      # Shift_JIS でも見つける
     (tmp_path / "spaced.txt").write_text("架 空 太 郎 邸", encoding="utf-8")           # 空白を入れても見つける
+    (tmp_path / "wide.txt").write_text("架空　太郎邸", encoding="utf-8")            # 全角の空白でも見つける（★11/5）
     (tmp_path / "pic.txt").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 20)              # 拡張子を変えた画像
     (tmp_path / "ok.py").write_text("print('hello')  # noreply@anthropic.com と例示用の someone@example.com は許す", encoding="utf-8")
     (tmp_path / f"{WORD}の図面.txt").write_text("中身は大丈夫", encoding="utf-8")       # 名前に言葉
@@ -38,6 +39,7 @@ def test_scan_finds_words_in_history_without_printing_them(repo, capsys):
     assert not r["ok"] and r["commits"] == 2
     kinds = {(p["kind"], p["where"]) for p in r["problems"]}
     assert ("ng_word", "old.md") in kinds and ("ng_word", "sjis.txt") in kinds and ("ng_word", "spaced.txt") in kinds
+    assert ("ng_word", "wide.txt") in kinds
     assert ("binary", "pic.txt") in kinds
     assert any(k == "ng_word_in_path" for k, _ in kinds)
     assert any(k == "email" and w.startswith("コミットの文") for k, w in kinds)

@@ -8,10 +8,20 @@ from pathlib import Path
 from core.paths import LOCAL_PATHS, load_local_paths
 
 
+NG_FORMAT_MESSAGE = ("data/local_paths.yaml の ng_words の書き方が違います。「ng_words:」の下に「  - 言葉」を1行に1つ書き、"
+                     "「-」のあとは半角の空白にしてください（全角の空白だと、言葉の並びではなく1つの文として読まれます）")
+
+
 def clean_words(items) -> list[str]:
     """YAML の言葉の並びを文字の並びにする。空の行（`- ` だけ）は捨てる。
-    ★11/4：空の行は None になり、str(None) で「None」という言葉になって、コードの None に当たっていた。"""
-    return [str(w) for w in (items or []) if w is not None and str(w).strip()]
+    ★11/4：空の行は None になり、str(None) で「None」という言葉になって、コードの None に当たっていた。
+    ★11/5：「-」のあとが全角の空白だと、並びではなく1つの文になり、1文字ずつの言葉（「-」など）になって全部止まっていた
+    → 並び以外は、分かる文で止める（言葉そのものは文に入れない）。"""
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        raise ValueError(NG_FORMAT_MESSAGE)
+    return [str(w) for w in items if w is not None and str(w).strip()]
 
 
 def ng_words(path: Path | None = None) -> list[str]:

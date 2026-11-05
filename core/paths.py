@@ -36,6 +36,14 @@ class PropertyFiles:
     jww: dict[str, Path] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)   # 場所を読んで分かったこと（元のファイル名は書かない）
 
+    def __repr__(self) -> str:
+        """場所（元のファイル名に施主名が入る）は出さない。★11/5：テストが失敗したとき、pytest がこの値をそのまま表示して、
+        物件B の glb のファイル名（施主名入り）が画面に出た。種類と数だけにする。"""
+        return (f"PropertyFiles(alias={self.alias!r}, glb={'あり' if self.glb else 'なし'}, "
+                f"jww_folder={'あり' if self.jww_folder else 'なし'}, jww={sorted(self.jww)}, notes={len(self.notes)}件)")
+
+    __str__ = __repr__
+
     @property
     def glb_label(self) -> str:
         """出力に書いてよい glb の名前（元のファイル名は使わない）。"""
@@ -121,8 +129,8 @@ def parse_local_paths(text: str) -> dict:
     except yaml.YAMLError as e:
         mark = getattr(e, "problem_mark", None) or getattr(e, "context_mark", None)
         where = f"{mark.line + 1} 行目あたり" if mark else "どこか"
-        raise ValueError(f"data/local_paths.yaml の {where}が YAML として読めません。場所を \"…\" で囲むと \\ がそのまま書けないので、"
-                         "'…' で囲むか、囲まずに書いてください") from None
+        raise ValueError(f"data/local_paths.yaml の {where}が YAML として読めません。よくある原因：①「- 言葉」の「-」のあとの空白が全角になっている"
+                         "（半角の空白にする）②場所を \"…\" で囲んでいる（\\ がそのまま書けないので、'…' で囲むか、囲まずに書く）") from None
     if not isinstance(data, dict):
         raise ValueError("data/local_paths.yaml の形が違います（「物件A:」のように仮名で始まる書き方にしてください）")
     return data

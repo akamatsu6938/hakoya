@@ -31,7 +31,7 @@ model:
   foundation_band_mm: 150
   upper_floor_plate_mm: 3.0
   plate_thickness_mm: 2.0
-  roof_overhang_mm: 2.0            # 屋根板を外壁から4辺とも出す量（模型寸法）。破風・鼻隠しの分を厚めに見せる（架空。自社は 1.0）
+  roof_overhang_mm: 1.0            # 屋根板を外壁から4辺とも出す量（模型寸法）。★11/5 作者「板の出は今までと一緒」（2.0 → 1.0）
   roof_print: face_down
   print_bed_margin_mm: 5.0
   roof_cut_smooth_mm: 1.5

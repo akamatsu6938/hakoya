@@ -70,9 +70,12 @@ def scan_blob(path: str, blob: bytes, words: list[tuple[int, list[bytes]]]) -> l
         if label and blob.startswith(sig):
             found.append(("binary", f"中身が {label}"))
     flat = re.sub(rb"\s+", b"", blob)
-    norm = unicodedata.normalize("NFKC", blob.decode("utf-8", errors="ignore")).encode("utf-8")
+    text_u = unicodedata.normalize("NFKC", blob.decode("utf-8", errors="ignore"))
+    norm = text_u.encode("utf-8")
+    # ★11/5：全角の空白（バイトの \s には入らない）で区切った名前も見つける（言葉を空白なしで入れたとき、前は見逃した）
+    norm_flat = re.sub(r"\s+", "", text_u).encode("utf-8")
     for i, forms in words:
-        if any(f in blob or f in flat or f in norm for f in forms):
+        if any(f in blob or f in flat or f in norm or f in norm_flat for f in forms):
             found.append(("ng_word", f"ng_words の {i} 番目"))
     text = blob.decode("utf-8", errors="ignore")
     if any(p.search(text) for p in API_KEY_PATTERNS):

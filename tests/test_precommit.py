@@ -64,3 +64,17 @@ def test_broken_yaml_does_not_show_the_line(tmp_path):
     with pytest.raises(ValueError) as e:
         load_ng_words(p)
     assert "3 行目" in str(e.value) and "架空施主" not in str(e.value) and e.value.__cause__ is None
+
+
+def test_full_width_space_after_dash_stops_with_a_clear_message(tmp_path, monkeypatch):
+    """★11/5：「-」のあとが全角の空白だと、並びではなく1つの文になる。1文字ずつの言葉にせず、分かる文で止める（言葉は文に入れない）。"""
+    import pytest
+
+    from tools import precommit_check as pc
+    p = tmp_path / "local_paths.yaml"
+    p.write_text("物件C:\n  glb: C:/x\n  ng_words:\n    -\u3000架空施主\n", encoding="utf-8")
+    with pytest.raises(ValueError) as e:
+        pc.load_ng_words(p)
+    assert str(e.value) == pc.NG_FORMAT_MESSAGE and "架空施主" not in str(e.value)
+    monkeypatch.setattr(pc, "LOCAL_PATHS", p)
+    assert pc.main() == 1                                                          # コミットを止める

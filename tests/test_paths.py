@@ -126,3 +126,23 @@ def test_unreadable_folders_do_not_show_the_place(tmp_path, monkeypatch):
     assert glb is None and "PermissionError" in why and "架空施主" not in why
     jww, notes = detect_jww(folder)
     assert jww == {} and "PermissionError" in notes[0] and "架空施主" not in notes[0]
+
+
+def test_ng_words_written_as_one_sentence_stops_with_a_clear_message(tmp_path):
+    """★11/5：「-」のあとが全角の空白 → 1文字ずつの言葉（「-」が全部の出力に当たって止まる）にせず、書き方の文で止める。"""
+    import pytest
+
+    from core.privacy import NG_FORMAT_MESSAGE, clean_words
+    p = _yaml(tmp_path, {"物件C": {"glb": "y", "ng_words": "-\u3000架空"}})
+    with pytest.raises(ValueError) as e:
+        ng_words(p)
+    assert str(e.value) == NG_FORMAT_MESSAGE and "架空" not in str(e.value)
+    assert clean_words(None) == [] and clean_words(["架空", None, " "]) == ["架空"]
+
+
+def test_broken_yaml_message_mentions_the_full_width_space(tmp_path):
+    from core.paths import parse_local_paths
+    import pytest
+    with pytest.raises(ValueError) as e:
+        parse_local_paths("ng_words:\n  - 架空\n  -\u3000仮名\n")
+    assert "全角" in str(e.value) and "架空" not in str(e.value) and "仮名" not in str(e.value)

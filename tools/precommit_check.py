@@ -22,6 +22,9 @@ API_KEY_PATTERNS = [
 ]
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCAL_PATHS = REPO_ROOT / "data" / "local_paths.yaml"
+# core/privacy.py と同じ文（このファイルは git のフックから単独で動くので、core を読み込まない）
+NG_FORMAT_MESSAGE = ("data/local_paths.yaml の ng_words の書き方が違います。「ng_words:」の下に「  - 言葉」を1行に1つ書き、"
+                     "「-」のあとは半角の空白にしてください（全角の空白だと、言葉の並びではなく1つの文として読まれます）")
 
 
 def load_ng_words(path: Path = LOCAL_PATHS) -> list[str]:
@@ -36,10 +39,18 @@ def load_ng_words(path: Path = LOCAL_PATHS) -> list[str]:
     except yaml.YAMLError as e:   # エラー文にはその行がそのまま入る（施主名が入ることがある）ので、行の番号だけ出す
         mark = getattr(e, "problem_mark", None) or getattr(e, "context_mark", None)
         raise ValueError(f"data/local_paths.yaml の {mark.line + 1 if mark else '?'} 行目あたりが YAML として読めません") from None
-    words = list(data.get("ng_words") or []) if isinstance(data, dict) else []
+    def as_list(items) -> list:
+        """★11/5：「-」のあとが全角の空白だと1つの文になる → 1文字ずつに分けず、分かる文で止める（core/privacy.py と同じ）。"""
+        if items is None:
+            return []
+        if not isinstance(items, list):
+            raise ValueError(NG_FORMAT_MESSAGE)
+        return list(items)
+
+    words = as_list(data.get("ng_words")) if isinstance(data, dict) else []
     for v in (data.values() if isinstance(data, dict) else []):
         if isinstance(v, dict):
-            words += list(v.get("ng_words") or [])
+            words += as_list(v.get("ng_words"))
     # 空の行（`- ` だけ）は None になるので捨てる（str(None) の「None」がコードに当たってコミットが止まっていた。11/4）
     return [str(w) for w in words if w is not None and str(w).strip()]
 
@@ -87,7 +98,11 @@ def staged_files() -> dict[str, bytes]:
 
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
-    ng_words = load_ng_words()
+    try:
+        ng_words = load_ng_words(LOCAL_PATHS)            # 呼ぶときの場所を使う（テストで差し替えられるように）
+    except ValueError as e:                              # 書き方の間違い（文に言葉は入らない）
+        print(f"[コミット前の検査] コミットを止めました：{e}")
+        return 1
     if not ng_words:
         print("[コミット前の検査] 注意：data/local_paths.yaml の ng_words が空か、ファイルがありません。施主名の検査はしていません。")
     problems = find_problems(staged_files(), ng_words)

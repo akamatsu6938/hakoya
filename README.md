@@ -1,7 +1,7 @@
 # HAKOYA（箱家）
 
 Walk in home のデータから、1/50 の住宅模型の 3D プリント用データ（3MF）を作るソフト。
-形の計算はコード、検品と直す案は Claude（Powered by Claude）。
+形の計算はコード、検品と直す案は Claude。
 
 > いまは開発中です（Built with Claude: Japan 2026 の提出作品）。仕様は [SPEC.md](SPEC.md)。
 
