@@ -687,3 +687,53 @@ body[data-mode="sample"] .no-sample { display: none !important; }
   .strip[data-ws="model"] .tb[data-view]:not(#explode) span { display: none; }   /* 視点のボタンは絵だけ（説明は吹き出し） */
   .tlabel { display: none; }
 }
+
+/* ==== 検品（④）：状態の札と戻すボタン・質問に答える欄・検品中の札（★11/5 夜） ============================================ */
+/* 押した瞬間のボタン：「直しています…」とくるくるの印（押せなくしても字は金のまま） */
+.f-acts button.busy, .f-acts button.busy:disabled { color: var(--gold-hi); opacity: 1; }
+.f-acts button.busy::before, .inspect-banner .spin { content: ""; display: inline-block; flex: none; width: 9px; height: 9px;
+  border: 1.5px solid var(--c-press); border-top-color: var(--gold); border-radius: 50%; animation: hk-spin .8s linear infinite; }
+.f-acts button.busy::before { margin-right: 6px; vertical-align: -1px; }
+/* 決めた指摘の札（承認済み ✓・却下済み・あとで・依頼済み）。横の「取り消す」「戻す」で元に戻せる */
+.f-done { display: inline-flex; align-items: center; min-height: 22px; padding: 1px 8px; border-radius: var(--r); font-size: var(--fs-s); font-weight: 600; line-height: 1.4; }
+.f-done.is-承認 { background: var(--ok-soft); color: var(--ok); }
+.f-done.is-却下 { background: rgba(255, 255, 255, .06); color: var(--ink-3); font-weight: 400; }
+.f-done.is-あとで { background: var(--warn-soft); color: var(--warn); }
+.f-done.is-依頼済み { flex: 1 1 0; min-width: 9em; background: var(--gold-soft); color: var(--gold-hi); font-weight: 400; }   /* 長い札は折り返す（「場所を見る」を同じ行に残す） */
+.finding.st-依頼済み::before { background: var(--gold); }
+
+/* Claude からの質問に答える欄：選択肢は番号付きのボタン、ほかは書いて答える。答えたら答えと「この答えで直す案を作る」 */
+.qs > li.q-item { padding: 9px 0 10px; }
+.q-line { display: flex; align-items: baseline; }
+.q-line .tag { flex: none; }
+.q-item .q { color: var(--ink); font-size: var(--fs-m); line-height: 1.5; }
+.q-item .meta { margin: 3px 0 0 32px; color: var(--ink-3); font-size: var(--fs-xs); line-height: 1.5; }
+.q-body { margin: 7px 0 0 32px; }
+.q-prev { margin-bottom: 6px; color: var(--ink-2); font-size: var(--fs-s); line-height: 1.5; }
+.q-opts { display: flex; flex-direction: column; gap: 4px; }
+.q-opt { display: flex; align-items: baseline; gap: 7px; width: 100%; min-height: 26px; padding: 4px 9px; text-align: left;
+  line-height: 1.45; background: var(--c-raised); box-shadow: inset 0 0 0 1px var(--hair-2); }
+.q-opt:hover { background: var(--gold-soft); box-shadow: inset 0 0 0 1px var(--gold-line); }
+.q-opt .num { flex: none; color: var(--gold); font-weight: 600; }
+.q-write { display: flex; gap: 6px; margin-top: 6px; }
+.q-write input { flex: 1; min-width: 0; }
+.q-ans { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; padding: 5px 9px; border-radius: var(--r); background: var(--ok-soft); }
+.q-ans .lbl { color: var(--ok); font-size: var(--fs-xs); font-weight: 600; }
+.q-ans b { color: var(--ink); font-weight: 600; }
+.q-ans .when { margin-left: auto; color: var(--ink-3); font-size: var(--fs-xs); }
+.q-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.q-acts button { min-height: 24px; padding: 0 9px; font-size: var(--fs-s); }
+.q-acts .approve { background: transparent; color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold-line); font-weight: 600; }
+.q-acts .approve:hover { background: var(--gold-soft); }
+.q-acts .approve:disabled { box-shadow: none; }
+
+/* 検品中の札：だれが（Claude とモデル）・何をしていて・どのくらいかかるか。くるくるの印 */
+.inspect-banner { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 8px; padding: 8px 10px; border-radius: var(--r);
+  background: var(--gold-soft); box-shadow: inset 2px 0 0 var(--gold); }
+.inspect-banner .spin { width: 12px; height: 12px; margin-top: 2px; border-width: 2px; }
+.ib-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ib-text b { color: var(--ink); font-size: var(--fs-m); font-weight: 600; line-height: 1.45; }
+.ib-text span { color: var(--ink-2); font-size: var(--fs-s); line-height: 1.5; }
+/* 札が出ているときは「まだ検品していません」を出さない（上の決まりより強くする） */
+#sec-progress .sec-body:has(.inspect-banner:not([hidden]))::before { content: none !important; }
+@media (prefers-reduced-motion: reduce) { .f-acts button.busy::before, .inspect-banner .spin { animation: none; } }

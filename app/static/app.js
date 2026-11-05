@@ -626,6 +626,163 @@ function headline(f) {
 }
 const evidenceText = (ev) => (ev || []).map((e) => (e && typeof e === 'object' ? (e.ref || e.text || e.type || '') : e)).filter(Boolean).map(esc).join('、');
 
+// ---- 指摘の状態でボタンを変える（★11/5 夜 作者「却下ボタンしかない」「承認したときの反応を」「承認しても画面を移らない」）
+// 未確認：承認・却下・あとで（直す案があれば承認＝直す。なければ Claude に直す案を頼む）／承認：「承認済み ✓」と取り消す／
+// 却下・あとで・依頼済み：その札と戻す。押した瞬間にボタンを押せなくし、終わったらお知らせ（toast）。タブは替えない
+const DONE_ST = ['承認', '却下', '依頼済み'];     // 決めた指摘（タブの数に入れない）。「あとで」はまだ決めていないほうに数える
+const ST_LABEL = { 承認: '承認済み ✓', 却下: '却下済み', あとで: 'あとで', 依頼済み: '直す案を頼みました（修正タブの「頼んだこと」）' };
+const fixing = { busy: false };                 // 直している（組み直している）間は、ほかの承認・取り消しを受けない（組み直しを重ねない）
+const cardSel = (fid) => `.cards .finding[data-fid="${CSS.escape(String(fid))}"]`;
+const NO_REQUEST = 'この版では使えません（直す案を Claude に頼む仕組みが、まだこの版に入っていません）';
+
+function lockCard(card, b, text) {   // 押した瞬間：カードのボタンを押せなくし、押したボタンを「…しています」にする
+  if (!card) return;
+  $$('.f-acts button:not(.where)', card).forEach((x) => { x.disabled = true; });
+  if (b) { b.dataset.label = b.textContent; b.textContent = text; b.classList.add('busy'); }
+}
+function unlockCard(card) {
+  if (!card) return;
+  $$('.f-acts button', card).forEach((x) => {
+    x.disabled = false; x.classList.remove('busy');
+    if (x.dataset.label) { x.textContent = x.dataset.label; delete x.dataset.label; }
+  });
+}
+// 読み直しても、押したカード（質問）を同じ高さに見せる（読み直すと右の欄の上の「選んだ部材」が消えたり出たりして、
+// カードが動いて見えなくなっていた）。上に「選んだ部材」が重なるときは、その下に出す
+async function keepPlace(sel, fn) {
+  const insp = $('.inspector'); const top = document.querySelector(sel)?.getBoundingClientRect().top;
+  const out = await fn();
+  const el = document.querySelector(sel);
+  if (insp && el && top != null && el.offsetParent) {
+    insp.scrollTop += el.getBoundingClientRect().top - top;
+    const panel = $('#sel-panel');
+    if (!panel.hidden) { const over = panel.getBoundingClientRect().bottom - el.getBoundingClientRect().top; if (over > 0) insp.scrollTop -= over + 8; }
+  }
+  return out;
+}
+function fixedText(p) {   // 直したことの一言（お知らせ）。例：O7（上端 FL+）を 2400 → 2300 に直しました
+  if (!p) return '直しました';
+  if (p.field === '_delete') return `${p.target} を取り除きました`;
+  return `${p.target}（${FIELD[p.field] || p.field}）を ${p.from} → ${p.to} に直しました`;
+}
+async function relight(f, p) {   // 直したあと：直した部材と指摘の部材を光らせ直す（読み直すと印が消えるため。カメラは動かさない）
+  const ids = [...new Set([p && p.field !== '_delete' ? String(p.target) : null, ...(f.targets || []).map(String)].filter(Boolean))]
+    .filter((id) => findElement(id));
+  if (!ids.length) return;
+  state.focus = { ids, primary: ids[0], label: f.id, fid: f.id };
+  renderInspector(); revealInTree(ids[0]);
+  await applyFocus({ frame: false, quiet: true });
+}
+
+async function approveFinding(f, b) {   // 直す案のある指摘の承認：修正として記録し、組み直して、直した部材を光らせる
+  if (fixing.busy) { toast('いま直しています。終わってから押してください', { kind: 'info' }); return; }
+  fixing.busy = true;
+  const card = b?.closest('.finding'); lockCard(card, b, '直しています…');
+  setStatus(`${f.id} を直しています（修正として記録し、模型を組み直しています）…`, 'busy');
+  try {
+    const r = await quietly(() => keepPlace(cardSel(f.id), async () => {
+      const res = await call('POST', `/api/findings/{a}/${encodeURIComponent(f.id)}`, { action: 'approve' });
+      if (res.already) { await renderFindings(); return res; }
+      await refresh();                     // 模型・平面図・表・指摘を読み直す（タブは替えない）
+      await relight(f, f.proposal);
+      return res;
+    }));
+    const oid = r.finding?.override;
+    if (r.already) { toast(`${f.id} はもう承認してあります${oid ? `（直し ${oid}）` : ''}`, { kind: 'info' }); setStatus('', ''); return; }
+    toast(fixedText(f.proposal), { kind: 'ok', action: oid ? { label: '取り消す', fn: () => undoFindingFix(f, oid) } : null });
+    setStatus(`${f.id}：${fixedText(f.proposal)}（直しの履歴から取り消せます）`, 'ok');
+  } catch (e) {
+    toast('直せませんでした：' + e.message, { kind: 'err' }); setStatus('直せませんでした：' + e.message, 'err'); unlockCard(card);
+  } finally { fixing.busy = false; }
+}
+
+async function undoFindingFix(f, oid, b) {   // 承認した直しを取り消す（指摘はサーバーが「未確認」に戻す）
+  if (fixing.busy) { toast('いま直しています。終わってから押してください', { kind: 'info' }); return; }
+  fixing.busy = true;
+  const card = b?.closest('.finding') || document.querySelector(cardSel(f.id)); lockCard(card, b, '取り消しています…');
+  setStatus(`${oid} を取り消して、模型を組み直しています…`, 'busy');
+  try {
+    await quietly(() => keepPlace(cardSel(f.id), async () => {
+      await call('DELETE', `/api/overrides/{a}/${encodeURIComponent(oid)}`); await refresh();
+    }));
+    toast(`${f.id} の直し（${oid}）を取り消しました。指摘は「未確認」に戻りました`, { kind: 'ok' });
+    setStatus(`${oid} を取り消しました`, 'ok');
+  } catch (e) {
+    toast('取り消せませんでした：' + e.message, { kind: 'err' }); setStatus('取り消せませんでした：' + e.message, 'err'); unlockCard(card);
+  } finally { fixing.busy = false; }
+}
+
+async function decideQuiet(f, action, b) {   // 却下・あとで・戻す（模型は変わらない）
+  const card = b?.closest('.finding') || document.querySelector(cardSel(f.id)); lockCard(card, b, '記録しています…');
+  try {
+    await quietly(() => keepPlace(cardSel(f.id), async () => {
+      await call('POST', `/api/findings/{a}/${encodeURIComponent(f.id)}`, { action }); await renderFindings();
+    }));
+    const msg = { reject: `${f.id} を却下しました`, later: `${f.id} を「あとで」にしました`, reset: `${f.id} を「未確認」に戻しました` }[action];
+    if (msg) toast(msg, { kind: 'ok', action: action === 'reset' ? null : { label: '戻す', fn: () => decideQuiet(f, 'reset') } });
+  } catch (e) { toast('記録できませんでした：' + e.message, { kind: 'err' }); unlockCard(card); }
+}
+
+// 直す案を Claude に頼むときのつなぎ方：修正タブの「囲んで直す」で選んでいるもの（window.createFixRequest も同じものを使う想定）
+function fixConnection() {
+  const sel = $('#lasso-conn');
+  if (sel && sel.value) return sel.value;
+  return (state.settings?.connections || []).includes('claude_code') && state.mode !== 'other' ? 'claude_code' : 'api_key';
+}
+async function confirmFixCost(what) {   // 費用の確かめ（検品・囲んで直すの確かめの窓の文に合わせる）。what：「この指摘のとおりに直す案を」
+  if (fixConnection() === 'api_key') {
+    let st = state.settings;
+    try { st = await call('GET', '/api/settings'); } catch (e) { /* 前に読んだ設定で確かめる */ }
+    if (!st?.api_key_set) { toast('API キーが設定されていません。「ファイル」→「環境設定」で API キーを入れてください', { kind: 'err' }); return false; }
+    return confirm(`${what}、API キーで Claude に作ってもらいます。30秒〜数分かかり、キーの持ち主に API の料金がかかります（1回の上限 $1.00）。よろしいですか？`);
+  }
+  return confirm(`${what} Claude に作ってもらいます。30秒〜数分かかり、Claude のプランの利用枠を使います。よろしいですか？`);
+}
+const plainEvidence = (ev) => (ev || []).map((e) => (e && typeof e === 'object' ? (e.ref || e.text || e.type || '') : e)).filter(Boolean).join('、');
+function requestText(f) {   // 指摘の見出しと本文から作る頼み文（修正タブの「頼んだこと」に出て、Claude に渡る）
+  const ev = plainEvidence(f.evidence);
+  return [`検品の指摘 ${f.id}「${headline(f)}」のとおりに直す案を作ってください。`,
+    f.message && f.message !== headline(f) ? `指摘の内容：${f.message}` : '', ev ? `根拠：${ev}` : ''].filter(Boolean).join('\n');
+}
+// 頼む：修正担当の window.createFixRequest（修正タブの「頼んだこと」に出し、終わったら知らせる）。まだない版では知らせるだけ。
+// 返り値は待たない（Claude の答えまで 30秒〜数分かかる）。頼めたら true
+function sendFixRequest(req) {
+  if (typeof window.createFixRequest !== 'function') { toast(NO_REQUEST, { kind: 'info' }); return false; }
+  let pending;
+  try { pending = window.createFixRequest(req); } catch (e) { toast('頼めませんでした：' + e.message, { kind: 'err' }); return false; }
+  Promise.resolve(pending).catch((e) => toast(`直す案を頼めませんでした：${e?.message || e}`, { kind: 'err' }));
+  return true;
+}
+async function requestFix(f, b) {   // 直す案のない指摘の承認：この指摘のとおりに直す案を Claude に頼み、指摘を「依頼済み」にする
+  if (typeof window.createFixRequest !== 'function') { toast(NO_REQUEST, { kind: 'info' }); return; }
+  if (!(await confirmFixCost('この指摘のとおりに直す案を'))) return;
+  const card = b?.closest('.finding'); lockCard(card, b, '頼んでいます…');
+  if (!sendFixRequest({ text: requestText(f), ids: (f.targets || []).map(String), findingId: f.id })) { unlockCard(card); return; }
+  try {
+    await quietly(() => keepPlace(cardSel(f.id), async () => {
+      await call('POST', `/api/findings/{a}/${encodeURIComponent(f.id)}`, { action: 'request' }); await renderFindings();
+    }));
+  } catch (e) { toast(`${f.id} に「頼んだ」の印を残せませんでした：${e.message}`, { kind: 'err' }); unlockCard(card); }
+}
+
+function findingActions(f, st, acts) {
+  const btn = (label, cls, title, fn) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.className = cls; b.title = title;
+    b.addEventListener('click', () => fn(b)); acts.appendChild(b); return b;
+  };
+  if (st === '未確認') {
+    btn('承認', 'approve', f.proposal ? '直す案のとおりに直します（修正として記録し、模型を組み直します。取り消せます）'
+      : 'この指摘のとおりに直す案を Claude に作ってもらいます（修正タブの「頼んだこと」に出ます）', (b) => (f.proposal ? approveFinding(f, b) : requestFix(f, b)));
+    btn('却下', '', '指摘を却下します（模型は変わりません。あとで戻せます）', (b) => decideQuiet(f, 'reject', b));
+    btn('あとで', 'quiet', 'あとで決めます（模型は変わりません）', (b) => decideQuiet(f, 'later', b));
+    return;
+  }
+  acts.insertAdjacentHTML('beforeend', `<span class="f-done is-${esc(st)}">${esc(ST_LABEL[st] || st)}</span>`);
+  if (st === '承認') {
+    if (f.override) btn('取り消す', 'quiet', `直し（${f.override}）を取り消して、模型を組み直します。指摘は「未確認」に戻ります`, (b) => undoFindingFix(f, f.override, b));
+  } else btn('戻す', 'quiet', '「未確認」に戻します（模型は変わりません）', (b) => decideQuiet(f, 'reset', b));
+}
+
 function findingItem(f, withActions) {
   const li = document.createElement('li');
   const sev = ['高', '中', '低', '情報'].includes(f.severity) ? f.severity : 'none';
@@ -636,27 +793,13 @@ function findingItem(f, withActions) {
       + `<span class="sev" title="重さ：${esc(f.severity)}">${esc(f.severity || '')}</span>`
       + `<div class="f-main"><span class="f-title">${esc(headline(f))}</span>`
       + `<span class="f-ids">${ids.map((id) => `<span class="idc" data-id="${esc(id)}" title="${esc(id)} だけを光らせる">${esc(id)}</span>`).join('')}</span></div>`
-      + `<span class="f-st"><span class="st ${esc(st)}">${esc(st)}</span></span></div>`
+      + (st === '未確認' ? '<span class="f-st"><span class="st 未確認">未確認</span></span>' : '') + '</div>'   // 決めたものは下の札で示す
     + (f.proposal ? `<div class="f-prop">${proposalLine(f.proposal)}</div>` : '');
   const head = li.querySelector('.f-head');
   head.addEventListener('click', (e) => { const c = e.target.closest('.idc'); if (c) selectElement(c.dataset.id, { label: f.id }); else focusFinding(f); });
   head.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusFinding(f); } });
   const acts = document.createElement('div'); acts.className = 'f-acts';
-  if (withActions) {
-    for (const [action, label] of [['approve', '承認'], ['reject', '却下'], ['later', 'あとで']]) {
-      if (action === 'approve' && !f.proposal) continue;
-      const b = document.createElement('button'); b.textContent = label; b.className = { approve: 'approve', later: 'quiet' }[action] || '';
-      b.addEventListener('click', async () => {
-        try {
-          setStatus(action === 'approve' ? '直す案を修正として記録し、模型を組み直しています…' : '記録しています…', 'busy');
-          if (action === 'approve') { await call('POST', `/api/findings/{a}/${encodeURIComponent(f.id)}`, { action }); await refresh(); }
-          else await quietly(async () => { await call('POST', `/api/findings/{a}/${encodeURIComponent(f.id)}`, { action }); await renderFindings(); });
-          setStatus(`${f.id} を「${label}」にしました${action === 'approve' ? '（直しの履歴から取り消せます）' : ''}`, 'ok');
-        } catch (e) { setStatus('できませんでした：' + e.message, 'err'); }
-      });
-      acts.appendChild(b);
-    }
-  }
+  if (withActions) findingActions(f, st, acts);
   const where = document.createElement('button'); where.className = 'where';
   where.innerHTML = '<svg class="ic"><use href="#i-target"/></svg><span>場所を見る</span>'; where.title = '模型と平面図で、この指摘の部材を光らせます';
   where.addEventListener('click', () => focusFinding(f));
@@ -694,30 +837,141 @@ async function renderFindings() {
   const rep = await call('GET', '/api/findings/{a}');
   state.report = rep; updateSteps();
   const all = [...(rep.findings || []), ...(rep.code_findings || [])];
-  const open = all.filter((f) => !['承認', '却下'].includes(f.status));
+  const open = all.filter((f) => !DONE_ST.includes(f.status));
   setTabCount('inspect', open.length, open.some((f) => f.severity === '高') ? 'bad' : '');
+  // 「くわしく」を開いていたカードは、描き直しても開いたままにする
+  const opened = new Set($$('.cards .finding').filter((li) => li.querySelector(':scope > .f-more')?.open).map((li) => li.dataset.fid));
   const fill = (sel, items, withActions, empty, countSel) => {
     const ul = $(sel); ul.innerHTML = '';
-    const n = (items || []).filter((f) => !['承認', '却下'].includes(f.status));
+    const n = (items || []).filter((f) => !DONE_ST.includes(f.status));
     const c = $(countSel); c.textContent = n.length ? String(n.length) : ''; c.className = 'sec-count' + (n.some((f) => f.severity === '高') ? ' bad' : '');
     if (!items || !items.length) { ul.innerHTML = `<li class="hint">${empty}</li>`; return; }
-    for (const f of items) ul.appendChild(findingItem(f, withActions));
+    for (const f of items) {
+      const li = findingItem(f, withActions);
+      if (opened.has(String(f.id))) li.querySelector(':scope > .f-more').open = true;
+      ul.appendChild(li);
+    }
   };
   fill('#findings', rep.findings, true, rep.connection === 'off' ? 'AI なしで検品したので、Claude の指摘はありません' : 'まだありません', '#n-findings');
   fill('#code-findings', rep.code_findings, true, 'ありません', '#n-code');
-  const qs = $('#questions'); qs.innerHTML = '';
-  const questions = (rep.questions || []).concat((rep.findings || []).filter((f) => f.question).map((f) => ({ id: f.id, ...f.question })));
-  $('#n-questions').textContent = questions.length ? String(questions.length) : '';
-  if (!questions.length) qs.innerHTML = '<li class="muted">ありません</li>';
-  for (const q of questions) qs.insertAdjacentHTML('beforeend', `<li><span class="tag">${esc(q.id)}</span><span class="q">${esc(q.question)}</span><div class="meta">選択肢：${(q.options || []).map(esc).join(' ／ ')}${q.evidence ? '　根拠：' + esc(q.evidence) : ''}</div></li>`);
+  renderQuestions(rep);
   const cost = rep.cost_usd ? `　費用の目安 $${Number(rep.cost_usd).toFixed(2)}` : '';
   $('#inspect-summary').textContent = rep.summary ? `${rep.summary}${rep.duration_s ? `（${rep.duration_s} 秒${cost}）` : ''}` : '';
   markLit();
 }
 
+// ---- Claude からの質問に答える（★11/5 夜 作者「質問に回答できる窓口がない」）。選択肢は番号付きのボタン、ほかは書いて答える。
+// 答えは物件ごとに残り（out/<物件>/answers.json）、次の検品で Claude に伝わる（同じ質問を二度しない）
+const qSel = (qid) => `#questions [data-qid="${CSS.escape(String(qid))}"]`;
+function renderQuestions(rep) {
+  const qs = $('#questions'); qs.innerHTML = '';
+  const byId = new Map((rep.findings || []).map((f) => [f.id, f]));
+  const questions = (rep.questions || []).concat((rep.findings || []).filter((f) => f.question).map((f) => ({ ...f.question, id: f.id })));
+  const open = questions.filter((q) => !q.answer).length;
+  $('#n-questions').textContent = open ? String(open) : '';
+  if (!questions.length) { qs.innerHTML = '<li class="muted">ありません</li>'; return; }
+  for (const q of questions) qs.appendChild(questionItem(q, byId.get(q.id) || null));
+}
+function questionItem(q, f) {   // f：指摘に付いた質問なら、その指摘（直す案を頼むときに部材の番号を渡す）
+  const li = document.createElement('li'); li.className = 'q-item' + (q.answer ? ' answered' : ''); li.dataset.qid = q.id;
+  li.innerHTML = `<div class="q-line"><span class="tag">${esc(q.id)}</span><span class="q">${esc(q.question)}</span></div>`
+    + (f ? `<div class="meta">指摘 ${esc(f.id)}「${esc(headline(f))}」についての質問</div>` : '')
+    + (q.evidence ? `<div class="meta">根拠：${esc(q.evidence)}</div>` : '');
+  const body = document.createElement('div'); body.className = 'q-body'; li.appendChild(body);
+  if (!q.answer) {
+    if (q.previous_answer?.answer) body.insertAdjacentHTML('beforeend', `<div class="q-prev">前の検品で同じ質問に「${esc(q.previous_answer.answer)}」と答えています${q.previous_answer.at ? `（${esc(fmtTime(q.previous_answer.at))}）` : ''}</div>`);
+    body.appendChild(answerForm(q, f));
+    return li;
+  }
+  body.insertAdjacentHTML('beforeend', `<div class="q-ans"><span class="lbl">答え</span><b>${esc(q.answer)}</b>${q.answered_at ? `<span class="when">${esc(fmtTime(q.answered_at))}</span>` : ''}</div>`);
+  const acts = document.createElement('div'); acts.className = 'q-acts';
+  const make = document.createElement('button'); make.type = 'button'; make.className = 'approve'; make.textContent = 'この答えで直す案を作る';
+  make.title = 'この答えのとおりに直す案を Claude に作ってもらいます（修正タブの「頼んだこと」に出ます）';
+  make.addEventListener('click', () => requestFromAnswer(q, q.answer, f, make));
+  const redo = document.createElement('button'); redo.type = 'button'; redo.className = 'quiet'; redo.textContent = '答え直す';
+  redo.addEventListener('click', () => { body.innerHTML = ''; body.appendChild(answerForm(q, f)); body.querySelector('.q-opt, input')?.focus(); });
+  acts.append(make, redo); body.appendChild(acts);
+  return li;
+}
+function answerForm(q, f) {
+  const box = document.createElement('div'); box.className = 'q-form';
+  const opts = document.createElement('div'); opts.className = 'q-opts';
+  (q.options || []).forEach((o, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'q-opt'; b.title = `「${o}」と答える`;
+    b.innerHTML = `<span class="num">${i + 1}.</span><span>${esc(o)}</span>`;
+    b.addEventListener('click', () => answerQuestion(q, String(o), f, box)); opts.appendChild(b);
+  });
+  const row = document.createElement('div'); row.className = 'q-write';
+  const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 400; inp.placeholder = '選択肢にないときは、書いて答える';
+  const send = document.createElement('button'); send.type = 'button'; send.textContent = '答える';
+  const go = () => { const v = inp.value.trim(); if (!v) { inp.focus(); return; } answerQuestion(q, v, f, box); };
+  send.addEventListener('click', go);
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); go(); } });   // 変換中の Enter では送らない
+  row.append(inp, send);
+  if ((q.options || []).length) box.appendChild(opts);
+  box.appendChild(row);
+  return box;
+}
+async function answerQuestion(q, answer, f, box) {
+  $$('button, input', box).forEach((el) => { el.disabled = true; });
+  try {
+    await quietly(() => keepPlace(qSel(q.id), async () => {
+      await call('POST', `/api/findings/{a}/questions/${encodeURIComponent(q.id)}/answer`, { answer, question: q.question }); await renderFindings();
+    }));
+    const shown = answer.length > 24 ? answer.slice(0, 23) + '…' : answer;
+    toast(`${q.id} に「${shown}」と答えました。次の検品で Claude に伝えます`, { kind: 'ok', action: { label: 'この答えで直す案を作る', fn: () => requestFromAnswer(q, answer, f) } });
+  } catch (e) {
+    toast('答えを残せませんでした：' + e.message, { kind: 'err' });
+    $$('button, input', box).forEach((el) => { el.disabled = false; });
+  }
+}
+async function requestFromAnswer(q, answer, f, b) {   // 答えのとおりに直す案を Claude に頼む（修正タブの「頼んだこと」）
+  if (typeof window.createFixRequest !== 'function') { toast(NO_REQUEST, { kind: 'info' }); return; }
+  if (!(await confirmFixCost('この答えのとおりに直す案を'))) return;
+  const opts = (q.options || []).map((o, i) => `${i + 1}. ${o}`).join(' ／ ');
+  const text = [`検品の Claude の質問 ${q.id}「${q.question}」に、人が「${answer}」と答えました。この答えのとおりに直す案を作ってください。`,
+    opts ? `選択肢：${opts}` : '', q.evidence ? `質問の根拠：${q.evidence}` : '',
+    f ? `もとの指摘 ${f.id}「${headline(f)}」：${f.message || ''}` : ''].filter(Boolean).join('\n');
+  if (sendFixRequest({ text, ids: f ? (f.targets || []).map(String) : [], findingId: f ? f.id : null }) && b) {
+    b.disabled = true; b.textContent = '頼みました（修正タブの「頼んだこと」）';
+  }
+}
+
+// ---- 検品中の札（★11/5 夜 作者「Claude が考えています、という文章がわかりづらい」）：だれが・何をしていて・どのくらいかかるか
+function modelLabel(id) {   // claude-opus-5-5 → Opus 5.5
+  const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(String(id || ''));
+  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : '';
+}
+function fmtElapsed(sec) {
+  const n = Math.max(0, Math.round(Number(sec) || 0));
+  return n < 60 ? `${n} 秒` : `${Math.floor(n / 60)} 分 ${String(n % 60).padStart(2, '0')} 秒`;
+}
+function renderInspectBanner(st) {
+  const box = $('#inspect-banner'); if (!box) return;
+  const s = st.state || {};
+  if (!s.running) { box.hidden = true; box.innerHTML = ''; return; }
+  let lead; let note;
+  if (s.connection === 'off') { lead = 'コードが模型を検査しています'; note = 'ふつう数秒で終わります'; }
+  else {
+    const phase = st.progress?.phase || '準備中'; const m = s.models || {};
+    const merging = phase === '指摘をまとめている';
+    const name = modelLabel(merging ? m.merge : m.face);
+    const who = `Claude${name ? `（${name}）` : ''}`;
+    const faces = Object.values(st.progress?.faces || {});
+    const done = faces.filter((x) => x.state === '済み' || x.state === '失敗').length;
+    lead = merging ? `${who}が、6 つの面の指摘をまとめています`
+      : phase === '面ごとに検品中' ? `${who}が 6 つの面を見比べています（済み ${done}/${faces.length || 6}）` : `${who}が検品の準備をしています`;
+    note = 'ふつう 3〜6 分かかります';
+  }
+  box.hidden = false;
+  box.innerHTML = `<span class="spin" aria-hidden="true"></span><div class="ib-text"><b>${esc(lead)}</b>`
+    + `<span>経過 ${esc(fmtElapsed(s.elapsed_s))}・${esc(note)}・裏で進むので、ほかのタブを見ていても大丈夫です</span></div>`;
+}
+
 function renderProgress(st) {
   const box = $('#inspect-progress');
   const prog = st.progress; const s = st.state || {};
+  renderInspectBanner(st);
   if (!s.connection) { box.innerHTML = ''; return; }
   if (s.connection === 'off') { box.innerHTML = `<div class="face ${s.running ? '見ている' : '済み'}"><b>コードの検査</b>${s.running ? '検査中…' : '済み'}</div>`; return; }
   if (!prog) { box.innerHTML = ''; return; }
@@ -726,6 +980,7 @@ function renderProgress(st) {
 }
 
 async function pollInspection() {
+  if (!state.alias) { renderInspectBanner({}); return; }       // 物件を閉じた
   try {
     const st = await call('GET', '/api/inspect/{a}/status');
     renderProgress(st);
@@ -736,8 +991,14 @@ async function pollInspection() {
       setTimeout(pollInspection, 2000);
     } else if (s.connection) {
       inspectButtons(false);
-      if (s.error) setStatus('検品が終わりませんでした：' + s.error, 'err');
-      else { await quietly(renderFindings); setStatus(`検品が終わりました（${s.elapsed_s || 0} 秒）`, 'ok'); }
+      const look = state.ws === 'inspect' ? null : { label: '検品を見る', fn: () => setWorkspace('inspect') };   // 押したときだけタブを替える
+      if (s.error) { setStatus('検品が終わりませんでした：' + s.error, 'err'); toast('検品が終わりませんでした：' + s.error, { kind: 'err', action: look }); }
+      else {
+        await quietly(renderFindings); setStatus(`検品が終わりました（${s.elapsed_s || 0} 秒）`, 'ok');
+        const rep = state.report || {};
+        const nq = (rep.questions || []).length + (rep.findings || []).filter((f) => f.question).length;
+        toast(`検品が終わりました：指摘 ${(rep.findings || []).length + (rep.code_findings || []).length} 件${nq ? `・質問 ${nq} 件` : ''}（${fmtElapsed(s.elapsed_s)}）`, { kind: 'ok', action: look });
+      }
     }
   } catch (e) { setStatus('進み具合を読めませんでした：' + e.message, 'err'); }
 }

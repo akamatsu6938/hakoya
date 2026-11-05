@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import datetime as dt
 import json
 import os
 import shutil
@@ -141,7 +142,13 @@ def prepare_workdir(alias: str, company: str, skills_used: tuple[str, ...] = ("i
     return work
 
 
-def face_agents(models: dict, multi: bool = False) -> dict:
+def with_answers(text: str, answers: str) -> str:
+    """指示の文の後ろに「前の検品で人が答えたこと」（core/answers.prompt_section）を足す（なければそのまま）。"""
+    return f"{text}\n\n{answers}" if answers else text
+
+
+def face_agents(models: dict, multi: bool = False, answers: str = "") -> dict:
+    """面ごとの検品担当。answers：前の検品で人が答えたこと（core/answers.prompt_section。なければ空）。"""
     from claude_agent_sdk import AgentDefinition
     m = models["inspect_face"]
     out = {}
@@ -152,11 +159,11 @@ def face_agents(models: dict, multi: bool = False) -> dict:
                f"面 {face}（{label}）の模型の図と glb の図を render_view で両方見比べ、get_elements（view={face}）で部材の番号を確かめる。")
         out[f"inspect-{face}"] = AgentDefinition(
             description=f"模型の検品担当：{label}",
-            prompt=(f"あなたは住宅模型の検品担当で、担当は「{label}」。Skill の inspection・model-rules・会社ルールに従う。{how}"
+            prompt=with_answers((f"あなたは住宅模型の検品担当で、担当は「{label}」。Skill の inspection・model-rules・会社ルールに従う。{how}"
                     "食い違いを見つけたら、指摘を Skill の書き方（view・kind・severity・title・message・targets・evidence・proposal・question・confidence）で、"
                     "日本語の箇条書きで返す。title は「何が・どこで・どうおかしいか」を20字くらいの見出しに（例「西の窓の間の柱が細い」）、"
                     "message は1〜2文の説明。targets は get_elements が返した部材の番号（W○・O○・Y○・Y○:S など）だけ。"
-                    "直す案は propose_override で試し、数値は自分で書かない。見つからなければ「指摘なし」と返す。"),
+                    "直す案は propose_override で試し、数値は自分で書かない。見つからなければ「指摘なし」と返す。"), answers),
             tools=tool_names(), model=m["model"], effort=m["effort"],
         )
     return out
@@ -188,24 +195,27 @@ def build_options(ctx: ToolContext, connection: str = "claude_code"):
     if connection == "claude_code" and os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError("claude_code 接続なのに、環境に ANTHROPIC_API_KEY があります。API の料金になるため止めました。"
                            "API キーで動かすときは api_key 接続を選んでください。")
+    from core.answers import prompt_section
     conf = load_ai_models()
     models, limits = conf[connection], conf["limits"]
     company = ctx.raw["source"].get("company_rules", default_company())
     work = prepare_workdir(ctx.alias, company)
     merge = models["inspect_merge"]
+    answers = prompt_section(ctx.alias)              # 前の検品で人が答えたこと（★11/5 夜。なければ空）
     return ClaudeAgentOptions(
-        system_prompt=("あなたは住宅模型（1/50、3D プリント）の検品のまとめ役。日本語で考え、日本語で書く。"
+        system_prompt=with_answers(("あなたは住宅模型（1/50、3D プリント）の検品のまとめ役。日本語で考え、日本語で書く。"
                        "まず get_building で家の要約を読み、6人の検品担当（inspect-S・inspect-N・inspect-E・inspect-W・inspect-plan・inspect-print）を"
                        "同時に呼ぶ。返ってきた指摘の重複を除き、根拠のないものは捨て、重要度（高・中・低）順に並べて、決められた JSON で返す。"
                        "指摘ごとに title（何が・どこで・どうおかしいかを20字くらいの見出し。例「西の窓の間の柱が細い」）と、"
                        "message（1〜2文の説明）を書く。targets は部材の番号（W○・O○・Y○・Y○:S など）だけ。"
                        "直す案は数値を書かず value_source（majority:種類 / rule:項目 / glb / number）で指定する。決まらないことは question にする。"),
+                                   answers),
         model=merge["model"], effort=merge["effort"],
         mcp_servers={SERVER: build_server(ctx)},
         tools=list(BUILTIN_ALLOWED),
         allowed_tools=list(BUILTIN_ALLOWED) + tool_names(),
         permission_mode="dontAsk",
-        agents=face_agents(models, multi=len(ctx.building.get("levels", [])) > 1),
+        agents=face_agents(models, multi=len(ctx.building.get("levels", [])) > 1, answers=answers),
         hooks=deny_non_app_tools(),
         cwd=str(work), setting_sources=["project"], skills=["inspection", "model-rules", f"company-{company}"],
         output_format={"type": "json_schema", "schema": FINDINGS_SCHEMA},
@@ -318,6 +328,8 @@ async def run_inspection(alias: str, connection: str = "claude_code", on_event=N
     data = extract_findings(result)
     findings = finalize(ctx, data.get("findings", []))
     report = {"alias": alias, "connection": connection, "summary": data.get("summary", ""), "findings": findings,
+              # 検品した時刻（★11/5 夜：人の答え answers.json が、どの検品の質問への答えかを見分ける。AI なし・MCP と同じ形）
+              "at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
               "cost_usd": result.total_cost_usd, "duration_s": round((result.duration_ms or 0) / 1000, 1),
               "turns": result.num_turns, "permission_denials": result.permission_denials or [],
               "questions": ctx.questions,   # 検品担当が ask_question で出した質問（人の答えを待つもの）

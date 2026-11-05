@@ -169,7 +169,7 @@ def _findings_stale(alias: str) -> bool:
 # 物件の進み具合に使うファイル（out/<物件>/ の中）：組み立て・人の修正・検品・書き出し
 STATUS_FILES = {"built_at": "building.json", "edited_at": "overrides.json", "inspected_at": "findings.json",
                 "exported_at": "model/checks.json"}
-DECIDED = ("承認", "却下")
+DECIDED = ("承認", "却下", "依頼済み")     # 依頼済み：直す案を Claude に頼んだ（続きは修正タブの「頼んだこと」。★11/5 夜）
 
 
 def _status(alias: str) -> tuple[dict, int]:
@@ -543,9 +543,22 @@ def start_inspection(alias: str, connection: str = "claude_code"):
             log = out_dir(alias) / "inspect_log.jsonl"
             if log.exists():
                 log.unlink()                                     # 前回の記録を消して、進み具合を最初から数える
-        RUNS[alias] = {"running": True, "connection": connection, "started_at": time.time(), "error": None}
+        RUNS[alias] = {"running": True, "connection": connection, "started_at": time.time(), "error": None,
+                       "models": _inspect_models(connection)}
     threading.Thread(target=_run_inspection_thread, args=(alias, connection), daemon=True).start()
     return _safe_json({"started": True, "connection": connection})
+
+
+def _inspect_models(connection: str) -> dict | None:
+    """検品に使うモデル（面ごとの担当・まとめ役）。画面の「Claude（Opus 5.5）が…」の札に出す（★11/5 夜）。AI なしは None。"""
+    if connection not in ("claude_code", "api_key"):
+        return None
+    from core.ai.agent import load_ai_models
+    try:
+        m = load_ai_models()[connection]
+        return {"face": m["inspect_face"]["model"], "merge": m["inspect_merge"]["model"]}
+    except (OSError, KeyError, TypeError):           # 設定が読めなくても検品は始める（札にモデル名を出さないだけ）
+        return None
 
 
 @app.get("/api/inspect/{alias}/status")
@@ -561,11 +574,14 @@ def inspection_status(alias: str):
 
 @app.get("/api/findings/{alias}")
 def findings(alias: str):
+    from core import answers
     _check_alias(alias)
     rep = fd.load(alias) or {"findings": [], "code_findings": [], "summary": "まだ検品していません"}
     for f in [*(rep.get("findings") or []), *(rep.get("code_findings") or [])]:
         if isinstance(f, dict):
             f["title"] = fd.title_of(f)          # ★11/5 より前の検品には見出しがないので、message から作る（ファイルは書き換えない）
+    # 質問に人の答えを付ける（この検品の答えは answer、前の検品で同じ質問にした答えは previous_answer。★11/5 夜）
+    answers.attach(alias, rep)
     # 検品のあとに「読み込んで組み立てる」で作り直したか（見本用の手順の帯を「検品する」に戻す）
     rep["stale"] = _findings_stale(alias)
     return _safe_json(rep)
@@ -575,17 +591,51 @@ class DecisionIn(BaseModel):
     action: str
 
 
+DECIDE_LOCK = threading.Lock()       # 指摘を決めるのは1つずつ（同じ指摘の承認が同時に2つ届いても、修正を2件にしない）
+
+
 @app.post("/api/findings/{alias}/{fid}")
 def decide_finding(alias: str, fid: str, body: DecisionIn):
-    """指摘を承認／却下／あとでにする。承認すると修正として記録し、模型を組み直す。"""
+    """指摘を承認／却下／あとで／依頼済み（request：直す案を Claude に頼んだ）／未確認に戻す（reset）にする。
+    承認すると修正として記録し、模型を組み直す。もう承認してある指摘は、何もしないで今の指摘を返す（already: true。組み直さない）。"""
     _check_alias(alias)
+    with DECIDE_LOCK:
+        before = {x.get("id") for x in ov.load(alias)}
+        try:
+            f = fd.decide(alias, fid, body.action)
+        except (KeyError, ValueError) as e:
+            raise HTTPException(400, str(e).strip("'\""))
+    added = f.get("override") if body.action == "approve" and f.get("override") not in before else None
+    if added:
+        _rebuild_or_undo(alias, added)
+    return _safe_json({"finding": f, "already": body.action == "approve" and not added})
+
+
+class AnswerIn(BaseModel):
+    answer: str
+    question: str | None = None      # 画面に出ていた質問の文（検品し直して番号の中身が変わっていたら断るため）
+
+
+@app.post("/api/findings/{alias}/questions/{qid}/answer")
+def answer_question(alias: str, qid: str, body: AnswerIn):
+    """検品の Claude の質問に、人が答える（★11/5 夜）。物件ごとに out/<物件>/answers.json に残し、次の検品で Claude に伝える
+    （同じ質問を二度しないため）。書く前に、出してはいけない言葉がないか確かめる。"""
+    from core import answers
+    from core.privacy import PrivacyError
+    _check_alias(alias)
+    rep = fd.load(alias)
+    if rep is None:
+        raise HTTPException(409, "まだ検品していません")
+    q = answers.find_question(rep, qid)
+    if q is None:
+        raise HTTPException(404, f"{qid} という質問はありません（検品し直したときは、画面を読み直してください）")
+    if body.question is not None and not answers.same_question(body.question, q.get("question")):
+        raise HTTPException(409, f"{qid} の質問が変わっています（検品し直したため）。画面を読み直してから答えてください")
     try:
-        f = fd.decide(alias, fid, body.action)
-    except (KeyError, ValueError) as e:
-        raise HTTPException(400, str(e).strip("'\""))
-    if body.action == "approve":
-        _rebuild_or_undo(alias, f.get("override"))
-    return _safe_json({"finding": f})
+        rec = answers.add(alias, qid, q.get("question"), q.get("options"), body.answer, rep.get("at"))
+    except (PrivacyError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    return _safe_json({"answer": rec})
 
 
 @app.get("/api/inspect/{alias}/image/{view}")

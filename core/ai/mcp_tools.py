@@ -984,12 +984,16 @@ def inspect_prompt(alias: str | None = None) -> str:
                 + "道具を呼ぶときは、いつもその仮名を alias に付けます。")
     faces = "\n".join(f"   - {f}：{face_label(f, multi)}" for f in FACES)
     plan_how = f"\n   2階建てなので、plan の担当は：{MULTI_PLAN_HOW}" if multi else ""
+    # 前の検品で人が答えたこと（HAKOYA の検品タブで答えたもの。同じ質問をもう一度しないため。★11/5 夜）
+    from core.answers import prompt_section
+    answers = prompt_section(alias) if known else ""
+    answers = f"\n{answers}\n" if answers else ""
     return f"""{FACE_ROLE}
 ここでは、検品担当とまとめ役の両方をあなたが一人で行います。HAKOYA のデータのフォルダ（お客様の図面・glb）を Read・Bash などで直接開かず、HAKOYA の道具（mcp__hakoya__…）だけを使ってください。
 
 ## 物件
 {head}
-
+{answers}
 ## 手順
 1. get_building で家の要約を読む。run_checks（コードの検査）と get_code_findings（コードの指摘）も読む。built でない物件は、人に確かめてから rebuild。
 2. 6つの面を順に見る：

@@ -15,14 +15,17 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import datetime as dt
 import json
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core.ai.agent import FACES, FINDINGS_SCHEMA, MULTI_PLAN_HOW, SKILLS_DIR, face_label, finalize, load_ai_models
+from core.ai.agent import (FACES, FINDINGS_SCHEMA, MULTI_PLAN_HOW, SKILLS_DIR, face_label, finalize, load_ai_models,
+                           with_answers)
 from core.ai.tools import TOOL_SPECS, ToolContext, call_tool
+from core.answers import prompt_section
 from core.findings import code_findings
 from core.findings import save as save_findings
 from core.paths import out_dir
@@ -156,7 +159,8 @@ def api_tools(specs: dict | None = None) -> list[dict]:
     return [{"name": n, "description": s["description"], "input_schema": s["schema"]} for n, s in (specs or TOOL_SPECS).items()]
 
 
-def face_prompt(face: str, multi: bool = False) -> str:
+def face_prompt(face: str, multi: bool = False, answers: str = "") -> str:
+    """面ごとの検品担当への頼み。answers：前の検品で人が答えたこと（core/answers.prompt_section。なければ空。★11/5 夜）。"""
     label = face_label(face, multi)
     if face == "print":
         how = "run_checks の結果と、各面の模型の図（render_view source=model）を見て、印刷と組み立ての問題を探してください。"
@@ -165,12 +169,12 @@ def face_prompt(face: str, multi: bool = False) -> str:
     else:
         how = (f"render_view で面 {face}（{label}）の模型の図（source=model）と glb の図（source=glb）を両方見比べ、"
                f"get_elements（view={face}）で部材の番号を確かめてください。")
-    return (f"物件の模型を検品してください。あなたの担当は「{label}」です。{how}"
+    return with_answers((f"物件の模型を検品してください。あなたの担当は「{label}」です。{how}"
             "食い違いを見つけたら、1件ずつ、面（view）・種類（kind）・重要度（severity）・見出し（title）・内容（message）・"
             "対象の番号（targets）・根拠（evidence）・直す案（proposal）・質問（question）・確からしさ（confidence）が分かるように、"
             "日本語の箇条書きで返してください。見出しは「何が・どこで・どうおかしいか」を20字くらいで（例「西の窓の間の柱が細い」）、"
             "内容は1〜2文の説明にしてください。対象の番号は get_elements が返した番号（W○・O○・Y○・Y○:S など）だけにしてください。"
-            "直す案は propose_override で試し、数値は自分で書かないでください。見つからなければ「指摘なし」と返してください。")
+            "直す案は propose_override で試し、数値は自分で書かないでください。見つからなければ「指摘なし」と返してください。"), answers)
 
 
 def tool_result(ctx, block, call=None) -> dict:
@@ -229,13 +233,13 @@ async def tool_loop(client, ctx, prompt: str, *, model: str, effort: str, system
 
 
 async def run_face(client, ctx: ToolContext, face: str, *, model: str, effort: str, system, tools: list[dict],
-                   meter: Meter, log, max_turns: int) -> dict:
-    """1つの面の検品担当。道具を使うやりとりを回し、報告の文章を返す。"""
+                   meter: Meter, log, max_turns: int, answers: str = "") -> dict:
+    """1つの面の検品担当。道具を使うやりとりを回し、報告の文章を返す。answers：前の検品で人が答えたこと。"""
     log({"type": "FaceStarted", "face": face})
     try:
         text, stop, turns = await tool_loop(
-            client, ctx, face_prompt(face, len(ctx.building.get("levels", [])) > 1), model=model, effort=effort, system=system, tools=tools, meter=meter,
-            max_turns=max_turns,
+            client, ctx, face_prompt(face, len(ctx.building.get("levels", [])) > 1, answers), model=model, effort=effort,
+            system=system, tools=tools, meter=meter, max_turns=max_turns,
             on_turn=lambda turn, resp, cost: log({"type": "FaceTurn", "face": face, "turn": turn, "stop_reason": resp.stop_reason,
                                                   "cost_usd": round(cost, 4), "content": _blocks(resp.content)}),
             on_tool=lambda name: log({"type": "FaceTool", "face": face, "tool": name}))
@@ -252,10 +256,13 @@ async def run_face(client, ctx: ToolContext, face: str, *, model: str, effort: s
 
 
 async def merge(client, ctx: ToolContext, reports: list[dict], *, model: str, effort: str, system: str,
-                meter: Meter, log) -> tuple[dict, str]:
-    """まとめ役：6人の報告から、重複を除いて重要度順に並べ、決めた形の JSON にする（道具は使わない1回の呼び出し）。"""
+                meter: Meter, log, answers: str = "") -> tuple[dict, str]:
+    """まとめ役：6人の報告から、重複を除いて重要度順に並べ、決めた形の JSON にする（道具は使わない1回の呼び出し）。
+    answers：前の検品で人が答えたこと（同じ質問を question にしないため。なければ空）。"""
     summary = call_tool(ctx, "get_building", {})
     parts = [f"## 家の要約（get_building）\n{json.dumps(summary, ensure_ascii=False)}"]
+    if answers:
+        parts.append(answers)
     for r in reports:
         body = r["report"] or f"（報告なし：{r.get('note') or r['status']}）"
         parts.append(f"## 検品担当「{FACES[r['face']]}」（view={r['face']}）の報告\n{body}")
@@ -289,6 +296,7 @@ async def run_inspection_api(alias: str, *, client=None, ctx: ToolContext | None
     out = out or out_dir(alias)
     company = ctx.raw["source"].get("company_rules", default_company())
     skills = skill_text(company)
+    answers = prompt_section(alias, out / "answers.json")     # 前の検品で人が答えたこと（★11/5 夜。なければ空）
     face_system = [{"type": "text", "text": FACE_ROLE + "\n\n" + skills, "cache_control": {"type": "ephemeral"}}]
     fm, mm = models["inspect_face"], models["inspect_merge"]
     meter = Meter(prices=conf["prices_usd_per_mtok"], limit_usd=float(limits["max_budget_usd"]))
@@ -301,7 +309,7 @@ async def run_inspection_api(alias: str, *, client=None, ctx: ToolContext | None
             try:
                 results = await asyncio.gather(*(run_face(
                     client, ctx, face, model=fm["model"], effort=fm["effort"], system=face_system, tools=api_tools(),
-                    meter=meter, log=log, max_turns=int(limits["max_turns_per_face"])) for face in FACES),
+                    meter=meter, log=log, max_turns=int(limits["max_turns_per_face"]), answers=answers) for face in FACES),
                     return_exceptions=True)
                 errors = [r for r in results if isinstance(r, BaseException)]
                 for e in errors:
@@ -311,7 +319,7 @@ async def run_inspection_api(alias: str, *, client=None, ctx: ToolContext | None
                 if not any(r["status"] == "済み" for r in reports):
                     raise errors[0] if errors else RuntimeError("どの面の検品も終わりませんでした")
                 data, raw_text = await merge(client, ctx, reports, model=mm["model"], effort=mm["effort"],
-                                             system=MERGE_ROLE + "\n\n" + skills, meter=meter, log=log)
+                                             system=MERGE_ROLE + "\n\n" + skills, meter=meter, log=log, answers=answers)
             except Exception as e:
                 log({"type": "ApiResult", "is_error": True, "error": japanese_error(e), "detail": repr(e)[:500],
                      "cost_usd": round(meter.cost_usd, 4), "calls": meter.calls, "tokens": meter.tokens})
@@ -326,6 +334,8 @@ async def run_inspection_api(alias: str, *, client=None, ctx: ToolContext | None
                                                             ensure_ascii=False, indent=2), encoding="utf-8")
     report = {"alias": alias, "connection": "api_key", "summary": data.get("summary", ""),
               "findings": finalize(ctx, data.get("findings", [])),
+              # 検品した時刻（★11/5 夜：人の答え answers.json が、どの検品の質問への答えかを見分ける。AI なし・MCP と同じ形）
+              "at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
               "cost_usd": round(meter.cost_usd, 4), "duration_s": round(time.time() - started, 1), "turns": meter.calls,
               "tokens": meter.tokens, "models": {"inspect_face": fm["model"], "inspect_merge": mm["model"]}, "faces": faces,
               "questions": ctx.questions,      # 検品担当が ask_question で出した質問（人の答えを待つもの）

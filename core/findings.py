@@ -1,6 +1,8 @@
 """検品の指摘（findings.json）の扱い（SPEC §6・§9-2）。
 
 - 指摘は1件ずつ「承認／却下／あとで」。承認すると直す案を人が承認した修正（overrides）として記録する。
+  直す案のない指摘を承認すると、画面が Claude に直す案を頼み、指摘は「依頼済み」になる（★11/5 夜）。
+  却下・あとで・依頼済みは「未確認」に戻せる（reset）。
 - 修正の履歴から取り消したら、その指摘は「未確認」に戻す。
 - コードの検査からも指摘を作る（code_findings）：glb の例外（背中合わせの外壁など）・未解決の所・検査の警告・
   窓の間の柱が1階の部品の中で上がつながらない所（直す案つき。core/lintel.py）・形の検査（core/shape_checks.py）。
@@ -16,7 +18,9 @@ from pathlib import Path
 from core import overrides as ov
 from core.paths import out_dir, write_text_atomic
 
-STATUSES = {"approve": "承認", "reject": "却下", "later": "あとで"}
+STATUSES = {"approve": "承認", "reject": "却下", "later": "あとで",
+            "request": "依頼済み",     # 直す案のない指摘：この指摘のとおりに直す案を Claude に頼んだ（頼むのは画面の修正タブ。★11/5 夜）
+            "reset": "未確認"}         # 却下・あとで・依頼済みを、未確認に戻す
 TITLE_MAX = 30          # 見出しの長さの上限（目安は20字くらい。長すぎたら切る）
 # glb の整合性の検査（core/consistency.py）の種類ごとの見出し。{0}・{1} は対象の番号
 CONSISTENCY_TITLES = {"walls_overlap": "{0} と {1} の壁が重なる", "opening_protrudes": "{0} が壁の端からはみ出す",
@@ -188,15 +192,27 @@ def _find(report: dict, fid: str) -> dict:
     raise KeyError(f"{fid} という指摘はありません")
 
 
+def is_applied(alias: str, f: dict) -> bool:
+    """承認して、その修正がいまも直しの履歴に残っているか。"""
+    oid = f.get("override")
+    return f.get("status") == STATUSES["approve"] and bool(oid) and any(x.get("id") == oid for x in ov.load(alias))
+
+
 def decide(alias: str, fid: str, action: str) -> dict:
-    """指摘を承認／却下／あとでにする。承認は直す案を修正として記録する（数値は検品のときにコードが計算した値）。"""
+    """指摘を承認／却下／あとで／依頼済み（直す案を頼んだ）／未確認に戻す にする。
+    承認は直す案を修正として記録する（数値は検品のときにコードが計算した値）。
+    ★11/5 夜：もう承認して修正が残っている指摘に approve が来たら、何もしないで今の指摘を返す（修正を2件にしない）。
+    承認した指摘を却下・あとで・未確認にはしない（修正が残ったままになる。やめるときは直しの取り消しから）。"""
     if action not in STATUSES:
-        raise ValueError("action は approve / reject / later のどれかです")
+        raise ValueError("action は approve / reject / later / request / reset のどれかです")
     report = load(alias)
     if report is None:
         raise KeyError("まだ検品していません")
     f = _find(report, fid)
+    applied = is_applied(alias, f)
     if action == "approve":
+        if applied:
+            return f
         p = f.get("proposal")
         if not p:
             raise ValueError("直す案のない指摘は承認できません（表で直すか、却下・あとでにしてください）")
@@ -204,8 +220,13 @@ def decide(alias: str, fid: str, action: str) -> dict:
         item = ov.add(alias, raw, p["target"], p["field"], p.get("to"), p["value_source"], p.get("reason") or f["message"],
                       origin=f"finding:{fid}")
         f["override"] = item["id"]
+    elif applied:
+        raise ValueError(f"{fid} は承認して、修正 {f['override']} になっています。やめるときは、直しの取り消し（取り消す）を使ってください")
     f["status"] = STATUSES[action]
-    f["decided_at"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    if action == "reset":
+        f.pop("decided_at", None)
+    else:
+        f["decided_at"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     save(alias, report)
     return f
 

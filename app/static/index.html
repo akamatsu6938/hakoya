@@ -236,8 +236,8 @@
 
     <!-- 検品：進み具合・指摘・質問・コードの検査 -->
     <div class="ws-panel" data-ws="inspect" hidden>
-      <details class="sec" id="sec-progress" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>進み具合<span class="help" tabindex="0" title="Claude が東・西・南・北・平面・印刷の6つの面を同時に見比べ、食い違いを根拠つきで挙げます。直す案は「承認」すると修正として記録され、模型が組み直されます。"><svg class="ic ic-s"><use href="#i-help"/></svg></span></summary>
-        <div class="sec-body"><div id="inspect-progress" class="progress"></div><p id="inspect-summary" class="summary"></p></div>
+      <details class="sec" id="sec-progress" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>進み具合<span class="help" tabindex="0" title="Claude が東・西・南・北・平面・印刷の6つの面を同時に見比べ、食い違いを根拠つきで挙げます。直す案は「承認」すると修正として記録され、模型が組み直されます。直す案のない指摘は「承認」すると、Claude に直す案を頼みます（修正タブの「頼んだこと」）。質問には選択肢か書いて答えられ、答えは次の検品で Claude に伝わります。"><svg class="ic ic-s"><use href="#i-help"/></svg></span></summary>
+        <div class="sec-body"><div id="inspect-banner" class="inspect-banner" role="status" hidden></div><div id="inspect-progress" class="progress"></div><p id="inspect-summary" class="summary"></p></div>
       </details>
       <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>Claude の指摘<span class="sec-count" id="n-findings"></span></summary>
         <div class="sec-body flush"><ul id="findings" class="cards"></ul></div>
