@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { buildPickGroup, pickHits } from './pick3d.js';
+import { buildPickGroup, pickHits, pickAt, pickCopies } from './pick3d.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -166,7 +166,7 @@ function loop(now) {               // 描く（始めるのはファイルのい
   requestAnimationFrame(loop);
   if (document.hidden || state.pane !== '3d') return;
   stepTween(now ?? performance.now()); controls.update(); renderer.render(scene, camera);
-  updateGizmo(); updateScalebar();
+  updateGizmo(); updateScalebar(); updateTags();
 }
 
 // ---- 右上の向きの印：東西南北と上。押すと、その向きから見る（真ん中の点は斜め）
@@ -247,8 +247,10 @@ function setExploded(on) {
   state.exploded = on;
   const b = $('#explode'); b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.querySelector('span').textContent = on ? 'パーツを戻す' : 'パーツを離す';
   applyVisibility();
-  if (lasso.source === '3d') clearLasso();                    // 離すと色付けの位置がずれるので消す
-  if (on) { setLasso3dMode(false); clearHighlight3d(); } else reapplyFocus();
+  // ★11/5 夜：離したままでも押して選べる・囲める（当たり判定の形も部品ごとにずらす。pick3d.js）。
+  // 選んだもの・囲んだものはそのまま残し、光らせた印を新しい位置で描き直す
+  if (state.focus) reapplyFocus();
+  else if (state.hl && state.hlRows) highlight3d(state.hlRows);
 }
 document.querySelectorAll('button[data-view]').forEach((b) => b.addEventListener('click', () => {
   if (b.dataset.view === 'explode') { if (state.root) setExploded(!state.exploded); return; }
@@ -272,6 +274,7 @@ async function loadModel() {
   plate.position.set(mid.x, mid.y, box.min.z); plate.visible = true;
   scene.add(state.root); resize(); applyVisibility();
   if (!state.viewSet) { setView('iso', 0); state.viewSet = true; }
+  ensurePick().catch(() => {});      // 当たり判定の形を先に読んでおく（押したらすぐ選べるように）
 }
 
 // ---------------------------------------------------------------- 表で直す
@@ -1438,21 +1441,33 @@ const overlay = $('#lasso3d-overlay');
 const SVGNS = 'http://www.w3.org/2000/svg';
 const HL_MAT = new THREE.MeshBasicMaterial({ color: 0xe0008c, transparent: true, opacity: 0.45, depthTest: false, side: THREE.DoubleSide });
 
-function setLasso3dMode(on) {
-  if (on && state.exploded) { setStatus('パーツを戻してから囲んでください（離した表示では囲めません）', 'err'); return; }
+function setLasso3dMode(on) {   // ★11/5 夜：パーツを離したままでも囲める（pick3d.js が離した位置で数える）
   lasso.on3d = on; controls.enabled = !on;                 // 囲む間は回さない
   holder.classList.toggle('lassoing3d', on);
   syncLassoUi();
   if (on) setStatus('直したい部材（壁・窓・軒）をぐるっと囲んでください');
 }
 
-function clearHighlight3d() { if (state.hl) { scene.remove(state.hl); state.hl = null; } }
-function highlight3d(rows) {        // 選んだ部材に半透明の色を重ねる
+function clearHighlight3d() { if (state.hl) { scene.remove(state.hl); state.hl = null; } state.hlRows = null; state.hlAnchors = null; }
+// 選んだ部材に半透明の色を重ねる。パーツを離しているときは、部品ごとに離した位置へずらした写しに重ねる（pick3d.js の pickCopies）
+function highlight3d(rows) {
   clearHighlight3d();
-  if (!state.pick) return;
-  const ids = new Set(rows.map((r) => r.id));
-  state.hl = new THREE.Group();
-  state.pick.children.forEach((m) => { if (ids.has(m.userData.id)) state.hl.add(new THREE.Mesh(m.geometry, HL_MAT)); });
+  if (!state.pick || !state.root) return;
+  const ids = new Set(rows.map((r) => String(r.id)));
+  state.hl = new THREE.Group(); state.hlRows = rows;
+  // 名前の札を出す所：部材の番号（屋根は番号でも）ごとに、全体の箱の上の真ん中と、写しごとの上の真ん中（高い順）。
+  // 画面に入っている最初の所に出す（離したとき、上の部分が画面の外なら下の部分の上に）
+  const boxes = new Map();
+  const grow = (key, box) => { const e = boxes.get(key) || { all: box.clone(), parts: [] }; e.all.union(box); e.parts.push(box); boxes.set(key, e); };
+  const top = (b) => new THREE.Vector3((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, b.max.z);
+  for (const c of pickCopies(state.root, state.pick, { all: true })) {
+    const id = String(c.src.userData.id); if (!ids.has(id)) continue;
+    const m = new THREE.Mesh(c.geo, HL_MAT); m.position.z = c.dz; m.renderOrder = 10; state.hl.add(m);
+    if (!c.geo.boundingBox) c.geo.computeBoundingBox();
+    const box = c.geo.boundingBox.clone(); box.min.z += c.dz; box.max.z += c.dz;
+    grow(id, box); if (baseId(id) !== id) grow(baseId(id), box);
+  }
+  state.hlAnchors = new Map([...boxes].map(([k, e]) => [k, [top(e.all), ...e.parts.sort((a, b) => b.max.z - a.max.z).map(top)]]));
   state.hl.renderOrder = 10;
   scene.add(state.hl);
 }
@@ -1609,9 +1624,21 @@ function renderLassoResult(res) {
 // ---------------------------------------------------------------- 光らせる：指摘の見出し・左の一覧・番号の札（3D と平面図）
 // state.focus = { ids, primary, label }。refresh() で消す（組み直すと形が変わるため）。タブを替えても残す
 let focusSeq = 0;
+// 当たり判定の形：いま開いている家（state.building）のもの。読んでいる間に組み直したら、新しい家の形を読み直す
 async function ensurePick() {
-  if (!state.pick) state.pick = buildPickGroup(await call('GET', '/api/pick/{a}'));
-  return state.pick;
+  for (;;) {
+    const b = state.building;
+    if (state.pick && state.pickFor === b) return state.pick;
+    if (!state.pickReq || state.pickReq.b !== b) {
+      const req = { b, p: call('GET', '/api/pick/{a}') };
+      req.p.catch(() => { if (state.pickReq === req) state.pickReq = null; });   // しくじったら、次はもう一度読む
+      state.pickReq = req;
+    }
+    const data = await state.pickReq.p;
+    if (state.building !== b) continue;
+    if (!state.pick || state.pickFor !== b) { state.pick = buildPickGroup(data); state.pickFor = b; }
+    return state.pick;
+  }
 }
 function expandIds(ids) {          // 屋根 Y# は、その軒 Y#:* も一緒に光らせる
   const out = new Set(ids.map(String));
@@ -1647,11 +1674,10 @@ async function applyFocus({ frame = false, quiet = false } = {}) {
   const my = ++focusSeq;
   const known = f.ids.filter((id) => isElementId(id));
   let in3d = new Set(); let inPlan = new Set();
-  // 離した表示のまま：押して光らせたときは戻してから光らせる。タブを替えたときの付け直しでは、離したままにして 3D の印だけ付けない
-  if (state.root && state.built && known.length && !(state.exploded && !frame)) {
+  // ★11/5 夜：パーツを離したままでも光らせる（戻さない。作者「パーツを離した状態でも部品を触れるようにし、戻らないようにする」）
+  if (state.root && state.built && known.length) {
     try { await ensurePick(); } catch (e) { setStatus('部材の形を読めませんでした：' + e.message, 'err'); return; }
     if (my !== focusSeq || state.focus !== f) return;
-    if (state.exploded) setExploded(false);
     const ids = expandIds(known);
     highlight3d(ids.map((id) => ({ id })));
     const want = new Set(ids);
@@ -1700,11 +1726,90 @@ async function selectElement(id, { frame = true, quiet = false, label = '' } = {
 // 光っている部材の印：左の一覧の行・指摘のカード・番号の札・表の行
 function markLit() {
   const f = state.focus; const lit = new Set(f ? f.ids.map(baseId) : []);
-  $$('#tree .el').forEach((r) => { r.classList.toggle('lit', lit.has(r.dataset.id)); r.classList.toggle('sel', !!f && f.primary === r.dataset.id); });
+  $$('#tree .el').forEach((r) => { r.classList.toggle('lit', lit.has(r.dataset.id)); r.classList.toggle('sel', !!f && baseId(f.primary) === r.dataset.id); });
   $$('.idc[data-id]').forEach((c) => c.classList.toggle('lit', lit.has(baseId(c.dataset.id))));
   $$('.cards .finding').forEach((li) => li.classList.toggle('focus', !!f && f.fid === li.dataset.fid));
   $$('.tables tr[data-id]').forEach((tr) => tr.classList.toggle('lit', lit.has(tr.dataset.id)));
 }
+
+// ---------------------------------------------------------------- 押して選ぶ・外す（3D と平面図。★11/5 夜 作者の要望）
+// 「パーツを離した状態でも部品を触れるように」「修正時に選択すると戻せないから、真ん中の操作場所をクリックすると選択が外れるように」。
+// 押して（動かさずに）離すと、そこに見えている部材を選ぶ（左の一覧の行を押したときと同じ選び方）。何もない所なら外す。Esc でも外す
+const CLICK_PX = 5;                 // これより動かしたら「回した・動かした」とみなす（押したことにしない）
+function tagText(id) {              // 部材の名前の札（例：W2 外壁・O3 窓・Y1 屋根・Y1 南の軒）
+  const f = findElement(id); if (!f) return String(id);
+  const name = f.kind === 'roof' ? (f.side ? `${SIDE[f.side]}の軒` : roofShort(f.el)) : (KIND[f.el.kind] || f.el.kind);
+  return `${f.el.id} ${name}`;
+}
+function clearSelection() {         // 選んだ部材と囲み（修正担当の clearLassoSelection があれば）を外す
+  const had = !!state.focus;
+  clearFocus();
+  window.clearLassoSelection?.();
+  if (had) setStatus('選んだ部材を外しました');
+}
+
+// 3D：押した所の部材（pick3d.js の pickAt。パーツを離していても、離した位置で当たる）
+const press3d = { down: null, seq: 0 };
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  press3d.down = e.button === 0 && !lasso.on3d ? { x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const d = press3d.down; press3d.down = null;
+  if (!d || e.button !== 0 || d.id !== e.pointerId || lasso.on3d) return;
+  if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > CLICK_PX) return;     // 回した
+  pick3dAt(e.clientX, e.clientY);
+});
+async function pick3dAt(cx, cy) {
+  if (!state.root || !state.built) return;
+  const my = ++press3d.seq;
+  let pick;
+  try { pick = await ensurePick(); } catch (e) { setStatus('部材の形を読めませんでした：' + e.message, 'err'); return; }
+  if (my !== press3d.seq || !state.root || state.pane !== '3d') return;
+  const r = renderer.domElement.getBoundingClientRect();
+  const id = pickAt(renderer, camera, state.root, pick, cx - r.left, cy - r.top, r.width, r.height);
+  if (id == null || !findElement(id)) { clearSelection(); return; }
+  await selectElement(id, { frame: false, quiet: true });
+  setStatus(`${tagText(id)} を選びました（何もない所を押すか Esc で外れます）`, 'ok');
+}
+
+// 3D の名前の札：選んだ部材の上に「W2 外壁」。部材の箱の上の真ん中を毎回、画面の位置に直す（回しても付いていく）
+const tags3d = document.createElement('div'); tags3d.className = 'tags3d'; tags3d.setAttribute('aria-hidden', 'true');
+$('#v3d').appendChild(tags3d);
+const TAG_MAX = 6;
+const tagV = new THREE.Vector3();
+function updateTags() {
+  const f = state.focus; const jishas = state.hlAnchors;
+  const items = [];
+  if (f && jishas && state.hl) {
+    for (const id of f.ids) {
+      const a = jishas.get(String(id)) || jishas.get(baseId(id));
+      if (a && items.length < TAG_MAX) items.push([String(id), a]);
+    }
+  }
+  while (tags3d.children.length > items.length) tags3d.lastElementChild.remove();
+  while (tags3d.children.length < items.length) { const el = document.createElement('div'); el.className = 'tag3d'; tags3d.appendChild(el); }
+  const w = holder.clientWidth, h = holder.clientHeight;
+  items.forEach(([id, list], k) => {
+    const el = tags3d.children[k];
+    const text = tagText(id); if (el.textContent !== text) el.textContent = text;
+    let at = null;
+    for (const a of list) {            // カメラの後ろ・画面の外の所は使わない
+      tagV.copy(a).project(camera);
+      const x = (tagV.x + 1) / 2 * w, y = (1 - tagV.y) / 2 * h;
+      if (tagV.z <= 1 && x >= 0 && x <= w && y >= 24 && y <= h) { at = [x, y]; break; }
+    }
+    el.hidden = !at;
+    if (at) el.style.transform = `translate(${at[0].toFixed(1)}px, ${at[1].toFixed(1)}px) translate(-50%, calc(-100% - 7px))`;
+  });
+}
+
+// Esc：選んだ部材と囲みを外す（囲むモード・小窓・メニュー・入力中の Esc は、それぞれのものを先に）
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (lasso.on || lasso.on3d || document.querySelector('dialog[open]') || !$('#file-pop').hidden) return;
+  if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+  clearSelection();
+}, true);
 
 // ---------------------------------------------------------------- 左：部品と部材
 const TREE_KINDS = [['walls', '壁', 'i-wall'], ['openings', '窓・ドア', 'i-opening'], ['roofs', '屋根', 'i-roof']];
@@ -1875,10 +1980,90 @@ async function loadPlan() {   // 平面図（2階建ては選んだ階）。「�
   const params = [];
   if (state.multi) params.push(`level=${encodeURIComponent($('#plan-level').value)}`);
   if ($('#plan-drawing').checked) params.push('drawing=1');
-  $('#plan').innerHTML = await call('GET', '/api/plan/{a}' + (params.length ? '?' + params.join('&') : ''));
+  const svgText = await call('GET', '/api/plan/{a}' + (params.length ? '?' + params.join('&') : ''));
+  const fresh = !planSvg();                                // 閉じたあとに開き直した
+  $('#plan').innerHTML = svgText;
+  const key = `${state.alias}|${state.multi ? $('#plan-level').value : ''}`;   // 物件や階を替えたら「全体」に戻す
+  if (key !== planView.key || fresh) { planView.key = key; planView.fit = true; }
+  applyPlanView();
   updateSplitControls();
   if (state.focus) markPlan(state.focus.ids);             // 読み直すと印が消えるので、付け直す
 }
+
+// ---------------------------------------------------------------- 平面図の拡大・縮小・移動（★11/5 夜 作者「W1 や O1 などが見づらい」）
+// SVG の viewBox を変える（囲みの座標の変換 svgPoint・toMm はそのまま合う）。見ている所は「真ん中の点（SVG の座標）と
+// 倍率 k（画面の px ÷ SVG の 1）」で持ち、窓の大きさが変わっても保つ。ホイール：カーソルの所を中心に。ドラッグ：動かす
+const planView = { cx: 0, cy: 0, k: 1, fit: true, key: '', pan: null };
+const PLAN_PAD = { top: 52, right: 16, bottom: 16, left: 16 };     // 左上の切り替え・右上の道具に紙がかからないように
+function planPaper(svg) {          // 紙（SVG の全体）の大きさ。最初の viewBox を覚えておく
+  if (!svg.dataset.vw) { const vb = svg.viewBox.baseVal; svg.dataset.vw = vb.width || svg.getAttribute('width'); svg.dataset.vh = vb.height || svg.getAttribute('height'); }
+  return [Number(svg.dataset.vw), Number(svg.dataset.vh)];
+}
+function planFitK(svg, w, h) {
+  const [W, H] = planPaper(svg);
+  return Math.max(0.01, Math.min((w - PLAN_PAD.left - PLAN_PAD.right) / W, (h - PLAN_PAD.top - PLAN_PAD.bottom) / H));
+}
+function applyPlanView() {
+  const svg = planSvg(); const box = $('#plan'); if (!svg) return;
+  const w = box.clientWidth, h = box.clientHeight; if (!w || !h) return;   // 3D を出している間（隠れている）は後で
+  const [W, H] = planPaper(svg);
+  if (planView.fit) {
+    planView.k = planFitK(svg, w, h);
+    planView.cx = W / 2 - (PLAN_PAD.left - PLAN_PAD.right) / 2 / planView.k;
+    planView.cy = H / 2 - (PLAN_PAD.top - PLAN_PAD.bottom) / 2 / planView.k;
+  }
+  const { cx, cy, k } = planView;
+  svg.setAttribute('viewBox', `${(cx - w / 2 / k).toFixed(2)} ${(cy - h / 2 / k).toFixed(2)} ${(w / k).toFixed(2)} ${(h / k).toFixed(2)}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+}
+function zoomPlan(f, sx, sy) {     // f 倍にする。(sx, sy)＝その点を動かさない（平面図の欄の中の px。省くと真ん中）
+  const svg = planSvg(); const box = $('#plan'); if (!svg) return;
+  const w = box.clientWidth, h = box.clientHeight; if (!w || !h) return;
+  const fitK = planFitK(svg, w, h);
+  const k = Math.min(Math.max(planView.k * f, fitK * 0.5), fitK * 14);
+  const px = (sx ?? w / 2) - w / 2, py = (sy ?? h / 2) - h / 2;
+  const ux = planView.cx + px / planView.k, uy = planView.cy + py / planView.k;
+  Object.assign(planView, { k, cx: ux - px / k, cy: uy - py / k, fit: false });
+  applyPlanView();
+}
+function fitPlan() { planView.fit = true; applyPlanView(); }
+new ResizeObserver(() => applyPlanView()).observe($('#plan'));
+$('#plan').addEventListener('wheel', (e) => {
+  if (!planSvg()) return;
+  e.preventDefault();
+  const r = $('#plan').getBoundingClientRect();
+  const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+  zoomPlan(Math.exp(-dy * 0.0015), e.clientX - r.left, e.clientY - r.top);
+}, { passive: false });
+$('#plan-zoom-in').addEventListener('click', () => zoomPlan(1.4));
+$('#plan-zoom-out').addEventListener('click', () => zoomPlan(1 / 1.4));
+$('#plan-fit').addEventListener('click', fitPlan);
+
+// 平面図：ドラッグで動かす・押して選ぶ（囲むとき・分け目をつかむときは、それぞれの処理）。札（W2 など）を押しても選べる
+$('#plan').addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || lasso.on || splitUi.drag || !planSvg() || e.target.closest?.('[data-role="split"]')) return;
+  planView.pan = { x: e.clientX, y: e.clientY, cx: planView.cx, cy: planView.cy, target: e.target, id: e.pointerId, moved: false };
+  $('#plan').setPointerCapture(e.pointerId);
+});
+$('#plan').addEventListener('pointermove', (e) => {
+  const p = planView.pan; if (!p || p.id !== e.pointerId) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  if (!p.moved && Math.hypot(dx, dy) <= CLICK_PX) return;
+  if (!p.moved) { p.moved = true; $('#plan').classList.add('panning'); }
+  Object.assign(planView, { cx: p.cx - dx / planView.k, cy: p.cy - dy / planView.k, fit: false });
+  applyPlanView();
+});
+function endPlanPan(e, cancel) {
+  const p = planView.pan; if (!p || p.id !== e.pointerId) return;
+  planView.pan = null; $('#plan').classList.remove('panning');
+  if (cancel || p.moved || lasso.on) return;
+  const id = p.target.closest?.('[data-id]')?.dataset.id;
+  if (id && findElement(id)) {
+    selectElement(id, { frame: false, quiet: true }).then(() => setStatus(`${tagText(id)} を選びました（何もない所を押すか Esc で外れます）`, 'ok'));
+  } else clearSelection();
+}
+$('#plan').addEventListener('pointerup', (e) => endPlanPan(e, false));
+$('#plan').addEventListener('pointercancel', (e) => endPlanPan(e, true));
 $('#plan-drawing').addEventListener('change', async () => {
   try { setStatus($('#plan-drawing').checked ? '図面を重ねています（初回は数秒かかります）…' : '図面を外しています…', 'busy'); await loadPlan(); setStatus('', ''); }
   catch (e) { setStatus('平面図を読めませんでした：' + e.message, 'err'); }
@@ -1997,20 +2182,13 @@ function updateChrome() {
   }
 }
 
+// 下の帯：左は動きの文（#status）、右は保存済みの時刻だけ（★11/5 夜 作者「縮尺とか造形範囲とか部品とか AI はいらないかな。
+// 保存済みだけでいい」。造形範囲・部品の数は模型の欄、AI のつなぎ方は環境設定で見られる）
 function updateStatusBar() {
-  const open = !!state.alias;
   const saved = $('#sb-saved');
-  saved.hidden = !open;
+  saved.hidden = !state.alias;
   saved.textContent = state.savedAt ? `保存済み ${fmtTime(state.savedAt)}` : '自動で保存';
-  const ps = open ? printSummary(state.checks) : null;
-  const fit = $('#sb-fit'); fit.hidden = !ps || ps.fits == null;
-  if (ps && ps.fits != null) { fit.textContent = `造形範囲：${ps.fits ? '入る' : '入らない'}`; fit.className = 'sb-item ' + (ps.fits ? 'ok' : 'bad'); }
-  const parts = $('#sb-parts'); parts.hidden = !ps; if (ps) parts.textContent = `部品 ${ps.count}`;
-  const st = state.settings || {};
-  const c = st.connections || []; const plan = c.includes('claude_code') && state.mode !== 'other'; const key = !!st.api_key_set;
-  $('#sb-ai').textContent = plan && key ? 'AI：自分のプラン・API キー' : plan ? 'AI：自分のプラン' : key ? 'AI：API キー' : 'AI：なし（API キー未設定）';
 }
-$('#sb-ai').addEventListener('click', () => openPrefs('set-ai'));
 $('#empty-new').addEventListener('click', () => runCmd('new'));
 $('#empty-open').addEventListener('click', () => runCmd('open'));
 

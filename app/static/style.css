@@ -737,3 +737,29 @@ body[data-mode="sample"] .no-sample { display: none !important; }
 /* 札が出ているときは「まだ検品していません」を出さない（上の決まりより強くする） */
 #sec-progress .sec-body:has(.inspect-banner:not([hidden]))::before { content: none !important; }
 @media (prefers-reduced-motion: reduce) { .f-acts button.busy::before, .inspect-banner .spin { animation: none; } }
+
+/* ==== 見る・選ぶ（③）（11/5 夜）：3D で押して選ぶ・名前の札・平面図の拡大と移動・下の帯 ===================================
+   作者「W1 や O1 などが見づらい」「パーツを離した状態でも部品を触れるように」「真ん中をクリックすると選択が外れるように」 */
+/* 3D の名前の札：選んだ部材の上に小さく（赤紫＝光らせた部材の色）。押せない（3D を回すじゃまをしない） */
+.tags3d { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
+.tag3d { position: absolute; left: 0; top: 0; padding: 1px 6px; border: 1px solid var(--pick); border-radius: 2px;
+  background: rgba(18, 20, 23, .9); color: var(--pick-ink); font-size: var(--fs-s); font-weight: 600; line-height: 16px;
+  white-space: nowrap; will-change: transform; }
+.tag3d::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 1px; height: 6px; background: var(--pick); }
+
+/* 平面図：紙（白）を暗い場所に置き、ホイールで拡大・縮小、ドラッグで動かす（viewBox を変える。app.js の applyPlanView） */
+.plan { overflow: hidden; padding: 0; }
+.plan svg { width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border-radius: 0; cursor: grab;
+  user-select: none; -webkit-user-select: none; touch-action: none; }
+.plan.panning svg, .plan.panning [data-id] { cursor: grabbing; }
+.plan [data-id] { cursor: pointer; }
+.plan.lassoing svg, .plan.lassoing [data-id] { cursor: crosshair; }
+.plan polygon[data-id]:not(.picked):hover { stroke-width: 2.5; }
+.plan text[data-id]:hover { font-weight: 700; }
+.plan text[data-id].picked { stroke: #fff; stroke-width: 3px; fill: var(--pick); font-weight: 700; }
+.plan-tools { position: absolute; z-index: 5; top: 10px; right: 12px; display: flex; gap: 2px; padding: 2px; border-radius: 2px;
+  background: rgba(18, 20, 23, .86); box-shadow: 0 0 0 1px var(--hair); }
+.plan-tools button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 28px; min-height: 24px;
+  padding: 0 8px; border-radius: 2px; background: transparent; color: var(--ink-2); font-size: var(--fs-m); }
+.plan-tools button:hover { background: var(--c-hover); color: var(--ink); }
+.plan-tools button span { font-size: var(--fs-s); }

@@ -22,6 +22,17 @@ STYLE_LABELS = {"sliding": "引き違い", "fixed": "FIX", "unknown": "形不明
 SCALE = 0.08     # 1mm → 0.08px（10m が 800px）
 MARGIN = 60
 LIST_WIDTH = 400  # 右側の壁の一覧の幅
+# 図の中の札（番号）：白いふち取りで線の上でも読めるように（★11/5 夜 作者「W1 や O1 などが見づらい」）。
+# 札にも data-id を付け、画面で札を押しても部材を選べるようにする（app.js）
+HALO = 'stroke="white" stroke-width="3" stroke-linejoin="round" paint-order="stroke"'
+WALL_LABEL_SIZE = 13
+OPENING_LABEL_SIZE = 12
+ID_LEGEND = "W＝壁　O＝窓・ドア　Y＝屋根"   # 番号の頭の字の意味（凡例）
+
+
+def _n(v) -> str:
+    """寸法の数を短く（2400.0 → 2400）。"""
+    return f"{float(v):g}"
 
 
 def wall_corners(w: dict) -> list[tuple[float, float]]:
@@ -104,7 +115,7 @@ def render_svg(b: dict, title: str, level: str | None = None, overlay: list | No
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.0f}" height="{H:.0f}" '
            f'viewBox="0 0 {W:.0f} {H:.0f}" font-family="sans-serif" '
            f'data-x0="{x0:.1f}" data-y1="{y1:.1f}" data-scale="{SCALE}" data-margin="{MARGIN}">',
-           f'<rect width="100%" height="100%" fill="white"/>',
+           f'<rect width="{W:.0f}" height="{H:.0f}" fill="white"/>',   # 紙（画面で拡大・移動しても同じ所に）
            f'<text x="{MARGIN}" y="30" font-size="16">{html.escape(title)}（{level_label}平面図・壁の作り直し）</text>']
     for r in rooms:
         poly = " ".join(P(*p) for p in r["polygon"])
@@ -122,12 +133,15 @@ def render_svg(b: dict, title: str, level: str | None = None, overlay: list | No
         poly = " ".join(P(*c) for c in wall_corners(w))
         dash = ' stroke-dasharray="4,2"' if upper(w) else ""  # 途中の高さから始まる壁は破線
         c = COLORS[w["kind"]]
+        # 吹き出し（例：W2 外壁 厚み 162）。途中の高さから始まる壁は下端も
+        tip = f'{w["id"]} {LABELS[w["kind"]]} 厚み {_n(w["thickness_mm"])}' + (
+            f' 下端 {_n(w["bottom_mm"])}（途中の高さから始まる壁）' if upper(w) else "")
         out.append(f'<polygon data-id="{w["id"]}" points="{poly}" fill="{c}" fill-opacity="0.35" stroke="{c}" stroke-width="1"{dash}>'
-                   f'<title>{w["id"]} {LABELS[w["kind"]]} 厚み{w["thickness_mm"]}mm 下端{w["bottom_mm"]} '
-                   f'{w.get("source", "")}</title></polygon>')
+                   f'<title>{html.escape(tip)}</title></polygon>')
         mx, my = (w["start"][0] + w["end"][0]) / 2, (w["start"][1] + w["end"][1]) / 2
-        out.append(f'<text x="{P(mx, my).split(",")[0]}" y="{P(mx, my).split(",")[1]}" font-size="10" '
-                   f'fill="{c}" text-anchor="middle" dy="-3">{w["id"]} {w["thickness_mm"]:g}</text>')
+        out.append(f'<text data-id="{w["id"]}" x="{P(mx, my).split(",")[0]}" y="{P(mx, my).split(",")[1]}" font-size="{WALL_LABEL_SIZE}" '
+                   f'fill="{c}" text-anchor="middle" dy="-4" {HALO}>{w["id"]} {w["thickness_mm"]:g}'
+                   f'<title>{html.escape(tip)}</title></text>')
     walls_by_id = {w["id"]: w for w in walls}
     for o in openings:
         w = walls_by_id[o["wall"]]
@@ -139,10 +153,12 @@ def render_svg(b: dict, title: str, level: str | None = None, overlay: list | No
         piece = {"start": a, "end": e, "thickness_mm": w["thickness_mm"] + 40}
         poly = " ".join(P(*c) for c in wall_corners(piece))
         col = OPENING_COLORS[o["kind"]]
-        out.append(f'<polygon data-id="{o["id"]}" points="{poly}" fill="white" stroke="{col}" stroke-width="1.5"/>')
+        tip = f'{o["id"]} {OPENING_LABELS[o["kind"]]} 幅 {_n(o["width_mm"])} 上端 FL+{_n(o["head_fl_mm"])}'   # 例：O3 窓 幅 1690 上端 FL+2000
+        out.append(f'<polygon data-id="{o["id"]}" points="{poly}" fill="white" stroke="{col}" stroke-width="1.5">'
+                   f'<title>{html.escape(tip)}</title></polygon>')
         cx, cy = P(*o["center"]).split(",")
-        out.append(f'<text x="{cx}" y="{cy}" font-size="9" fill="{col}" text-anchor="middle" dy="12">'
-                   f'{o["id"]} FL+{o["head_fl_mm"]}</text>')
+        out.append(f'<text data-id="{o["id"]}" x="{cx}" y="{cy}" font-size="{OPENING_LABEL_SIZE}" fill="{col}" text-anchor="middle" dy="14" {HALO}>'
+                   f'{o["id"]} FL+{o["head_fl_mm"]}<title>{html.escape(tip)}</title></text>')
     if overlay:   # 図面の線（文字・表題欄は描かない）。囲む操作に反応しないように pointer-events="none"
         segs = "".join(f'<line x1="{P(x0_, y0_).split(",")[0]}" y1="{P(x0_, y0_).split(",")[1]}" '
                        f'x2="{P(x1_, y1_).split(",")[0]}" y2="{P(x1_, y1_).split(",")[1]}"/>' for x0_, y0_, x1_, y1_ in overlay)
@@ -153,8 +169,8 @@ def render_svg(b: dict, title: str, level: str | None = None, overlay: list | No
         a, e = P(*u["start"]), P(*u["end"])
         out.append(f'<line x1="{a.split(",")[0]}" y1="{a.split(",")[1]}" x2="{e.split(",")[0]}" y2="{e.split(",")[1]}" '
                    f'stroke="#ff8800" stroke-width="5" stroke-dasharray="6,3"><title>{u["id"]} 未解決（壁があるか要確認）</title></line>')
-    # 凡例と縮尺
-    ly = H - 40
+    # 凡例と縮尺。1行目：壁の種類・未解決の所・破線。2行目：窓・ドアの色と、番号の頭の字（W＝壁　O＝窓・ドア　Y＝屋根）
+    ly = H - 48
     lx = MARGIN
     for kind in ("exterior", "standalone", "interior"):
         out.append(f'<rect x="{lx}" y="{ly}" width="18" height="10" fill="{COLORS[kind]}" fill-opacity="0.5"/>'
@@ -164,6 +180,12 @@ def render_svg(b: dict, title: str, level: str | None = None, overlay: list | No
                f'<text x="{lx + 36}" y="{ly + 10}" font-size="12">未解決の所</text>')
     lx += 130
     out.append(f'<text x="{lx}" y="{ly + 10}" font-size="12">破線＝途中の高さから始まる壁</text>')
+    ly2, lx = ly + 22, MARGIN
+    for kind in ("window", "door", "entrance_door"):
+        out.append(f'<rect x="{lx}" y="{ly2}" width="18" height="10" fill="white" stroke="{OPENING_COLORS[kind]}" stroke-width="1.5"/>'
+                   f'<text x="{lx + 24}" y="{ly2 + 10}" font-size="12">{OPENING_LABELS[kind]}</text>')
+        lx += 100
+    out.append(f'<text class="id-legend" x="{lx}" y="{ly2 + 10}" font-size="12">{ID_LEGEND}</text>')
     # 右側：壁の一覧（マウスを使わなくても読めるように）
     tx, ty = plan_w + 10, MARGIN
     out.append(f'<text x="{tx}" y="{ty}" font-size="13" font-weight="bold">壁の一覧（番号・種類・厚み・下端）</text>')

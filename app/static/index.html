@@ -171,7 +171,13 @@
       <svg id="gizmo" class="gizmo" viewBox="-50 -50 100 100" role="group" aria-label="向き（押すとその向きから見る）"></svg>
       <div id="scalebar" class="scalebar" aria-hidden="true"></div>
     </div>
-    <div id="vplan" class="vpane"><div id="plan" class="plan"></div></div>
+    <div id="vplan" class="vpane"><div id="plan" class="plan"></div>
+      <div class="plan-tools" role="toolbar" aria-label="平面図の大きさ" title="ホイールでも拡大・縮小できます。ドラッグで動かせます">
+        <button type="button" id="plan-zoom-in" title="拡大する（ホイールを奥へ回しても）" aria-label="拡大する">＋</button>
+        <button type="button" id="plan-zoom-out" title="縮小する（ホイールを手前へ回しても）" aria-label="縮小する">−</button>
+        <button type="button" id="plan-fit" title="平面図の全体を見る"><svg class="ic ic-s"><use href="#i-fit"/></svg><span>全体</span></button>
+      </div>
+    </div>
     <div id="empty" class="empty" hidden>
       <div class="empty-card">
         <p class="empty-lead" id="empty-lead">ファイル → 新しく読み込む／過去の物件を開く</p>
@@ -291,10 +297,6 @@
   <div id="status" class="status" role="status" aria-live="polite"></div>
   <div class="sb">
     <span id="sb-saved" class="sb-item" title="直すたびに自動で保存しています" hidden></span>
-    <span class="sb-item" title="模型の寸法＝実寸 mm ÷ 50">縮尺 1/50</span>
-    <span id="sb-fit" class="sb-item" title="3D プリンターの造形範囲（256mm 角）" hidden></span>
-    <span id="sb-parts" class="sb-item" title="印刷する部品の数（分けた屋根・本体は分けた数）" hidden></span>
-    <button id="sb-ai" class="sb-item sb-btn" title="AI のつなぎ方（押すと環境設定）"></button>
   </div>
 </footer>
 
