@@ -684,15 +684,16 @@ def pick_proxies(alias: str):
 
 @app.post("/api/lasso/{alias}/select")
 def lasso_select(alias: str, body: LassoIn):
-    """囲みの中の部材（コードが決める）。"""
+    """囲みの中の部材（コードが決める）。part は、その部材が入る模型の部品の短い説明。"""
     _check_alias(alias)
     from core import lasso as geo
+    from core.ai.lasso import read_checks
     b, _ = _effective(alias)
     try:
         sel = _lasso_selection(b, body)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return _safe_json({"selection": geo.describe(b, sel)})
+    return _safe_json({"selection": geo.describe(b, sel, geo.roof_ids_from_checks(read_checks(alias)))})
 
 
 @app.post("/api/lasso/{alias}/ask")
@@ -737,6 +738,278 @@ def lasso_approve(alias: str, body: LassoApproveIn):
         raise HTTPException(400, str(e))
     summary = _rebuild_or_undo(alias, item["id"])
     return _safe_json({"override": item, "checks": summary["checks"]})
+
+
+# ---------------------------------------------------------------- 修正の依頼（★11/5 夜 作者の試しから。core/fix_requests.py）
+# 囲んで直す・文字で直すを裏で動かし、頼んだことと答えを物件ごとに残す。画面はタブを替えても・物件を開き直しても、
+# 一覧（GET）を読み直せば答えが見える。承認したら模型の形を前後で比べ、変わらない直しは取り消す（core/shape_diff.py）。
+# 今までの /api/lasso/*（テストや録画が使う）は、そのまま残す。
+
+CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
+FIX_LOCK = threading.Lock()          # 承認・却下は1つずつ（二度押しで同じ案を2回直さない）
+NO_CHANGE_NOTE = "この直しでは模型が変わりませんでした（取り消しました）"
+FIX_STATE_JA = {"approved": "もう承認しました（やめるときは「取り消す」）", "rejected": "却下しました",
+                "no_change": "模型が変わらなかったので取り消しました"}
+
+
+class FixGroupIn(BaseModel):
+    label: str = ""
+    ids: list[str] = []
+    partial: list[str] = []          # 囲みに一部だけかかった部材
+    source: str = "plan"             # plan（平面図で囲んだ）・3d（3D で囲んだ）
+    view: str | None = None          # 3D をどちらから見ていたか（S/N/E/W/plan）
+
+
+class FixRequestIn(BaseModel):
+    text: str = ""
+    connection: str = "claude_code"
+    model: str = "opus"              # opus（Opus 5.5・既定）・sonnet（Sonnet 5.5）
+    kind: str = "lasso"              # lasso（囲んで直す）・text（文字で直す）
+    ids: list[str] | None = None     # 囲んだ部材（lasso）・いま選んでいる部材（text）
+    groups: list[FixGroupIn] | None = None   # 囲みごとの部材（①②…）
+    polygon: list[list[float]] | None = None  # 1つの囲みを /api/lasso と同じ形で送るとき（サーバーが部材を決める）
+    level: str | None = None
+    hits: list[dict] | None = None
+    mask_px: int = 0
+    view: str | None = None
+    keep: list[str] | None = None
+    finding_id: str | None = None    # 検品の指摘から頼んだとき
+    parent_id: str | None = None
+
+
+def _fix_ready(alias: str, connection: str) -> dict:
+    """依頼を受ける前の確かめ（組み立て済み・接続・検品中でない）。修正を当てた家を返す。"""
+    _check_alias(alias)
+    b, _ = _effective(alias)                                   # 組み立て前なら 409
+    if connection not in ("claude_code", "api_key"):
+        raise HTTPException(400, "connection は claude_code（自分のプラン）か api_key です（AI なしは「表で直す」）")
+    _check_edition(connection)
+    if connection == "api_key" and not secret_store.has_api_key():
+        raise HTTPException(409, "API キーが設定されていません。「ファイル」→「環境設定」で API キーを入れてください")
+    if RUNS.get(alias, {}).get("running"):
+        raise HTTPException(409, "この物件はいま検品中です。検品が終わってから頼んでください")
+    return b
+
+
+def _fix_selection(alias: str, b: dict, body: FixRequestIn) -> tuple[list[dict], list[dict]]:
+    """依頼の部材の一覧（説明つき）と、囲みごとの番号 [{label, ids, partial, source, view}]。"""
+    from core import lasso as geo
+    from core.ai.lasso import read_checks
+    roof_ids = geo.roof_ids_from_checks(read_checks(alias))
+    if body.kind == "text":                                     # いま選んでいる部材（なくてもよい。知らない番号は外す）
+        return geo.describe(b, geo.select_ids(b, body.ids or [], strict=False), roof_ids), []
+    if body.hits is not None or body.polygon:                   # 1つの囲み（/api/lasso と同じ。部材はサーバーが決める）
+        lasso_in = LassoIn(polygon=body.polygon, hits=body.hits, mask_px=body.mask_px, view=body.view, level=body.level)
+        rows = geo.describe(b, geo.keep_only(_lasso_selection(b, lasso_in), body.keep), roof_ids)
+        src = "3d" if body.hits is not None else "plan"
+        return rows, [{"label": CIRCLED[0], "ids": [r["id"] for r in rows], "partial": [r["id"] for r in rows if r["partial"]],
+                       "source": src, "view": body.view if src == "3d" else None}] if rows else []
+    groups_in = body.groups or ([FixGroupIn(label=CIRCLED[0], ids=body.ids)] if body.ids else [])
+    ids = list(dict.fromkeys([*(body.ids or []), *(i for g in groups_in for i in g.ids)]))
+    rows = geo.describe(b, geo.select_ids(b, ids, [i for g in groups_in for i in g.partial]), roof_ids)   # 知らない番号は 400
+    known = [r["id"] for r in rows]
+    groups, used = [], set()
+    for k, g in enumerate(groups_in):
+        gid = [i for i in dict.fromkeys(g.ids) if i in known]
+        if gid:
+            groups.append({"label": (g.label.strip() or CIRCLED[k % len(CIRCLED)])[:4], "ids": gid,
+                           "partial": [i for i in g.partial if i in gid], "source": "3d" if g.source == "3d" else "plan",
+                           "view": g.view if g.source == "3d" and g.view in ("S", "N", "E", "W", "plan") else None})
+            used.update(gid)
+    if groups and len(used) < len(known):                       # どの囲みにも入っていない番号（送り方の誤り）は「ほか」に
+        groups.append({"label": "ほか", "ids": [i for i in known if i not in used], "partial": [], "source": "plan", "view": None})
+    return rows, groups
+
+
+def _start_fix(alias: str, req: dict) -> None:
+    """依頼を裏の thread で Claude に渡す（終わったら fix_requests が記録する）。"""
+    import asyncio
+    from core import fix_requests as fr
+    from core.ai.lasso import run_fix
+    ids = [r["id"] for r in req["selection"]]
+    partial = [r["id"] for r in req["selection"] if r.get("partial")]
+
+    def job():
+        return asyncio.run(run_fix(alias, req["connection"], req["text"], kind=req["kind"], model=req["model"],
+                                   ids=ids, partial=partial, groups=req["groups"], human_words=req.get("human_words"),
+                                   request_id=req["id"]))
+    fr.start(alias, req["id"], job)
+
+
+@app.post("/api/fix/{alias}/requests")
+def fix_create(alias: str, body: FixRequestIn):
+    """修正の依頼を作り、裏で Claude に渡す（すぐ返る。答えは GET で読む）。返すのは依頼（status=running）。"""
+    from core import fix_requests as fr
+    from core.ai.agent import load_ai_models
+    from core.ai.lasso import model_spec
+    from core.privacy import PrivacyError
+    b = _fix_ready(alias, body.connection)
+    if body.kind not in ("lasso", "text"):
+        raise HTTPException(400, "kind は lasso（囲んで直す）か text（文字で直す）です")
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(400, "一言を書いてください（例：この壁厚だけおかしい。ほかとそろえて）")
+    try:
+        assert_clean(text + "\n" + (body.finding_id or ""), "一言")
+    except PrivacyError as e:
+        raise HTTPException(400, str(e))
+    try:
+        m = model_spec(load_ai_models(), body.connection, body.model)
+        rows, groups = _fix_selection(alias, b, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if body.kind == "lasso" and not rows:
+        raise HTTPException(400, "囲みの中に部材がありません。壁や窓、軒をぐるっと囲んでください")
+    try:
+        req = fr.create(alias, text=text, kind=body.kind, model=body.model, model_label=m["label"], connection=body.connection,
+                        selection=rows, groups=groups, finding_id=body.finding_id, parent_id=body.parent_id)
+    except fr.BusyError as e:
+        raise HTTPException(409, str(e))
+    _start_fix(alias, req)
+    return _safe_json(req)
+
+
+@app.get("/api/fix/{alias}/requests")
+def fix_list(alias: str):
+    """修正の依頼の一覧（新しい順）。running は、この物件でいま Claude が考えている数。"""
+    from core import fix_requests as fr
+    _check_alias(alias)
+    return _safe_json({"requests": fr.load(alias), "running": fr.running_count(alias), "max_running": fr.MAX_RUNNING})
+
+
+class FixIndexIn(BaseModel):
+    index: int
+
+
+def _fix_proposal(alias: str, rid: str, index: int) -> tuple[dict, dict]:
+    from core import fix_requests as fr
+    try:
+        req = fr.get(alias, rid)
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'\""))
+    props = req.get("proposals") or []
+    if not 0 <= index < len(props):
+        raise HTTPException(404, f"{rid} に {index + 1} 番目の直す案はありません")
+    return req, props[index]
+
+
+@app.post("/api/fix/{alias}/requests/{rid}/approve")
+def fix_approve(alias: str, rid: str, body: FixIndexIn):
+    """直す案を承認して修正として記録し、模型を組み直す。数値はサーバーが出どころから計算し直す。
+    組み直す前と後で模型の形を比べ、変わらなければ取り消して state=no_change（changed=false）。同じ案は二度承認できない。"""
+    from core import fix_requests as fr
+    from core import shape_diff as sd
+    from core.ai.lasso import approve
+    _check_alias(alias)
+    _effective(alias)
+    if RUNS.get(alias, {}).get("running"):
+        raise HTTPException(409, "この物件はいま検品中です。検品が終わってから承認してください")
+    with FIX_LOCK:
+        req, p = _fix_proposal(alias, rid, body.index)
+        if p.get("state") in FIX_STATE_JA:
+            raise HTTPException(409, f"この案は{FIX_STATE_JA[p['state']]}")
+        before = sd.signature_of(alias)
+        try:
+            item = approve(alias, p, origin="text" if req.get("kind") == "text" else "lasso")
+        except ValueError as e:
+            fr.set_proposal(alias, rid, body.index, state="failed", note=str(e))
+            raise HTTPException(400, str(e))
+        try:
+            summary = _rebuild_or_undo(alias, item["id"])
+        except HTTPException as e:
+            fr.set_proposal(alias, rid, body.index, state="failed", note=str(e.detail))
+            raise
+        parts = sd.changed_parts(before, sd.signature_of(alias))
+        values = {"from": item.get("from"), "to": item.get("to")}         # 承認のときに計算し直した値
+        if not parts:                                                     # 模型が変わらない直し：記録から外して組み直す
+            ov.undo(alias, item["id"])
+            fd.revert_override(alias, item["id"])
+            summary = write_outputs(alias)
+            req = fr.set_proposal(alias, rid, body.index, state="no_change", override_id=None, note=NO_CHANGE_NOTE, **values)
+            return _safe_json({"request": req, "override": item, "changed": False, "changed_parts": [],
+                               "checks": summary["checks"]})
+        req = fr.set_proposal(alias, rid, body.index, state="approved", override_id=item["id"], note="", **values)
+        return _safe_json({"request": req, "override": item, "changed": True, "changed_parts": parts,
+                           "checks": summary["checks"]})
+
+
+@app.post("/api/fix/{alias}/requests/{rid}/reject")
+def fix_reject(alias: str, rid: str, body: FixIndexIn):
+    """直す案を却下する（模型は変えない）。承認した案は「取り消す」でやめる。"""
+    from core import fix_requests as fr
+    _check_alias(alias)
+    with FIX_LOCK:
+        _, p = _fix_proposal(alias, rid, body.index)
+        if p.get("state") == "approved":
+            raise HTTPException(409, "承認した案です。やめるときは「取り消す」を押してください")
+        req = fr.set_proposal(alias, rid, body.index, state="rejected", note="")
+    return _safe_json({"request": req})
+
+
+class FixAnswerIn(BaseModel):
+    question_id: str
+    answer: str
+
+
+@app.post("/api/fix/{alias}/requests/{rid}/answer")
+def fix_answer(alias: str, rid: str, body: FixAnswerIn):
+    """Claude の質問に答える：元の一言に「質問：…／選択肢：1. … 2. …／人の答え：…」を付けた新しい依頼（parent_id 付き）を作り、
+    裏で Claude に渡す。返すのは新しい依頼。同じ質問には一度だけ答えられる。"""
+    from core import fix_requests as fr
+    from core import lasso as geo
+    from core.ai.agent import load_ai_models
+    from core.ai.lasso import model_spec, read_checks
+    from core.privacy import PrivacyError
+    _check_alias(alias)
+    answer = (body.answer or "").strip()
+    if not answer:
+        raise HTTPException(400, "答えを書くか、選択肢を押してください")
+    try:
+        assert_clean(answer, "人の答え")
+    except PrivacyError as e:
+        raise HTTPException(400, str(e))
+    with fr.LOCK:                                             # 二度押しで、同じ答えの依頼を2つ作らない
+        try:
+            parent = fr.get(alias, rid)
+        except KeyError as e:
+            raise HTTPException(404, str(e).strip("'\""))
+        q = next((x for x in parent.get("questions") or [] if x.get("id") == body.question_id), None)
+        if q is None:
+            raise HTTPException(404, f"{rid} に {body.question_id} という質問はありません")
+        if q.get("answered"):
+            raise HTTPException(409, "この質問にはもう答えました（答えを添えた依頼が一覧にあります）")
+        b = _fix_ready(alias, parent["connection"])
+        text, words = fr.answered_text(parent, q, answer)
+        ids = [r["id"] for r in parent.get("selection") or []]
+        partial = [r["id"] for r in parent.get("selection") or [] if r.get("partial")]
+        rows = geo.describe(b, geo.select_ids(b, ids, partial, strict=False), geo.roof_ids_from_checks(read_checks(alias)))
+        try:
+            m = model_spec(load_ai_models(), parent["connection"], parent.get("model"))
+            req = fr.create(alias, text=text, kind=parent.get("kind", "lasso"), model=parent.get("model") or "opus",
+                            model_label=m["label"], connection=parent["connection"], selection=rows,
+                            groups=parent.get("groups") or [], finding_id=parent.get("finding_id"), parent_id=rid,
+                            human_words=words)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except fr.BusyError as e:
+            raise HTTPException(409, str(e))
+        fr.mark_answered(alias, rid, q["id"], answer, req["id"])
+    _start_fix(alias, req)
+    return _safe_json(req)
+
+
+@app.delete("/api/fix/{alias}/requests/{rid}")
+def fix_remove(alias: str, rid: str):
+    """依頼を一覧から外す（記録 lasso_log.jsonl には残る。承認した修正はそのまま）。考えている途中の依頼は外さない。"""
+    from core import fix_requests as fr
+    _check_alias(alias)
+    try:
+        fr.remove(alias, rid)
+    except KeyError as e:
+        raise HTTPException(404, str(e).strip("'\""))
+    except fr.BusyError as e:
+        raise HTTPException(409, str(e))
+    return _safe_json({"removed": rid})
 
 
 # ---------------------------------------------------------------- 会社ルールの言語化（SPEC §5-4②・§9-1）

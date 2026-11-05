@@ -78,7 +78,8 @@ function setWorkspace(ws) {
   $$('.strip[data-ws]').forEach((s) => { s.hidden = s.dataset.ws !== ws; });
   $$('.ws-panel[data-ws]').forEach((p) => { p.hidden = p.dataset.ws !== ws; });
   if (lasso.on || lasso.on3d) { setLassoMode(false); setLasso3dMode(false); }
-  if (ws !== 'fix' && (lasso.selection.length || lasso.line || lasso.line3d)) clearLasso();   // 囲みは修正タブのもの
+  // ★11/5 夜：囲みは修正タブ以外に移っても消さない（作者「待っている間に他のことをするとどっか行ってしまう」）
+  if (ws === 'fix') { loadFixRequests(); if (lasso.selection.length) markLassoSelection(); }   // 依頼の一覧を読み直す
   reapplyFocus();                                          // 指摘や一覧で光らせた部材は、タブを替えても残す
   renderInspector();
   if (ws === 'rules') renderRules();
@@ -100,8 +101,9 @@ function setPane(pane) {
   state.pane = pane; document.body.dataset.pane = pane;
   $$('#pane-switch [data-pane]').forEach((b) => { const on = b.dataset.pane === pane; b.classList.toggle('on', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
   $('#v3d').classList.toggle('on', pane === '3d'); $('#vplan').classList.toggle('on', pane === 'plan');
-  clearLasso(); setLassoMode(false); setLasso3dMode(false);   // 囲みは表示している図だけのもの
+  clearLassoLines(); setLassoMode(false); setLasso3dMode(false);   // 図を替えたら囲みの線だけ消す（囲んだ部材は残す。★11/5 夜）
   reapplyFocus();
+  if (lasso.selection.length) markLassoSelection();
   if (pane === '3d') resize();
 }
 $('#pane-switch').addEventListener('click', (e) => { const b = e.target.closest('button[data-pane]'); if (b && b.dataset.pane !== state.pane) setPane(b.dataset.pane); });
@@ -1259,9 +1261,14 @@ const settingsReady = renderSettings();     // 物件の一覧は、モードを
 // ---------------------------------------------------------------- 囲んで直す（平面図、SPEC §9-3）
 // 囲みの中の部材はサーバー（コード）が決める。画面は囲んだ点を平面の mm に直して送るだけ。
 // source：最後に囲んだ図（plan＝平面図、3d＝3D）。3D は部材ごとの画素の数（hits）を送る
+// ★11/5 夜（作者の試し）：複数を囲める。groups は囲みごとの部材（①②…。「囲みを足す」で次の囲み）、selection は全部の囲みの部材。
+//   囲みは修正タブ以外に移っても消さない（線は図を替えたときだけ消す）。頼んだら囲みは空にし、答えは下の「依頼」に残る
+const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩';
 const lasso = { on: false, pts: [], line: null, polygon: null, selection: [], source: null,
-  on3d: false, pts3d: [], line3d: null, hits: null, maskPx: 0, view: null };
+  on3d: false, pts3d: [], line3d: null, hits: null, maskPx: 0, view: null,
+  groups: [], lines: [], append: false, seq: 0 };
 const planSvg = () => $('#plan svg');
+const nextLabel = () => CIRCLED[lasso.seq] || `(${lasso.seq + 1})`;
 
 function svgPoint(svg, e) {
   const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
@@ -1278,7 +1285,8 @@ function syncLassoUi() {   // 道具の帯の「囲んで直す」と、3D／平
   $('#lasso-btn').setAttribute('aria-pressed', on ? 'true' : 'false');
   $('#lasso-btn-label').textContent = on ? '囲むのをやめる' : '囲んで直す';
   $('#lasso-chip').hidden = !on;
-  $('#lasso-chip-text').textContent = lasso.on ? '平面図の上で、直したい壁や窓をぐるっと囲んでください' : '直したい部材（壁・窓・軒）をぐるっと囲んでください';
+  const what = lasso.on ? '平面図の上で、直したい壁や窓をぐるっと囲んでください' : '直したい部材（壁・窓・軒）をぐるっと囲んでください';
+  $('#lasso-chip-text').textContent = lasso.append && lasso.groups.length ? `${nextLabel()} の囲み：${what}` : what;
 }
 function setLassoMode(on) {
   lasso.on = on;
@@ -1286,30 +1294,49 @@ function setLassoMode(on) {
   syncLassoUi();
 }
 
-function clearLasso() {
-  lasso.pts = []; lasso.polygon = null; lasso.selection = []; lasso.source = null;
+function clearLassoLines() {   // 囲みの線だけを消す（図を替えたとき。囲んだ部材は残す）
+  for (const l of lasso.lines) l.remove();
+  lasso.lines = [];
   if (lasso.line) { lasso.line.remove(); lasso.line = null; }
-  lasso.pts3d = []; lasso.hits = null; lasso.maskPx = 0; lasso.view = null;
   if (lasso.line3d) { lasso.line3d.remove(); lasso.line3d = null; }
+  lasso.pts = []; lasso.pts3d = [];
+}
+
+function clearLasso() {   // 囲みと囲んだ部材を消す（依頼の一覧は消さない）
+  clearLassoLines();
+  lasso.polygon = null; lasso.selection = []; lasso.source = null; lasso.groups = []; lasso.seq = 0; lasso.append = false;
+  lasso.hits = null; lasso.maskPx = 0; lasso.view = null;
   clearHighlight3d();
   markPlan([]);
   document.querySelectorAll('.tables tr.picked').forEach((tr) => tr.classList.remove('picked'));   // 「表で直す（AI なし）」の印も消す
   document.querySelectorAll('.tables input.picked-input').forEach((i) => i.classList.remove('picked-input'));
-  $('#lasso-panel').hidden = true; $('#lasso-result').innerHTML = ''; $('#lasso-idle').hidden = false;
+  $('#lasso-panel').hidden = true; $('#lasso-picked').innerHTML = ''; $('#lasso-idle').hidden = false;
 }
+window.clearLassoSelection = () => { if (!lasso.on && !lasso.on3d) clearLasso(); };   // 見る担当：何もない所を押したら外す
 
+function startLassoMode() {
+  if (state.pane === 'plan') { if (planSvg()) setLassoMode(true); } else if (state.root) setLasso3dMode(true);
+}
 $('#lasso-btn').addEventListener('click', () => {
   if (lasso.on || lasso.on3d) { setLassoMode(false); setLasso3dMode(false); return; }
   if (!state.built) { setStatus('組み立ててから囲んでください', 'err'); return; }
   clearFocus();                                            // 囲むときは、指摘や一覧で光らせた印を消す
-  if (state.pane === 'plan') { if (planSvg()) setLassoMode(true); } else if (state.root) setLasso3dMode(true);
+  lasso.append = false;                                    // 道具の帯のボタンは囲み直す（足すときは「囲みを足す」）
+  startLassoMode();
 });
-$('#lasso-cancel').addEventListener('click', () => { setLassoMode(false); setLasso3dMode(false); });
+$('#lasso-add').addEventListener('click', () => {           // もう1か所囲む（①②…）
+  if (!state.built || !lasso.groups.length) return;
+  lasso.append = true;
+  startLassoMode();
+  if (!lasso.on && !lasso.on3d) lasso.append = false;      // 囲めなかった（離した表示など）
+});
+$('#lasso-cancel').addEventListener('click', () => { setLassoMode(false); setLasso3dMode(false); lasso.append = false; });
 $('#lasso-clear').addEventListener('click', clearLasso);
 
 $('#plan').addEventListener('pointerdown', (e) => {
   const svg = planSvg(); if (!lasso.on || !svg) return;
-  e.preventDefault(); clearLasso();
+  e.preventDefault();
+  if (!lasso.append) clearLasso(); else if (lasso.line) { lasso.line.remove(); lasso.line = null; }
   lasso.line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
   lasso.line.setAttribute('class', 'lasso-line'); svg.appendChild(lasso.line);
   const p = svgPoint(svg, e); lasso.pts = [[p.x, p.y]];
@@ -1324,15 +1351,22 @@ $('#plan').addEventListener('pointermove', (e) => {
 });
 $('#plan').addEventListener('pointerup', async () => {
   const svg = planSvg(); if (!lasso.on || !lasso.line || !svg) return;
-  if (lasso.pts.length < 3) { clearLasso(); return; }
-  lasso.line.setAttribute('points', lasso.pts.concat([lasso.pts[0]]).map((q) => q.join(',')).join(' '));   // 囲みを閉じる
+  const line = lasso.line;
+  if (lasso.pts.length < 3) { line.remove(); lasso.line = null; if (!lasso.groups.length) clearLasso(); return; }
+  line.setAttribute('points', lasso.pts.concat([lasso.pts[0]]).map((q) => q.join(',')).join(' '));   // 囲みを閉じる
   setLassoMode(false);
+  lasso.line = null; lasso.lines.push(line);                 // 囲みを足しても、前の囲みの線は残す
   lasso.polygon = lasso.pts.map(([x, y]) => toMm(svg, x, y));
   lasso.source = 'plan';
+  const level = state.multi ? $('#plan-level').value : null;
   try {
-    const res = await call('POST', '/api/lasso/{a}/select', { polygon: lasso.polygon, level: state.multi ? $('#plan-level').value : null });
-    showPicked(res.selection);
-  } catch (e) { setStatus('囲みを読めませんでした：' + e.message, 'err'); clearLasso(); }
+    const res = await call('POST', '/api/lasso/{a}/select', { polygon: lasso.polygon, level });
+    addGroup(res.selection, { source: 'plan', view: null, level });
+  } catch (e) {
+    setStatus('囲みを読めませんでした：' + e.message, 'err');
+    line.remove(); lasso.lines = lasso.lines.filter((l) => l !== line); lasso.append = false;
+    if (!lasso.groups.length) clearLasso();
+  }
 });
 
 // ---------------------------------------------------------------- 本体の分け目（平面図でドラッグ。★11/5 作者 2-1）
@@ -1485,7 +1519,8 @@ function overlayPoint(e) { const r = overlay.getBoundingClientRect(); return [e.
 
 overlay.addEventListener('pointerdown', (e) => {
   if (!lasso.on3d) return;
-  e.preventDefault(); clearLasso();
+  e.preventDefault();
+  if (!lasso.append) clearLasso(); else if (lasso.line3d) { lasso.line3d.remove(); lasso.line3d = null; }
   lasso.line3d = document.createElementNS(SVGNS, 'polyline'); lasso.line3d.setAttribute('class', 'lasso-line');
   overlay.appendChild(lasso.line3d);
   lasso.pts3d = [overlayPoint(e)];
@@ -1500,7 +1535,7 @@ overlay.addEventListener('pointermove', (e) => {
 });
 overlay.addEventListener('pointerup', async () => {
   if (!lasso.on3d || !lasso.line3d) return;
-  if (lasso.pts3d.length < 3) { clearLasso(); return; }
+  if (lasso.pts3d.length < 3) { lasso.line3d.remove(); lasso.line3d = null; if (!lasso.groups.length) clearLasso(); return; }
   lasso.line3d.setAttribute('points', lasso.pts3d.concat([lasso.pts3d[0]]).map((q) => q.join(',')).join(' '));
   setLasso3dMode(false);
   try {
@@ -1511,10 +1546,14 @@ overlay.addEventListener('pointerup', async () => {
     Object.assign(lasso, { source: '3d', hits, maskPx, view: viewHint() });
     const res = await call('POST', '/api/lasso/{a}/select', { hits, mask_px: maskPx, view: lasso.view });
     if (lasso.line3d) { lasso.line3d.remove(); lasso.line3d = null; }   // 囲みの線は消し、選んだ部材に色を付ける
-    showPicked(res.selection);
-    highlight3d(res.selection);
+    addGroup(res.selection, { source: '3d', view: lasso.view, level: null });
     setStatus(`囲んだ部材 ${res.selection.length} 件`, 'ok');
-  } catch (e) { setStatus('囲みを読めませんでした：' + e.message, 'err'); clearLasso(); }
+  } catch (e) {
+    setStatus('囲みを読めませんでした：' + e.message, 'err');
+    if (lasso.line3d) { lasso.line3d.remove(); lasso.line3d = null; }
+    lasso.append = false;
+    if (!lasso.groups.length) clearLasso();
+  }
 });
 
 // 平面図の部材に印を付ける（平面図の多角形には W#・O# の data-id がある）。印を付けられた番号を返す
@@ -1527,28 +1566,72 @@ function markPlan(ids) {
 
 // 囲みに少しでもかかった部材を並べる（★11/4 作者「一部だけ囲んだ部材が選ばれない」）。
 // 一部だけかかった部材は薄く出し、要らない部材は × で外せる。Claude に頼むときは残した部材だけを送る
-function showPicked(rows) {
-  lasso.selection = rows;
-  markPlan(rows.map((r) => r.id));
-  const box = $('#lasso-picked'); box.innerHTML = '';
-  if (rows.length) {
-    box.insertAdjacentHTML('beforeend', '<b>囲んだ部材</b>' + (rows.some((r) => r.partial) ? '<span class="hint">（薄いのは一部だけかかった部材。要らなければ × で外す）</span>' : ''));
-    for (const r of rows) {
-      const div = document.createElement('div'); div.className = 'pick-row' + (r.partial ? ' partial' : '');
-      div.innerHTML = `<span class="tag">${esc(r.id)}</span>${esc(r.label)}　${esc(r.text)}`;
-      const x = document.createElement('button'); x.className = 'unpick'; x.textContent = '×'; x.title = `${r.id} を外す`;
-      x.addEventListener('click', () => showPicked(lasso.selection.filter((q) => q.id !== r.id)));
-      div.prepend(x); box.appendChild(div);
-    }
-  } else {
-    box.innerHTML = '<span class="hint">囲みの中に部材がありません。壁や窓、軒をぐるっと囲んでください。</span>';
+// ★11/5 夜：囲みごとに分けて並べる（①②…）。1つだけのときは今までと同じ見た目
+const FROM_JA = { S: '南', N: '北', E: '東', W: '西', plan: '上' };
+function groupWhere(g) {
+  if (g.source === '3d') return `3D（${FROM_JA[g.view] || '斜め'}から）で囲んだ部材`;
+  return `平面図${state.multi && g.level ? `（${LEVEL_JA[g.level] || g.level}）` : ''}で囲んだ部材`;
+}
+function addGroup(rows, meta) {                // 囲みが1つ終わった（rows はサーバーが決めた部材）
+  lasso.append = false; syncLassoUi();
+  if (!rows.length) {
+    if (lasso.groups.length) { setStatus('囲みの中に部材がありません。この囲みは足しませんでした', 'err'); return; }
+    lasso.selection = []; markPlan([]);
+    $('#lasso-picked').innerHTML = '<span class="hint">囲みの中に部材がありません。壁や窓、軒をぐるっと囲んでください。</span>';
+    showLassoPanel(false);
+    return;
   }
+  lasso.groups.push({ label: nextLabel(), rows, ...meta });
+  lasso.seq += 1;
+  renderPicked({ focusText: true });
+}
+function showLassoPanel(has, focusText = false) {
   if (state.ws !== 'fix') setWorkspace('fix');
   const sec = $('#sec-lasso'); sec.hidden = false; sec.open = true;
-  $('#lasso-panel').hidden = false; $('#lasso-idle').hidden = true; $('#lasso-result').innerHTML = '';
-  $('#lasso-ask').disabled = !rows.length; $('#lasso-table').disabled = !rows.length;
+  $('#lasso-panel').hidden = false; $('#lasso-idle').hidden = true;
+  $('#lasso-ask').disabled = !has; $('#lasso-table').disabled = !has;
+  $('#lasso-add').disabled = !has; $('#lasso-add').textContent = `囲みを足す（${nextLabel()}）`;
   sec.scrollIntoView({ block: 'nearest' });
-  if (rows.length) $('#lasso-text').focus();
+  if (has && focusText) $('#lasso-text').focus();
+}
+function renderPicked({ focusText = false } = {}) {
+  lasso.groups = lasso.groups.filter((g) => g.rows.length);
+  const all = []; const seen = new Set();
+  for (const g of lasso.groups) for (const r of g.rows) if (!seen.has(r.id)) { seen.add(r.id); all.push(r); }
+  if (!all.length) { clearLasso(); return; }                 // × で全部外した
+  lasso.selection = all;
+  lasso.source = lasso.groups[lasso.groups.length - 1].source;
+  const multi = lasso.groups.length > 1;
+  const box = $('#lasso-picked'); box.innerHTML = '';
+  box.insertAdjacentHTML('beforeend', `<b>囲んだ部材${multi ? `（${lasso.groups.length} か所）` : ''}</b>`
+    + (all.some((r) => r.partial) ? '<span class="hint">（薄いのは一部だけかかった部材。要らなければ × で外す）</span>' : ''));
+  for (const g of lasso.groups) {
+    let host = box;
+    if (multi) {
+      host = document.createElement('div'); host.className = 'pick-grp';
+      host.innerHTML = `<div class="grp-head"><span class="grp-no">${esc(g.label)}</span>${esc(groupWhere(g))}</div>`;
+      box.appendChild(host);
+    }
+    for (const r of g.rows) {
+      const div = document.createElement('div'); div.className = 'pick-row' + (r.partial ? ' partial' : '');
+      div.innerHTML = `<span class="tag">${esc(r.id)}</span><span class="pick-main">${esc(r.label)}　${esc(r.text)}`
+        + (r.part ? `<span class="pick-part">模型の部品：${esc(r.part)}</span>` : '') + '</span>';
+      const x = document.createElement('button'); x.className = 'unpick'; x.textContent = '×'; x.title = `${r.id} を外す`;
+      x.addEventListener('click', () => { g.rows = g.rows.filter((q) => q.id !== r.id); renderPicked(); });
+      div.prepend(x); host.appendChild(div);
+    }
+  }
+  markLassoSelection();
+  showLassoPanel(true, focusText);
+}
+let lassoMarkSeq = 0;
+async function markLassoSelection() {          // 囲んだ部材に印（平面図）と色（3D）。図を替えたとき・タブに戻ったときも付け直す
+  const my = ++lassoMarkSeq;
+  markPlan(lasso.selection.map((r) => r.id));
+  if (!lasso.selection.length || !state.root || state.focus) return;
+  try { await ensurePick(); } catch (e) { return; }
+  if (my !== lassoMarkSeq || !lasso.selection.length || state.focus) return;
+  highlight3d(lasso.selection);
 }
 
 $('#lasso-table').addEventListener('click', () => {   // AI なし：囲んだ部材の表の行を開く（軒は、その辺の軒の出の欄にも印）
@@ -1567,61 +1650,357 @@ $('#lasso-table').addEventListener('click', () => {   // AI なし：囲んだ�
   setStatus(`囲んだ部材 ${rows.length} 件の行に色を付けました。値を変えて「承認」で直せます`, 'ok');
 });
 
-async function askLasso(extra = '') {
+// 頼む：囲みごとの部材（ids と groups）と一言を送る。送ったら囲みは空にし、答えは下の「依頼」に出る（★11/5 夜）
+async function askLasso() {
   const text = $('#lasso-text').value.trim();
-  if (!text) { setStatus('一言を書いてから「Claude に頼む」を押してください', 'err'); return; }
-  const connection = $('#lasso-conn').value;
-  if (connection === 'api_key' && !confirm('API キーで Claude に頼みます。キーの持ち主に API の料金がかかります（1回の上限 $1.00）。よろしいですか？')) return;
-  $('#lasso-ask').disabled = true;
-  setStatus('Claude が考えています（30秒〜数分）…', 'busy');
+  if (!text) { setStatus('一言を書いてから「Claude に頼む」を押してください', 'err'); $('#lasso-text').focus(); return; }
+  if (!lasso.groups.length) return;
+  const groups = lasso.groups.map((g) => ({ label: g.label, ids: g.rows.map((r) => r.id), partial: g.rows.filter((r) => r.partial).map((r) => r.id),
+    source: g.source, view: g.source === '3d' ? g.view : null }));
+  const btn = $('#lasso-ask'); btn.disabled = true;           // 送っている間は押せない（二重に頼まない）
   try {
-    const where = lasso.source === '3d' ? { hits: lasso.hits, mask_px: lasso.maskPx, view: lasso.view }
-      : { polygon: lasso.polygon, level: state.multi ? $('#plan-level').value : null };
-    const keep = lasso.selection.map((r) => r.id);          // × で外した部材は送らない
-    const res = await call('POST', '/api/lasso/{a}/ask', { ...where, text: text + extra, connection, keep });
-    renderLassoResult(res);
-    setStatus(`Claude の答えが届きました${res.cost_usd ? `（費用の目安 $${Number(res.cost_usd).toFixed(2)}）` : ''}`, 'ok');
-  } catch (e) { setStatus('頼めませんでした：' + e.message, 'err'); }
-  $('#lasso-ask').disabled = false;
+    const req = await sendFixRequest({ kind: 'lasso', text, ids: lasso.selection.map((r) => r.id), groups });
+    if (req) { clearLasso(); $('#lasso-text').value = ''; showRequest(req.id, false); }
+  } catch (e) { /* sendFixRequest が知らせた */ }
+  finally { btn.disabled = !lasso.groups.length; }
 }
 $('#lasso-ask').addEventListener('click', () => askLasso());
 
-function renderLassoResult(res) {
-  const box = $('#lasso-result'); box.innerHTML = '';
-  if (res.message) box.insertAdjacentHTML('beforeend', `<p class="msg">${esc(res.message)}</p>`);
-  for (const p of res.proposals || []) {
-    const div = document.createElement('div'); div.className = 'prop';
-    div.innerHTML = `直す案：${proposalText(p)}<div class="meta">理由：${esc(p.reason)}</div>`;
-    const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = '承認';
-    ok.addEventListener('click', async () => {
-      try {
-        setStatus('修正を記録して、模型を組み直しています…', 'busy');
-        await call('POST', '/api/lasso/{a}/approve', { target: p.target, field: p.field, value_source: p.value_source, reason: p.reason });
-        clearLasso(); await refresh();
-        setStatus(`${p.target} を直しました（直しの履歴から取り消せます）`, 'ok');
-      } catch (e) { setStatus('直せませんでした：' + e.message, 'err'); }
-    });
-    div.appendChild(ok); box.appendChild(div);
-  }
-  for (const q of res.questions || []) {   // 選択肢を押すと、答えを添えてもう一度頼む
-    const div = document.createElement('div'); div.className = 'question';
-    div.innerHTML = `<b>質問</b>　${esc(q.question)}${q.evidence ? `<div class="meta">根拠：${esc(q.evidence)}</div>` : ''}`;
-    for (const opt of q.options || []) {
-      const b = document.createElement('button'); b.textContent = opt;
-      b.addEventListener('click', () => askLasso(`\n（質問「${q.question}」への答え：${opt}）`));
-      div.appendChild(b);
-    }
-    // 選択肢にない答え（図面の数値など）は書いて答える。数値は人が書いたものだけが案に使われる
-    const ans = document.createElement('div'); ans.className = 'answer';
-    const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = '答えを書く（例：図面の軒の出は 450）';
-    const send = document.createElement('button'); send.textContent = '答える';
-    send.addEventListener('click', () => { const v = inp.value.trim(); if (v) askLasso(`\n（質問「${q.question}」への答え：${v}）`); });
-    ans.append(inp, send); div.appendChild(ans);
-    box.appendChild(div);
-  }
-  if (res.connection !== 'off' && !(res.proposals || []).length && !(res.questions || []).length)
-    box.insertAdjacentHTML('beforeend', '<p class="hint">直す案も質問もありませんでした。一言を変えて、もう一度頼んでください。</p>');
+// ---------------------------------------------------------------- 文字で直す（囲まない。★11/5 夜 作者「囲んで直す以外に文字で直す機能も」）
+const focusIdsForText = () => (state.focus ? state.focus.ids.filter((id) => isElementId(id)) : []);
+function updateTextFixHint() {
+  const ids = focusIdsForText();
+  $('#textfix-focus').textContent = ids.length ? `いま選んでいる部材（${ids.join('・')}）も添えます` : '';
 }
+$('#textfix-text').addEventListener('focus', updateTextFixHint);
+$('#textfix-ask').addEventListener('click', async () => {
+  const text = $('#textfix-text').value.trim();
+  if (!text) { setStatus('一言を書いてから「Claude に頼む」を押してください', 'err'); $('#textfix-text').focus(); return; }
+  const btn = $('#textfix-ask'); btn.disabled = true;
+  try {
+    const req = await sendFixRequest({ kind: 'text', text, ids: focusIdsForText() });
+    if (req) { $('#textfix-text').value = ''; showRequest(req.id, false); }
+  } catch (e) { /* sendFixRequest が知らせた */ }
+  finally { btn.disabled = false; }
+});
+
+// ---------------------------------------------------------------- 修正の依頼と Claude の答え（★11/5 夜。サーバーの /api/fix・core/fix_requests.py）
+// 頼んだことと答えは物件ごとにサーバーに残る。タブを替えても、物件を開き直しても、一覧を読み直せば見える。
+// 考えている依頼があるあいだは数秒ごとに読み直し、答えが届いたらお知らせ（toast）で知らせる（タブは移らない）
+const fixState = { alias: null, items: [], loaded: false, loading: false, again: false, cards: new Map(),
+  applying: new Set(), answering: new Set() };
+const FIX_KIND = { lasso: '囲んで直す', text: '文字で直す' };
+const fixUrl = (alias, p = '') => `/api/fix/${encodeURIComponent(alias)}/requests${p}`;
+const fixModel = () => ($('#fix-model').value === 'sonnet' ? 'sonnet' : 'opus');
+try { const m = localStorage.getItem('hakoya.fixModel'); if (m === 'opus' || m === 'sonnet') $('#fix-model').value = m; } catch (e) { /* 保存できない窓 */ }
+$('#fix-model').addEventListener('change', () => { try { localStorage.setItem('hakoya.fixModel', fixModel()); } catch (e) { /* 保存できない窓 */ } });
+const statusIsThinking = () => ($('#status').textContent || '').startsWith('Claude が考えています');
+const COST_CONFIRM = 'API キーで Claude に頼みます。キーの持ち主に API の料金がかかります（1回の上限 $1.00）。よろしいですか？';
+
+function resetFix() {
+  fixState.alias = null; fixState.items = []; fixState.loaded = false;
+  for (const c of fixState.cards.values()) c.el.remove();
+  fixState.cards.clear(); fixState.applying.clear(); fixState.answering.clear();
+  renderFixRequests();
+}
+
+async function loadFixRequests() {
+  const alias = state.alias;
+  if (!alias) { if (fixState.alias) resetFix(); return; }
+  if (fixState.loading) { fixState.again = true; return; }
+  fixState.loading = true;
+  try {
+    const res = await call('GET', fixUrl(alias));
+    if (alias !== state.alias) return;
+    if (fixState.alias !== alias) { resetFix(); fixState.alias = alias; }
+    const items = res.requests || [];
+    if (fixState.loaded) notifyFixChanges(items);
+    fixState.items = items; fixState.loaded = true;
+    renderFixRequests();
+  } catch (e) { /* 合わせる前のサーバー・つながらない：次に読み直す */ }
+  finally {
+    fixState.loading = false;
+    if (fixState.again) { fixState.again = false; loadFixRequests(); }
+  }
+}
+
+function notifyFixChanges(items) {             // 考えていた依頼が終わった：お知らせ（修正タブ以外なら「見る」）
+  const before = new Map(fixState.items.map((r) => [r.id, r.status]));
+  for (const r of items) {
+    if (before.get(r.id) !== 'running' || r.status === 'running') continue;
+    const look = state.ws === 'fix' ? null : { label: '見る', fn: () => showRequest(r.id) };
+    if (r.status === 'done') {
+      const n = (r.proposals || []).length; const q = (r.questions || []).length;
+      const what = n ? `直す案 ${n} 件` : q ? `質問 ${q} 件` : '直す案はありませんでした';
+      toast(`Claude の答えが届きました（${r.id}：${what}）`, { kind: 'ok', action: look });
+      if (statusIsThinking()) setStatus(`Claude の答えが届きました${r.cost_usd ? `（費用の目安 $${Number(r.cost_usd).toFixed(2)}）` : ''}`, 'ok');
+    } else {
+      toast(`${r.id} は答えが届きませんでした：${r.error || ''}`, { kind: 'err', action: look });
+      if (statusIsThinking()) setStatus('頼めませんでした：' + (r.error || ''), 'err');
+    }
+  }
+}
+
+function upsertRequest(req) {
+  const i = fixState.items.findIndex((r) => r.id === req.id);
+  if (i >= 0) fixState.items[i] = req; else fixState.items.unshift(req);
+  renderFixRequests();
+}
+
+function showRequest(rid, switchTab = true) {   // その依頼のカードを見せる
+  if (switchTab && state.ws !== 'fix') setWorkspace('fix');
+  const s = $('#sec-requests'); s.open = true;
+  const card = $(`#fix-requests [data-rid="${CSS.escape(rid)}"]`); if (!card) return;
+  card.scrollIntoView({ block: 'nearest' });
+  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+}
+
+// 頼む（囲んで直す・文字で直す・検品の指摘から）。今の接続とモデルを使う。返すのは依頼（やめたら null）
+async function sendFixRequest(body, { toastText = '' } = {}) {
+  const alias = state.alias;
+  if (!alias || !state.built) { const m = '物件を開いて組み立ててから頼んでください'; setStatus(m, 'err'); throw new Error(m); }
+  const connection = body.connection || $('#lasso-conn').value;
+  if (connection === 'api_key' && !confirm(COST_CONFIRM)) return null;
+  let req;
+  try { req = await call('POST', fixUrl(alias), { ...body, connection, model: body.model || fixModel() }); }
+  catch (e) { setStatus('頼めませんでした：' + e.message, 'err'); toast('頼めませんでした：' + e.message, { kind: 'err' }); throw e; }
+  if (alias === state.alias) {
+    if (fixState.alias !== alias) { resetFix(); fixState.alias = alias; }
+    upsertRequest(req); loadFixRequests();
+  }
+  setStatus('Claude が考えています（30秒〜数分）…', 'busy');      // 下の帯は今までどおり（作者「表記はそのままでいい」）
+  if (toastText) toast(toastText, { kind: 'info', action: state.ws === 'fix' ? null : { label: '見る', fn: () => showRequest(req.id) } });
+  return req;
+}
+// 検品の担当が「直す案のない指摘の承認」で呼ぶ。タブは移らない
+window.createFixRequest = async ({ text, ids = [], groups = null, findingId = null, kind = 'text' } = {}) => {
+  const body = { kind, text: String(text || ''), ids: (ids || []).map(String), finding_id: findingId };
+  if (groups) body.groups = groups;
+  return sendFixRequest(body, { toastText: '直す案を Claude に頼みました（修正タブ）' });
+};
+
+function renderFixRequests() {                 // カードは依頼ごとに作り、中身が変わったものだけ作り直す（書きかけの答えを消さない）
+  const ul = $('#fix-requests'); const items = fixState.items;
+  $('#fix-empty').hidden = items.length > 0;
+  $('#n-requests').textContent = items.length ? String(items.length) : '';
+  const keep = new Set(items.map((r) => r.id));
+  for (const [id, c] of fixState.cards) if (!keep.has(id)) { c.el.remove(); fixState.cards.delete(id); }
+  items.forEach((r, i) => {
+    const marks = [...fixState.applying, ...fixState.answering].filter((k) => k.startsWith(r.id + ':'));
+    const sig = JSON.stringify([r.status, r.message, r.error, r.proposals, r.questions, r.selection, marks]);
+    let c = fixState.cards.get(r.id);
+    if (!c || c.sig !== sig) {
+      const el = fixCard(r);
+      if (c) c.el.replaceWith(el);
+      c = { el, sig }; fixState.cards.set(r.id, c);
+    }
+    if (ul.children[i] !== c.el) ul.insertBefore(c.el, ul.children[i] || null);
+  });
+  updateElapsed();
+}
+
+function updateElapsed() {                     // 考えている依頼の経過の秒
+  for (const el of $$('#fix-requests .fr-sec[data-at]')) {
+    const s = Math.max(0, Math.round((Date.now() - Date.parse(el.dataset.at)) / 1000));
+    el.textContent = s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`;
+  }
+}
+
+function fixCard(req) {
+  const li = document.createElement('li'); li.className = `fix-req st-${req.status}`; li.dataset.rid = req.id;
+  const head = document.createElement('div'); head.className = 'fr-head';
+  head.innerHTML = `<span class="fr-id">${esc(req.id)}</span><span class="fr-kind">${esc(FIX_KIND[req.kind] || req.kind)}</span>`
+    + `<span class="fr-model" title="直す案を考えるモデル">${esc(req.model_label || '')}</span>`
+    + (req.fake ? '<span class="fr-fake" title="HAKOYA_FAKE_AI=1 の試し。Claude は呼んでいません">試し</span>' : '')
+    + `<span class="fr-time">${esc(fmtTime(req.at))}</span>`;
+  if (req.status !== 'running') {
+    const x = document.createElement('button'); x.className = 'fr-x'; x.textContent = '×'; x.title = 'この依頼を一覧から外す（直した修正はそのまま）';
+    x.addEventListener('click', () => deleteRequest(req));
+    head.appendChild(x);
+  }
+  li.appendChild(head);
+  li.insertAdjacentHTML('beforeend', `<p class="fr-text">${esc(req.text)}</p>`);
+  const sel = req.selection || [];
+  if (sel.length) {
+    const box = document.createElement('div'); box.className = 'fr-sel';
+    const chip = (id) => `<button class="idc" data-id="${esc(id)}" title="${esc(id)} を模型で光らせる">${esc(id)}</button>`;
+    const groups = (req.groups || []).filter((g) => (g.ids || []).length);
+    if (groups.length > 1) box.innerHTML = groups.map((g) => `<span class="grp"><span class="grp-no">${esc(g.label)}</span>${g.ids.map(chip).join('')}</span>`).join('');
+    else box.innerHTML = `<span class="fr-lbl">${req.kind === 'text' ? '選んでいた部材' : '囲んだ部材'}</span>${sel.map((r) => chip(r.id)).join('')}`;
+    li.appendChild(box);
+  }
+  if (req.status === 'running') {               // 待っている間（★11/5 夜 作者「Claude が考えています、が分かりにくい」）
+    li.insertAdjacentHTML('beforeend', '<div class="fr-wait" role="status"><span class="fr-spin" aria-hidden="true"></span><div class="fr-wait-main">'
+      + `<div class="fr-wait-title">Claude（${esc(req.model_label || 'Opus 5.5')}）が直す案を考えています<span class="fr-sec" data-at="${esc(req.at)}"></span></div>`
+      + '<div class="fr-wait-hint">ふつう 10〜60 秒。ほかの操作をしても大丈夫です（答えはここに残ります）</div></div></div>');
+    return li;
+  }
+  if (req.status !== 'done') {
+    li.insertAdjacentHTML('beforeend', `<p class="err-text fr-err">${esc(req.error || '答えが届きませんでした')}</p>`);
+    return li;
+  }
+  if (req.message) li.insertAdjacentHTML('beforeend', `<p class="msg fr-msg">${esc(req.message)}</p>`);
+  (req.proposals || []).forEach((p, i) => li.appendChild(propEl(req, p, i)));
+  for (const q of req.questions || []) li.appendChild(questionEl(req, q));
+  if (!(req.proposals || []).length && !(req.questions || []).length)
+    li.insertAdjacentHTML('beforeend', '<p class="hint">直す案も質問もありませんでした。一言を変えて、もう一度頼んでください。</p>');
+  return li;
+}
+
+const proposalElementId = (p) => { const f = String(p.field || ''); return f.startsWith('eave_mm.') ? `${p.target}:${f.slice(8)}` : String(p.target); };
+const changeText = (p) => (p.field === '_delete' ? '取り除いた' : `${FIELD[p.field] || p.field} ${p.from} → ${p.to}`);
+const doneText = (p) => `${p.target} ${changeText(p)}`;
+
+function propEl(req, p, i) {                   // 直す案のカード：押すと光る。承認・却下・直した印
+  const applying = fixState.applying.has(`${req.id}:${i}`);
+  const st = applying ? 'applying' : (p.state || 'pending');
+  const div = document.createElement('div'); div.className = `prop ps-${st}`; div.dataset.i = String(i);
+  const line = document.createElement('div'); line.className = 'prop-line'; line.tabIndex = 0; line.setAttribute('role', 'button');
+  line.title = '押すと、模型と平面図でこの部材を光らせます';
+  line.innerHTML = `<span class="prop-no">案${i + 1}</span><span class="prop-what">${proposalLine(p)}</span>`;
+  line.addEventListener('click', () => focusProposal(req, p, div));
+  line.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusProposal(req, p, div); } });
+  div.appendChild(line);
+  div.insertAdjacentHTML('beforeend', `<div class="meta">理由：${esc(p.reason || '')}　数値の出どころ：${esc(sourceText(p.value_source))}</div>`);
+  const acts = document.createElement('div'); acts.className = 'prop-acts';
+  if (st === 'pending' || st === 'failed') {
+    const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = st === 'failed' ? 'もう一度承認' : '承認';
+    ok.addEventListener('click', () => approveProposal(req, i));
+    const no = document.createElement('button'); no.className = 'quiet'; no.textContent = '却下';
+    no.addEventListener('click', () => rejectProposal(req, i));
+    acts.append(ok, no);
+    if (p.note) acts.insertAdjacentHTML('beforeend', `<span class="${st === 'failed' ? 'err-text' : 'prop-note'}">${esc(p.note)}</span>`);
+  } else if (st === 'applying') {
+    acts.innerHTML = '<button class="primary" disabled>直しています…</button>';
+  } else if (st === 'approved') {
+    acts.innerHTML = `<span class="prop-done">直しました ✓（${esc(doneText(p))}）</span>`;
+    const undo = document.createElement('button'); undo.className = 'quiet'; undo.textContent = '取り消す';
+    undo.title = 'この直しをやめて、模型を組み直します';
+    undo.addEventListener('click', () => undoApproved(p, fixState.alias));
+    acts.appendChild(undo);
+  } else if (st === 'rejected') {
+    acts.innerHTML = '<span class="prop-off">却下しました</span>';
+  } else if (st === 'no_change') {
+    acts.innerHTML = `<span class="prop-warn">${esc(p.note || 'この直しでは模型が変わりませんでした（取り消しました）')}</span>`;
+  }
+  div.appendChild(acts);
+  return div;
+}
+
+async function focusProposal(req, p, el) {    // 案を押す：その部材を 3D・平面図で光らせ、右上の欄に今の値を出す
+  $$('#fix-requests .prop.focus').forEach((x) => x.classList.remove('focus'));
+  el.classList.add('focus');
+  if (fixState.alias !== state.alias) return;
+  const id = proposalElementId(p);
+  if (!findElement(id)) { setStatus(`${id} は、この家の部材の中に見つかりません（組み立て直したのかもしれません）`, 'err'); return; }
+  await selectElement(id, { label: `${req.id} の案` });
+}
+
+async function approveProposal(req, i) {
+  const alias = fixState.alias; const key = `${req.id}:${i}`;
+  if (!alias || alias !== state.alias || fixState.applying.has(key)) return;
+  const p = req.proposals[i];
+  fixState.applying.add(key); renderFixRequests();              // 押した瞬間に「直しています…」（押せなくする）
+  const busy = toast(`${p.target} を直しています…`, { kind: 'busy' });
+  setStatus('修正を記録して、模型を組み直しています…', 'busy');
+  let res;
+  try {
+    res = await call('POST', fixUrl(alias, `/${encodeURIComponent(req.id)}/approve`), { index: i });
+  } catch (e) {
+    busy.close(); fixState.applying.delete(key);
+    toast('直せませんでした：' + e.message, { kind: 'err' }); setStatus('直せませんでした：' + e.message, 'err');
+    await loadFixRequests(); renderFixRequests();
+    return;
+  }
+  busy.close(); fixState.applying.delete(key);
+  upsertRequest(res.request);                                    // ほかの案はそのまま。タブも移らない
+  const np = res.request.proposals[i] || p;
+  if (!res.changed) {
+    toast('この直しでは模型が変わりませんでした（取り消しました）', { kind: 'info', ms: 7000 });
+    setStatus(`${np.target}：この直しでは模型が変わりませんでした（取り消しました）`);
+    await syncVersion();                                         // 組み直したファイルで「ほかの所で直された」と読み直さない
+    return;
+  }
+  toast(`${np.target} を直しました（${changeText(np)}）`, { kind: 'ok', action: { label: '取り消す', fn: () => undoApproved(np, alias) } });
+  try { await refresh(); } catch (e) { setStatus('読み直せませんでした：' + e.message, 'err'); return; }
+  setStatus(`${np.target} を直しました（直しの履歴から取り消せます）`, 'ok');
+  if (findElement(proposalElementId(np))) await selectElement(proposalElementId(np), { frame: false, quiet: true, label: '直した部材' });
+}
+
+async function rejectProposal(req, i) {
+  const alias = fixState.alias; if (!alias || alias !== state.alias) return;
+  try { const res = await call('POST', fixUrl(alias, `/${encodeURIComponent(req.id)}/reject`), { index: i }); upsertRequest(res.request); }
+  catch (e) { toast('却下できませんでした：' + e.message, { kind: 'err' }); }
+}
+
+async function undoApproved(p, alias) {        // 承認した案の「取り消す」（直しの履歴の取り消すと同じ）
+  if (!p.override_id) return;
+  if (alias !== state.alias) { toast('別の物件を開いているので、取り消せません', { kind: 'err' }); return; }
+  try {
+    setStatus('取り消して組み直しています…', 'busy');
+    await call('DELETE', `/api/overrides/${encodeURIComponent(alias)}/${encodeURIComponent(p.override_id)}`);
+    await loadFixRequests();
+    await refresh();
+    setStatus(`${p.override_id} を取り消しました`, 'ok');
+    toast(`${p.target} の直しを取り消しました`, { kind: 'info' });
+  } catch (e) { setStatus('取り消せませんでした：' + e.message, 'err'); toast('取り消せませんでした：' + e.message, { kind: 'err' }); }
+}
+
+function questionEl(req, q) {                  // 質問：選択肢に番号（1. 2. 3.）。番号だけの答えでも通じる（サーバーが選択肢の文を付ける）
+  const key = `${req.id}:${q.id}`; const sending = fixState.answering.has(key);
+  const div = document.createElement('div'); div.className = 'question' + (q.answered ? ' answered' : '');
+  div.innerHTML = `<b>質問</b>　${esc(q.question)}${q.evidence ? `<div class="meta">根拠：${esc(q.evidence)}</div>` : ''}`;
+  if (q.answered) {
+    div.insertAdjacentHTML('beforeend', `<div class="q-ans">答えました：${esc(q.answered)}${q.child_id ? `（→ ${esc(q.child_id)}）` : ''}</div>`);
+    return div;
+  }
+  const opts = document.createElement('div'); opts.className = 'opts';
+  (q.options || []).forEach((opt, k) => {
+    const b = document.createElement('button'); b.textContent = `${k + 1}. ${opt}`; b.disabled = sending;
+    b.addEventListener('click', () => answerQuestion(req, q, `${k + 1}. ${opt}`));
+    opts.appendChild(b);
+  });
+  div.appendChild(opts);
+  // 選択肢にない答え（図面の数値など）は書いて答える。数値は人が書いたものだけが案に使われる
+  const ans = document.createElement('div'); ans.className = 'answer';
+  const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = '答えを書く（番号でも。例：2／図面の軒の出は 450）'; inp.disabled = sending;
+  const send = document.createElement('button'); send.textContent = sending ? '送っています…' : '答える'; send.disabled = sending;
+  send.addEventListener('click', () => answerQuestion(req, q, inp.value));
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) answerQuestion(req, q, inp.value); });
+  ans.append(inp, send); div.appendChild(ans);
+  return div;
+}
+
+async function answerQuestion(req, q, answer) {
+  const text = String(answer || '').trim();
+  if (!text) { setStatus('答えを書くか、選択肢を押してください', 'err'); return; }
+  const alias = fixState.alias; const key = `${req.id}:${q.id}`;
+  if (!alias || alias !== state.alias || fixState.answering.has(key)) return;
+  if (req.connection === 'api_key' && !confirm(COST_CONFIRM)) return;
+  fixState.answering.add(key); renderFixRequests();             // 送っている間は、選択肢も「答える」も押せない
+  try {
+    const child = await call('POST', fixUrl(alias, `/${encodeURIComponent(req.id)}/answer`), { question_id: q.id, answer: text });
+    upsertRequest(child);
+    setStatus('Claude が考えています（30秒〜数分）…', 'busy');
+  } catch (e) { toast('答えを送れませんでした：' + e.message, { kind: 'err' }); setStatus('答えを送れませんでした：' + e.message, 'err'); }
+  finally { fixState.answering.delete(key); await loadFixRequests(); renderFixRequests(); }
+}
+
+async function deleteRequest(req) {
+  const alias = fixState.alias; if (!alias || alias !== state.alias) return;
+  try {
+    await call('DELETE', fixUrl(alias, `/${encodeURIComponent(req.id)}`));
+    fixState.items = fixState.items.filter((r) => r.id !== req.id); renderFixRequests();
+  } catch (e) { toast('外せませんでした：' + e.message, { kind: 'err' }); }
+}
+
+// 物件が替わったら一覧を読み直す。考えている依頼があるあいだは 2.5 秒ごとに読み直す
+setInterval(() => {
+  if (fixState.alias !== state.alias) { if (state.alias) loadFixRequests(); else if (fixState.alias) resetFix(); return; }
+  if (fixState.items.some((r) => r.status === 'running')) loadFixRequests();
+  if (state.ws === 'fix') updateTextFixHint();
+}, 2500);
+setInterval(updateElapsed, 1000);
 
 // ---------------------------------------------------------------- 光らせる：指摘の見出し・左の一覧・番号の札（3D と平面図）
 // state.focus = { ids, primary, label }。refresh() で消す（組み直すと形が変わるため）。タブを替えても残す

@@ -7,8 +7,12 @@
 3D（select_hits）：画面が部材ごとの当たり判定用の形（core/pick.py）を色で塗り、「囲みの中に見えている画素の数」を送る。
 - 囲みの中に 30 画素以上見えている部材を選ぶ。見えている部分の半分未満しか囲みに入っていなければ partial。
 - 屋根は辺ごとの軒（Y1:S など）と屋根全体（Y1）。軒が選ばれたら、その屋根全体は外す。
+番号（select_ids）：★11/5 夜 複数を囲む・文字で直す。画面が囲みごとに選んだ部材の番号を送り、家の部材にあるかを確かめる。
+部品（part_hint）：その部材が模型のどの部品に入るかの短い説明（Claude と画面への手がかり。決めるのは組み立て core/builder.py）。
 """
 from __future__ import annotations
+
+import re
 
 from shapely.geometry import LineString, Point, Polygon
 
@@ -148,8 +152,57 @@ def select_hits(building: dict, hits: list[dict], mask_px: int) -> dict:
     return res
 
 
-def describe(building: dict, selection: dict) -> list[dict]:
-    """囲んだ部材の一覧（画面と Claude への説明に使う）。値は building のまま。"""
+def select_ids(building: dict, ids: list[str], partial: list[str] | None = None, strict: bool = True) -> dict:
+    """画面が送った部材の番号（囲みごとに選んだもの）を、select と同じ形にする。番号は家の部材にあるものだけ。
+    strict：知らない番号があれば ValueError（囲んで直す）。False なら黙って外す（文字で直すに添える、選んでいる部材）。"""
+    groups = member_groups(building)
+    out = {"walls": [], "openings": [], "roof_edges": [], "roofs": []}
+    for mid in dict.fromkeys(str(i) for i in (ids or [])):          # 同じ番号は1つに（順番はそのまま）
+        if mid not in groups:
+            if strict:
+                raise ValueError(f"{mid} という部材はありません。画面を読み込み直して、もう一度囲んでください")
+            continue
+        out[groups[mid]].append(mid)
+    chosen = {x for v in out.values() for x in v}
+    out["partial"] = [x for x in (partial or []) if x in chosen]
+    return out
+
+
+# 組み立ての記録（model/checks.json の部品の notes）に「（W12・W13）は屋根と一緒に印刷する」と書かれた部材は、屋根の部品
+_ROOF_NOTE = re.compile(r"（([A-Z]\d+(?:・[A-Z]\d+)*)）は(?:下屋の)?屋根と一緒に印刷する")
+
+
+def roof_ids_from_checks(checks: dict | None) -> set[str]:
+    """組み立ての結果から分かる「屋根の部品に入った壁」の番号（袖壁・垂れ壁・下がり壁など）。読めなければ空。"""
+    out: set[str] = set()
+    for key, info in ((checks or {}).get("parts") or {}).items():
+        if not str(key).startswith("roof") or not isinstance(info, dict):
+            continue
+        for note in info.get("notes") or []:
+            for m in _ROOF_NOTE.finditer(str(note)):
+                out.update(m.group(1).split("・"))
+    return out
+
+
+def part_hint(building: dict, kind: str, el: dict, roof_ids: set[str] | frozenset = frozenset()) -> str:
+    """部材が入る模型の部品の短い説明。決め打ちを避けるため、組み立ての記録で屋根の部品と分かる壁だけ「屋根」と言い切り、
+    ほかは会社ルールで変わる所（天井の高さで分けるか）をぼかして書く（★11/5 夜：袖壁の振り分けは組み立ての担当が変える）。"""
+    multi = len(building.get("levels", [])) > 1
+    if kind in ("eave", "roof"):
+        return "下屋の屋根" if el.get("kind") == "lean_to" else ("大屋根" if multi else "屋根")
+    if el.get("id") in roof_ids:
+        return "屋根（組み立ての記録から）"
+    lv = el.get("level") or "1F"
+    if el.get("kind") == "interior":
+        return ("2階" if lv == "2F" else "1階") if multi else "家（1階の床・内壁）"
+    if not multi:
+        return "家（天井の高さで分けるときは、上は屋根）"
+    return "2階（天井の高さより上は大屋根）" if lv == "2F" else "1階（下屋の下は天井の高さで分け、上は下屋の屋根）"
+
+
+def describe(building: dict, selection: dict, roof_ids: set[str] | frozenset = frozenset()) -> list[dict]:
+    """囲んだ部材の一覧（画面と Claude への説明に使う）。値は building のまま。
+    part：その部材が入る模型の部品（roof_ids は組み立ての記録から分かる屋根の部品の壁。roof_ids_from_checks）。"""
     rows = []
     part = set(selection.get("partial") or [])
     walls = {w["id"]: w for w in building.get("walls", [])}
@@ -157,12 +210,15 @@ def describe(building: dict, selection: dict) -> list[dict]:
         w = walls[wid]
         length = LineString([w["start"], w["end"]]).length
         rows.append({"id": wid, "kind": w["kind"], "label": KINDS.get(w["kind"], w["kind"]),
-                     "text": f"厚み {w['thickness_mm']:g}mm・長さ {length:.0f}mm・下端 {w['bottom_mm']}"})
+                     "text": f"厚み {w['thickness_mm']:g}mm・長さ {length:.0f}mm・下端 {w['bottom_mm']}",
+                     "part": part_hint(building, "wall", w, roof_ids)})
     ops = {o["id"]: o for o in building.get("openings", [])}
     for oid in selection.get("openings", []):
         o = ops[oid]
+        w = walls.get(o["wall"])
         rows.append({"id": oid, "kind": o["kind"], "label": KINDS.get(o["kind"], o["kind"]),
-                     "text": f"壁 {o['wall']}・幅 {o['width_mm']:g}mm・FL+{o['sill_fl_mm']}〜FL+{o['head_fl_mm']}"})
+                     "text": f"壁 {o['wall']}・幅 {o['width_mm']:g}mm・FL+{o['sill_fl_mm']}〜FL+{o['head_fl_mm']}",
+                     "part": f"壁 {o['wall']} と同じ" + (f"（{part_hint(building, 'wall', w, roof_ids)}）" if w else "")})
     roofs = {r["id"]: r for r in building.get("roofs", []) if r.get("id")}
     for eid in selection.get("roof_edges", []):
         rid, _, side = eid.partition(":")
@@ -172,14 +228,16 @@ def describe(building: dict, selection: dict) -> list[dict]:
         rows.append({"id": eid, "kind": "eave", "label": f"軒（{SIDE_JA.get(side, side)}）",
                      "text": f"屋根 {rid}（{_roof_kind(building, r)}）の{SIDE_JA.get(side, side)}の軒：軒の出 {eave:g}mm{g}。"
                              f"軒の出は外壁の外の面から屋根の先まで（板金・樋を除く）。模型は板金の分を外に足す。"
-                             f"直すときは target={rid}・field=eave_mm.{side}"})
+                             f"直すときは target={rid}・field=eave_mm.{side}",
+                     "part": part_hint(building, "eave", r, roof_ids)})
     for rid in selection.get("roofs", []):
         r = roofs[rid]
         e = r.get("eave_mm") or {}
         eaves = "・".join(f"{SIDE_JA[s]} {e[s]:g}" for s in "WESN" if s in e)
         rows.append({"id": rid, "kind": "roof", "label": KINDS["roof"],
                      "text": f"{_roof_kind(building, r)}・勾配 {'/'.join(f'{x:g}' for x in r.get('pitch', []))}・"
-                             f"低い側 {SIDE_JA.get(r.get('low_side'), r.get('low_side'))}・軒の出（mm）{eaves}"})
+                             f"低い側 {SIDE_JA.get(r.get('low_side'), r.get('low_side'))}・軒の出（mm）{eaves}",
+                     "part": part_hint(building, "roof", r, roof_ids)})
     for r in rows:
         r["partial"] = r["id"] in part                     # 囲みに一部だけかかった部材（画面では薄く、Claude には印を付ける）
     return rows

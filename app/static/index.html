@@ -202,26 +202,46 @@
       </details>
     </div>
 
-    <!-- 修正：囲んで直す・表で直す・直しの履歴 -->
+    <!-- 修正：頼む相手・囲んで直す・文字で直す・依頼（Claude の答え）・表で直す・直しの履歴 -->
     <div class="ws-panel" data-ws="fix" hidden>
+      <!-- 頼む相手（囲んで直す・文字で直すで同じ。★11/5 夜：モデルを選べる。既定は Opus 5.5） -->
+      <div class="fix-ai" role="group" aria-label="直す案を頼む相手">
+        <label class="fix-pick"><span>頼む相手</span><select id="lasso-conn" title="直す案を考える AI のつなぎ方">
+          <option value="claude_code">Claude（自分のプラン）</option>
+          <option value="api_key">Claude（API キー）</option>
+        </select></label>
+        <label class="fix-pick"><span>モデル</span><select id="fix-model" title="Opus 5.5 はていねい（既定）。軽い直しは Sonnet 5.5 にすると速く終わります">
+          <option value="opus">Opus 5.5（ていねい・既定）</option>
+          <option value="sonnet">Sonnet 5.5（速い・軽い直し向け）</option>
+        </select></label>
+      </div>
       <details class="sec" id="sec-lasso" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>囲んで直す</summary>
         <div class="sec-body">
           <div id="lasso-panel" class="lasso-panel" hidden>
             <div id="lasso-picked" class="picked"></div>
-            <textarea id="lasso-text" rows="2" placeholder="一言（例：この壁厚だけおかしい。ほかとそろえて／図面だと軒がもう少し出ている）"></textarea>
+            <textarea id="lasso-text" rows="2" placeholder="一言（例：この壁厚だけおかしい。ほかとそろえて／2か所なら「①は…、②は…」）"></textarea>
             <div class="lasso-actions">
-              <select id="lasso-conn">
-                <option value="claude_code">Claude（自分のプラン）</option>
-                <option value="api_key">Claude（API キー）</option>
-              </select>
               <button id="lasso-ask" class="primary">Claude に頼む</button>
+              <button id="lasso-add" title="もう1か所囲みます（①②…。一言は1つで、「①は…、②は…」と書けます）">囲みを足す</button>
               <button id="lasso-table">表で直す（AI なし）</button>
               <button id="lasso-clear" class="quiet">囲みを消す</button>
             </div>
-            <div id="lasso-result"></div>
           </div>
           <p class="muted" id="lasso-idle">道具の帯の「囲んで直す」を押してから、3D か平面図で直したい部材をぐるっと囲んでください。</p>
         </div>
+      </details>
+      <details class="sec" id="sec-textfix" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>文字で直す</summary>
+        <div class="sec-body">
+          <div class="lasso-panel">
+            <textarea id="textfix-text" rows="2" placeholder="囲まずに一言で（例：南の窓の上端を、ほかの窓とそろえて）"></textarea>
+            <div class="lasso-actions"><button id="textfix-ask" class="primary">Claude に頼む</button><span class="hint" id="textfix-focus"></span></div>
+          </div>
+        </div>
+      </details>
+      <!-- 依頼：頼んだことと Claude の答え（物件ごとに残る。タブを替えても消えない）。#lasso-result は前の名前（録画の台本が使う） -->
+      <details class="sec" id="sec-requests" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>依頼と Claude の答え<span class="sec-count" id="n-requests"></span><span class="help" tabindex="0" title="囲んで直す・文字で直すで頼んだことと、Claude の答え（直す案・質問）です。物件ごとに残り、タブを替えても、物件を開き直しても消えません。&#10;直す案を押すと、模型でその部材が光ります。「承認」すると修正として記録して組み直します。模型が変わらない直しは、自動で取り消します。"><svg class="ic ic-s"><use href="#i-help"/></svg></span></summary>
+        <div class="sec-body flush"><div id="lasso-result"><ul id="fix-requests" class="fix-reqs"></ul>
+          <p class="muted fix-empty" id="fix-empty">まだ頼んでいません。囲むか文字で書いて「Claude に頼む」を押すと、答えがここに出ます。</p></div></div>
       </details>
       <details class="sec" id="sec-tables" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>表で直す<span class="sec-note">数値は mm（実寸）</span></summary>
         <div class="sec-body tables">

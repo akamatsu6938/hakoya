@@ -763,3 +763,93 @@ body[data-mode="sample"] .no-sample { display: none !important; }
   padding: 0 8px; border-radius: 2px; background: transparent; color: var(--ink-2); font-size: var(--fs-m); }
 .plan-tools button:hover { background: var(--c-hover); color: var(--ink); }
 .plan-tools button span { font-size: var(--fs-s); }
+
+/* ==== 修正の依頼（②） ===================================================================================
+   ★11/5 夜（作者の試し）：頼む相手とモデル・複数の囲み（①②…）・文字で直す・依頼のカード（待っている間・直す案・質問）。
+   依頼の一覧は #lasso-result（前の名前。録画の台本が使う）の中。角の丸みは 2px まで。色は決まりの変数だけ */
+.fix-ai { display: flex; gap: 8px; padding: 8px 12px 9px; box-shadow: inset 0 -1px 0 var(--hair); }
+.fix-pick { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fix-pick > span { color: var(--ink-3); font-size: var(--fs-xs); }
+.fix-pick select { width: 100%; min-width: 0; border-radius: 2px; }
+#lasso-add { white-space: nowrap; }
+
+/* 囲んだ部材：囲みごとの見出し（①平面図で囲んだ部材）と、部材が入る模型の部品 */
+.pick-grp { margin-top: 6px; padding-left: 8px; box-shadow: inset 2px 0 0 var(--pick-soft); }
+.grp-head { color: var(--ink-2); font-size: var(--fs-xs); margin-bottom: 1px; }
+.grp-no { display: inline-block; min-width: 1.2em; margin-right: 4px; color: var(--pick-ink); font-weight: 600; font-size: var(--fs-m); }
+.pick-main { flex: 1; min-width: 0; }
+.pick-part { display: block; color: var(--ink-3); font-size: var(--fs-xs); }
+
+/* 依頼の一覧（新しいものが上） */
+.fix-reqs { list-style: none; margin: 0; padding: 0; }
+.fix-empty { padding: 6px 12px 8px; }
+#lasso-result .fix-req button { margin: 0; }
+.fix-req { position: relative; padding: 8px 12px 10px 15px; box-shadow: inset 0 -1px 0 var(--hair); }
+.fix-req::before { content: ""; position: absolute; left: 5px; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--hair-2); }
+.fix-req.st-running::before { background: var(--gold); }
+.fix-req.st-error::before { background: var(--bad); }
+.fix-req.st-interrupted::before { background: var(--warn); }
+.fix-req.flash { animation: fr-flash 1.1s ease-out; }
+@keyframes fr-flash { from { background: var(--gold-soft); } to { background: transparent; } }
+.fr-head { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: var(--fs-xs); }
+.fr-id { color: var(--ink-2); font-weight: 600; }
+.fr-kind { color: var(--ink); font-size: var(--fs-s); font-weight: 600; }
+.fr-model { padding: 0 5px; border: 1px solid var(--hair-2); border-radius: 2px; color: var(--ink-2); line-height: 16px; }
+.fr-fake { padding: 0 5px; border-radius: 2px; background: var(--warn-soft); color: var(--warn); line-height: 16px; }
+.fr-time { margin-left: auto; }
+#lasso-result .fr-x { min-height: 20px; width: 22px; padding: 0; border-radius: 2px; background: transparent; color: var(--ink-3); font-size: 14px; line-height: 1; }
+#lasso-result .fr-x:hover { background: var(--c-hover); color: var(--ink); }
+.fr-text { margin-top: 4px; color: var(--ink); font-size: var(--fs-m); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fr-sel { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 4px; margin-top: 5px; }
+.fr-sel .fr-lbl { margin-right: 2px; color: var(--ink-3); font-size: var(--fs-xs); }
+.fr-sel .grp { display: inline-flex; align-items: center; gap: 3px; margin-right: 8px; }
+.fr-sel .grp-no { min-width: 0; margin-right: 1px; font-size: var(--fs-s); }
+#lasso-result .fr-sel .idc { border-radius: 2px; }
+.fr-msg { margin-top: 6px; color: var(--ink-2); font-size: var(--fs-s); line-height: 1.55; }
+.fr-err { margin-top: 6px; font-size: var(--fs-s); }
+
+/* 待っている間：くるくる・誰が考えているか・経過の秒・ほかの操作をしてよいこと */
+.fr-wait { display: flex; align-items: flex-start; gap: 10px; margin-top: 8px; padding: 9px 10px; border: 1px solid var(--gold-line);
+  border-radius: 2px; background: var(--gold-soft); }
+.fr-spin { flex: none; width: 16px; height: 16px; margin-top: 1px; border: 2px solid var(--c-press); border-top-color: var(--gold);
+  border-radius: 50%; animation: hk-spin .8s linear infinite; }
+.fr-wait-main { min-width: 0; }
+.fr-wait-title { color: var(--ink); font-size: var(--fs-m); font-weight: 600; line-height: 1.4; }
+.fr-sec { margin-left: 8px; color: var(--gold-hi); font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fr-wait-hint { margin-top: 3px; color: var(--ink-2); font-size: var(--fs-s); line-height: 1.5; }
+
+/* 直す案：押すと模型で光る。承認 → 直しています… → 直しました ✓（取り消す） */
+#lasso-result .fix-req .prop { margin-top: 6px; padding: 6px 8px 7px; border: 1px solid var(--hair); border-radius: 2px; box-shadow: none;
+  background: rgba(255, 255, 255, .02); }
+#lasso-result .fix-req .prop.focus { border-color: var(--pick); background: var(--pick-soft); }
+.prop-line { display: flex; align-items: baseline; gap: 7px; margin: -2px -4px 0; padding: 2px 4px; border-radius: 2px; cursor: pointer; }
+.prop-line:hover { background: var(--pick-soft); }
+.prop-no { flex: none; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
+.prop-what { color: var(--ink-2); font-size: var(--fs-m); }
+.prop-what b { color: var(--ink); }
+.prop-what .arrow { margin: 0 4px; color: var(--ink-3); }
+.prop-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.prop-acts button { min-height: 24px; border-radius: 2px; }
+#lasso-result .prop.ps-applying button.primary { background: var(--gold-soft); color: var(--gold-hi); opacity: 1; }
+#lasso-result .prop.ps-applying button.primary::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; vertical-align: -1px;
+  border: 1.5px solid var(--c-press); border-top-color: var(--gold); border-radius: 50%; animation: hk-spin .8s linear infinite; }
+#lasso-result .fix-req .prop.ps-approved { border-color: rgba(111, 207, 151, .35); }
+#lasso-result .fix-req .prop.ps-no_change { border-color: var(--warn-soft); }
+#lasso-result .fix-req .prop.ps-rejected { opacity: .62; }
+.prop-done { color: var(--ok); font-weight: 600; }
+.prop-off { color: var(--ink-3); }
+.prop-warn { color: var(--warn); }
+.prop-note { color: var(--ink-3); font-size: var(--fs-xs); }
+
+/* 質問：選択肢に番号。答えたら「答えました」 */
+#lasso-result .fix-req .question { margin-top: 6px; padding: 6px 8px 8px; border: 1px dashed var(--hair-2); border-radius: 2px; box-shadow: none; }
+#lasso-result .question .opts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+#lasso-result .question .opts button { min-height: 24px; border-radius: 2px; text-align: left; }
+#lasso-result .fix-req .question .answer { margin-top: 6px; }
+#lasso-result .question .answer input { border-radius: 2px; }
+#lasso-result .question.answered { border-style: solid; opacity: .8; }
+.q-ans { margin-top: 4px; color: var(--ok); font-size: var(--fs-s); }
+@media (prefers-reduced-motion: reduce) {
+  .fr-spin, #lasso-result .prop.ps-applying button.primary::before { animation: none; }
+  .fix-req.flash { animation: none; }
+}

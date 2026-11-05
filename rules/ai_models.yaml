@@ -9,9 +9,18 @@ claude_code:
 api_key:
   inspect_face:   {model: claude-sonnet-5-5, effort: medium}
   inspect_merge:  {model: claude-opus-5-5, effort: high}
-  lasso:          {model: claude-sonnet-5-5, effort: medium}
+  lasso:          {model: claude-opus-5-5, effort: high}       # ★11/5 夜 作者「精度が悪い気がする」→ 既定を Opus 5.5 に（前は Sonnet）
   room_names:     {model: claude-haiku-5-5, effort: low}
   rule_draft:     {model: claude-sonnet-5-5, effort: medium}
+# 修正（囲んで直す・文字で直す）で、人が画面で選べるモデル（★11/5 夜 作者「Opus 5.5 がデフォルトで、簡単なものを Sonnet に」）。
+# 自動の振り分けはしない。label は画面と依頼の記録に出す名前
+lasso_models:
+  claude_code:
+    opus:   {model: claude-opus-5-5, effort: high, label: Opus 5.5}
+    sonnet: {model: claude-sonnet-5-5, effort: medium, label: Sonnet 5.5}
+  api_key:
+    opus:   {model: claude-opus-5-5, effort: high, label: Opus 5.5}
+    sonnet: {model: claude-sonnet-5-5, effort: medium, label: Sonnet 5.5}
 limits:
   max_budget_usd: 3.0     # 1回の検品の費用の上限（安全装置。プランでも目安として効く）
   max_turns: 60           # まとめ役のやりとりの上限

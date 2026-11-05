@@ -128,8 +128,9 @@ def test_proposal_numbers_come_from_code(out):
     assert (p["from"], p["to"], p["value_source"]) == (145, 130, "majority:interior")   # 130 は内壁の多数派（コードが計算）
     first = client.calls[0]
     assert {t["name"] for t in first["tools"]} == set(TOOL_SPECS)                          # HAKOYA の道具だけ
-    assert first["model"] == "claude-sonnet-5-5" and TEXT in first["messages"][0]["content"] and "W3" in first["messages"][0]["content"]
-    assert res["cost_usd"] == pytest.approx((5000 * 2 + 300 * 10) / 1e6)
+    # ★11/5 夜：API キーの既定も Opus 5.5（作者「精度が悪い気がする」）。料金は Opus の表（入力 4・出力 20 ドル／100万）
+    assert first["model"] == "claude-opus-5-5" and TEXT in first["messages"][0]["content"] and "W3" in first["messages"][0]["content"]
+    assert res["cost_usd"] == pytest.approx((5000 * 4 + 300 * 20) / 1e6)
     log = [json.loads(x) for x in (out / "lasso_log.jsonl").read_text(encoding="utf-8").splitlines()]
     assert log[0]["selection"] == ["W3"] and log[0]["proposals"][0]["to"] == 130
 
