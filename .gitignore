@@ -23,3 +23,6 @@ dist/
 # 秘密情報
 .env
 *.key
+
+# サブエージェントの作業場所（git worktree）
+.claude/worktrees/

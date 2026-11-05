@@ -223,12 +223,74 @@ def plan(alias: str, level: str | None = None, drawing: bool = False):
     if drawing:
         from core.drawing_check import overlay_lines
         overlay, note = overlay_lines(alias, b, level)
-    svg = render_svg(b, alias, level, overlay=overlay, overlay_note=note)
+    svg = render_svg(b, alias, level, overlay=overlay, overlay_note=note, split=_house_cut(alias))
     assert_clean(svg, "平面図")
     return Response(svg, media_type="image/svg+xml; charset=utf-8")
 
 
-PIECE_STL = re.compile(r"^(roof|roof_ext|roof_lower|roof_lower_ext)_p\d{1,2}\.stl$")   # 屋根を面ごとに分けた STL
+def _house_cut(alias: str) -> dict | None:
+    """書き出したときの本体の分け目（checks.json）。画面の線とファイルの分け方は、必ず同じものにする。"""
+    p = out_dir(alias) / "model" / "checks.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8")).get("house_cut")
+    except (OSError, ValueError):
+        return None
+
+
+class SplitIn(BaseModel):
+    cuts_mm: list[float]
+
+
+@app.post("/api/split/{alias}")
+def split_set(alias: str, body: SplitIn):
+    """本体の分け目を、平面図で人が決めた位置にする（★11/5 作者 2-1「分割ラインを変えられる方がいい」）。
+    近くの壁の面に寄せ、どれも造形範囲に入るか確かめてから保存し、書き出し直す。入らなければ 400（理由つき）。"""
+    import numpy as np
+
+    from core import body_split as bs
+    from core.export import make_model
+    _check_alias(alias)
+    if RUNS.get(alias, {}).get("running"):
+        raise HTTPException(409, "この物件はいま検品中です。検品が終わってから分け目を動かしてください")
+    hc = _house_cut(alias)
+    if not hc or not hc.get("cuts"):
+        raise HTTPException(409, "この家は分けずに入るので、分け目はありません（先に「読み込んで組み立てる」を押してください）")
+    if len(body.cuts_mm) != len(hc["cuts"]) or not all(np.isfinite(body.cuts_mm)):
+        raise HTTPException(400, "分け目の数が違います")
+    b, parts, _, rules = make_model(alias)
+    u = np.array(hc["u"], float)
+    cuts = sorted(bs.snap_to_face(b, u, float(t), float(rules["model"]["scale"])) for t in body.cuts_mm)
+    trial = bs.choose(b, parts, rules, {"u": list(u), "cuts": cuts, "source": "human"})
+    if trial is None or trial.source != "human":
+        raise HTTPException(400, "その分け目では、分けた部品のどれかが造形範囲に入りません。もう少し真ん中寄りにしてください")
+    before = bs.load_saved(alias)
+    bs.save_human(alias, u, cuts)
+    try:
+        summary = write_outputs(alias)
+    except Exception:
+        if before:
+            bs.save_human(alias, np.array(before["u"], float), before["cuts"])
+        else:
+            bs.clear_saved(alias)
+        raise
+    return _safe_json({"house_cut": summary.get("house_cut"), "checks": summary.get("checks", [])})
+
+
+@app.delete("/api/split/{alias}")
+def split_reset(alias: str):
+    """本体の分け目を自動に戻して、書き出し直す。"""
+    from core import body_split as bs
+    _check_alias(alias)
+    if RUNS.get(alias, {}).get("running"):
+        raise HTTPException(409, "この物件はいま検品中です。検品が終わってから戻してください")
+    bs.clear_saved(alias)
+    summary = write_outputs(alias)
+    return _safe_json({"house_cut": summary.get("house_cut"), "checks": summary.get("checks", [])})
+
+
+PIECE_STL = re.compile(r"^(roof|roof_ext|roof_lower|roof_lower_ext|foundation|floor1|exterior1|floor2|exterior2)_p\d{1,2}\.stl$")   # 分けた STL（屋根の面・本体の分け目）
 
 
 @app.get("/api/model/{alias}/{name}")

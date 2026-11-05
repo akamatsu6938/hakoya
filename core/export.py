@@ -106,8 +106,21 @@ def _mesh_of(solid, scale: float) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(m.vert_properties, dtype=np.float64)[:, :3] / scale, np.asarray(m.tri_verts, dtype=np.int64)
 
 
-def print_pieces(owner_key: str, parts: dict[str, ModelPart], rules: dict) -> list[dict]:
+def _house_cuts_in(pc, house) -> list[float]:
+    """家の分け目のうち、その部品をまたぐもの。"""
+    if house is None or not house.cuts:
+        return []
+    xy = ps._verts_xy(pc.solids)
+    if not len(xy):
+        return []
+    proj = xy @ house.u
+    lo, hi = float(proj.min()), float(proj.max())
+    return [t for t in house.cuts if lo + 1.0 < t < hi - 1.0]
+
+
+def print_pieces(owner_key: str, parts: dict[str, ModelPart], rules: dict, house=None) -> list[dict]:
     """屋根のオブジェクトを面ごとに分け、上の面を床に付けて、造形範囲に入る角度で置いた部品の一覧。
+    入らない面は、家の分け目（house。core/body_split.py）があればそれで切り（本体と継ぎ目がそろう）、なければ長い方を半分にする。
     [{"name", "face", "meshes": {部品の key: (頂点, 三角形)}, "yaw", "fits", "support_mm2", "warnings"}]（模型寸法）"""
     m = rules["model"]
     scale = float(m["scale"])
@@ -125,7 +138,16 @@ def print_pieces(owner_key: str, parts: dict[str, ModelPart], rules: dict) -> li
             continue
         oriented, yaw, longest, fits = ps.orient(meshes, pc.top_plane, limit)
         if not fits and depth < 2:
-            queue[0:0] = [(h, depth + 1) for h in ps.split_across_eave(pc)]
+            cuts = _house_cuts_in(pc, house)
+            if cuts:
+                from core.body_split import side_names
+                msg = "造形範囲に入らないので、本体と同じ分け目で切った（継ぎ目がそろう）"
+                names = [f"{pc.name}・{s}" for s in side_names(house.u, len(cuts) + 1)]
+                subs = ps.split_by_planes(pc.solids, house.u, cuts, names, top_plane=pc.top_plane, base_cuts=pc.cuts,
+                                          warnings=pc.warnings + ([] if msg in pc.warnings else [msg]))
+                queue[0:0] = [(h, depth + 1) for h in subs]
+            else:
+                queue[0:0] = [(h, depth + 1) for h in ps.split_across_eave(pc)]
             continue
         # サポートの量は、部品を合わせた形で数える（同じオブジェクトの部品どうしの境目の面は、印刷では中に埋もれるため）
         union = drop_specks(union_all([x for x in pc.solids.values() if not x.is_empty()]))
@@ -137,7 +159,40 @@ def print_pieces(owner_key: str, parts: dict[str, ModelPart], rules: dict) -> li
     return out
 
 
+def body_pieces(owner_key: str, parts: dict[str, ModelPart], rules: dict, house) -> list[dict]:
+    """本体のオブジェクト（基礎・1階・2階）を家の分け目で分け、床を下のまま、造形範囲に入る角度に回して置いた部品の一覧
+    （★11/5 作者 2-1。print_pieces と同じ形。本体のサポートの量は数えない：窓の上の壁などで多めに出て、紛らわしいため）。"""
+    import math
+    m = rules["model"]
+    scale = float(m["scale"])
+    limit = ps.BED_MM - 2 * float(m.get("print_bed_margin_mm", 5.0))
+    members = {k: p for k, p in parts.items() if (p.object_key or p.key) == owner_key}
+    fuzzy = [k for k, p in members.items() if p.fuzzy_skin]
+    pieces = ps.split_by_planes({k: p.solid for k, p in members.items()}, house.u, house.objects[owner_key], house.sides,
+                                settle=False)
+    out = []
+    for pc in pieces:
+        ps.smooth_cuts(pc, fuzzy, owner_key, float(m.get("roof_cut_smooth_mm", 1.5)) * scale)
+        meshes = {k: _mesh_of(s, scale) for k, s in pc.solids.items() if not s.is_empty()}
+        if not meshes:
+            continue
+        allv = np.vstack([v for v, _ in meshes.values()])
+        deg, _ = ps.best_yaw(allv[:, :2], limit)
+        th = math.radians(deg)
+        Rz = np.array([[math.cos(th), -math.sin(th), 0.0], [math.sin(th), math.cos(th), 0.0], [0.0, 0.0, 1.0]])
+        zmin = float(allv[:, 2].min())
+        placed = {k: ((v @ Rz.T) - np.array([0.0, 0.0, zmin]), f) for k, (v, f) in meshes.items()}
+        allp = np.vstack([v for v, _ in placed.values()])
+        ext = allp.max(axis=0) - allp.min(axis=0)
+        fits = bool(ext[0] <= limit and ext[1] <= limit and ext[2] <= ps.BED_MM)
+        warns = list(pc.warnings) + ([] if fits else [f"造形範囲 {limit:.0f}mm に入らない（{ext[0]:.1f}×{ext[1]:.1f}mm）"])
+        out.append({"name": pc.name, "meshes": placed, "yaw": deg, "fits": fits, "support_mm2": None,
+                    "warnings": warns, "solids": pc.solids})
+    return out
+
+
 def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = True) -> dict:
+    from core import body_split as bs
     b, parts, ov_results, rules = make_model(alias, company)
     scale = float(rules["model"]["scale"])
     dst = out_dir(alias) / "model"
@@ -145,7 +200,9 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
     for old in dst.glob("*.stl"):                       # 前の書き出しの STL（分け方が変わると名前が変わる）を消す
         old.unlink()
     checks = building_checks(b) + overlap_checks(parts, scale)
-    split = _split_keys(parts, rules)
+    # 本体が造形範囲に入らなければ、家の分け目を決める（人が平面図で決めた分け目があれば、それを使う）
+    house = bs.choose(b, parts, rules, bs.load_saved(alias))
+    split = _split_keys(parts, rules) | (set(house.objects) if house else set())
     split_members = {k for k, p in parts.items() if (p.object_key or p.key) in split}
     scene = trimesh.Scene()
     for key, part in parts.items():
@@ -180,8 +237,9 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
                             "parts": [{"name": p.label, "fuzzy_skin": p.fuzzy_skin and m.get("exterior_finish") == "plaster",
                                        **_print_mesh(p, scale)} for p in members]})
             continue
-        # 屋根：面ごとに分けて、上の面を床に付けて置く（core/print_split.py）
-        pieces = print_pieces(key, parts, rules)
+        # 屋根：面ごとに分けて、上の面を床に付けて置く（core/print_split.py）。本体：家の分け目で分け、床を下のまま（core/body_split.py）
+        is_body = house is not None and key in house.objects
+        pieces = body_pieces(key, parts, rules, house) if is_body else print_pieces(key, parts, rules, house)
         n = len(pieces)
         base = parts[key].label.split("（")[0]
         for i, pc in enumerate(pieces, 1):
@@ -204,19 +262,28 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
             raw_ok = all(trimesh.Trimesh(vertices=q["verts"], faces=q["tris"], process=False).is_watertight for q in prt)
             checks += part_checks(f"{key}_p{i}" if n > 1 else key, name, combined, [x.volume() for x in union.decompose()],
                                   raw_watertight=raw_ok)
-            if pc["support_mm2"] > 300:
+            if pc["support_mm2"] is not None and pc["support_mm2"] > 300:
                 checks.append({"part": f"{key}_p{i}" if n > 1 else key, "level": "中", "item": "support",
                                "message": f"{name}：サポートが要りそうな面が約 {pc['support_mm2']:.0f}mm²（ポーチの天井の板・下がり天井の板の下など。見えない側）"})
             for w in pc["warnings"]:
                 checks.append({"part": f"{key}_p{i}" if n > 1 else key, "level": "中", "item": "print_split", "message": f"{name}：{w}"})
             ext = allv.max(axis=0) - allv.min(axis=0)
             piece_info.append({"object": key, "name": name, "face": pc["name"], "files": files, "yaw_deg": round(pc["yaw"], 1),
-                               "size_mm": [round(float(x), 1) for x in ext], "support_mm2": round(pc["support_mm2"]),
+                               "size_mm": [round(float(x), 1) for x in ext],
+                               "support_mm2": round(pc["support_mm2"]) if pc["support_mm2"] is not None else None,
                                "fits": pc["fits"], "warnings": pc["warnings"]})
+        if is_body:
+            checks.append({"part": key, "level": "情報", "item": "body_split",
+                           "message": f"{base}：長いので {n} 個に分けた（{house.reasons[0] if house.reasons else '分け目'}）。"
+                                      "分け目は平面図で動かせる。のり代は床と、切り口をまたぐ壁の切り口（定規に当てて平らに付ける）"})
+            continue
         checks.append({"part": key, "level": "情報", "item": "print_split",
                        "message": (f"{base}：上の面を床に付けて置いた（上の面にサポートが付かない）" if n == 1 else
                                    f"{base}：棟・隅棟・谷の線で面ごとに {n} 個に分け、それぞれ上の面を床に付けて置いた。"
                                    "のりで付けるのは棟・隅棟（切り口は2つの面のちょうど真ん中）")})
+    if house is not None:
+        for w in house.warnings:
+            checks.append({"part": "house_cut", "level": "中", "item": "body_split", "message": f"本体の分け目：{w}"})
     write_3mf(dst / "model.3mf", objects,
               {"thickness": float(m["fuzzy_skin_thickness_mm"]), "point_distance": float(m["fuzzy_skin_point_distance_mm"])})
     # Bambu Studio が入っていれば、Bambu 形式の 3MF（画面で開いても部品ごとの設定が残る）も作る（core/bambu.py）
@@ -229,7 +296,9 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
                        "message": f"{bambu['reason']}。model.3mf を開いたら、外壁の部品を選んで「その他」→「ファジースキン」→「外側の輪郭」にしてください"})
     summary = {"parts": {k: {"label": p.label, "fuzzy_skin": p.fuzzy_skin, "object": p.object_key or k,
                              "flip_for_print": p.flip_for_print and k not in split_members, "notes": p.notes} for k, p in parts.items()},
-               "overrides": ov_results, "checks": checks, "bambu_3mf": bambu, "print_pieces": piece_info}
+               "overrides": ov_results, "checks": checks, "bambu_3mf": bambu, "print_pieces": piece_info,
+               "house_cut": house.to_json() if house is not None else None,
+               "stl_files": sorted(f.name for f in dst.glob("*.stl"))}
     (dst / "checks.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
 

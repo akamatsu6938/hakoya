@@ -68,11 +68,13 @@ def _level_overlays(b: dict, level: str, names: list[str], P) -> list[str]:
     return out
 
 
-def render_svg(b: dict, title: str, level: str | None = None, overlay: list | None = None, overlay_note: str | None = None) -> str:
+def render_svg(b: dict, title: str, level: str | None = None, overlay: list | None = None, overlay_note: str | None = None,
+               split: dict | None = None) -> str:
     """平面図。2階建てでは階ごとに描く（level を省くと1階）。描く範囲と縮尺は全部の階で同じにする
     （重ねて見比べられ、囲んで直すときの座標も階によらずそろう）。
     overlay：模型の座標にした図面（jww）の線（x0, y0, x1, y1）。いちばん上に細い緑の線で重ねる（SPEC §10「元の図面を重ねる」）。
-    overlay_note：重ねられなかった理由など（図の上に書く）。"""
+    overlay_note：重ねられなかった理由など（図の上に書く）。
+    split：書き出したときの本体の分け目（core/body_split.py の HouseCut.to_json()）。平面図に線を描き、画面でドラッグして動かせる。"""
     names = [lv["name"] for lv in b.get("levels", [])]
     multi = len(names) > 1
     if level is None and multi:
@@ -197,6 +199,8 @@ def render_svg(b: dict, title: str, level: str | None = None, overlay: list | No
     sx = plan_w - MARGIN - 1000 * SCALE
     out.append(f'<line x1="{sx}" y1="{ly + 25}" x2="{sx + 1000 * SCALE}" y2="{ly + 25}" stroke="black" stroke-width="2"/>'
                f'<text x="{sx}" y="{ly + 20}" font-size="11">1m</text>')
+    if split and split.get("cuts"):
+        out += _split_svg(split, P, x0, x1, y0, y1)
     out.append("</svg>")
     return "\n".join(out)
 
@@ -223,3 +227,48 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+MODEL_SCALE = 50.0      # 模型の縮尺（1/50）。分け目の両側の長さを模型の mm で書く
+
+
+def _split_svg(split: dict, P, x0: float, x1: float, y0: float, y1: float) -> list[str]:
+    """本体の分け目（★11/5 作者 2-1）：点線と、つかみやすい太い透明の線（data-role="split"）、両側の長さ。
+    画面（app.js）は data-* を読んでドラッグし、離すと /api/split に送る。"""
+    import json as _json
+    ux, uy = float(split["u"][0]), float(split["u"][1])
+    vx, vy = -uy, ux
+    lo, hi = float(split["lo"]), float(split["hi"])
+    pad = 600.0
+
+    def ends(t: float):
+        """u·p = t の線を、家の外接の範囲（少し広げる）で切った両端。"""
+        cx, cy = ux * t, uy * t
+        ss = []
+        for c, d, a, z in ((cx, vx, x0 - pad, x1 + pad), (cy, vy, y0 - pad, y1 + pad)):
+            if abs(d) > 1e-9:
+                s1, s2 = (a - c) / d, (z - c) / d
+                ss.append((min(s1, s2), max(s1, s2)))
+        smin, smax = max(r[0] for r in ss), min(r[1] for r in ss)
+        return (cx + vx * smin, cy + vy * smin), (cx + vx * smax, cy + vy * smax)
+
+    sides = split.get("sides") or []
+    src = "平面図で決めた分け目" if split.get("source") == "human" else "自動の分け目"
+    ranges = _json.dumps(split.get("ranges") or [])
+    out = [f'<g id="split" data-ux="{ux:.6f}" data-uy="{uy:.6f}" data-lo="{lo:.1f}" data-hi="{hi:.1f}" '
+           f'data-source="{split.get("source", "auto")}" data-ranges=\'{ranges}\'>']
+    edges = [lo] + [float(t) for t in split["cuts"]] + [hi]
+    for i, t in enumerate(split["cuts"]):
+        (ax, ay), (bx, by) = ends(float(t))
+        pa, pb = P(ax, ay).split(","), P(bx, by).split(",")
+        out.append(f'<line class="split-line" data-i="{i}" x1="{pa[0]}" y1="{pa[1]}" x2="{pb[0]}" y2="{pb[1]}" stroke="#e8743b" '
+                   f'stroke-width="2.5" stroke-dasharray="10 6" pointer-events="none"/>')
+        out.append(f'<line data-role="split" data-i="{i}" data-t="{float(t):.1f}" x1="{pa[0]}" y1="{pa[1]}" x2="{pb[0]}" y2="{pb[1]}" '
+                   f'stroke="transparent" stroke-width="16" style="cursor:grab"><title>分け目（ドラッグで動かせます）</title></line>')
+        left = (float(t) - edges[i]) / MODEL_SCALE
+        right = (edges[i + 2] - float(t)) / MODEL_SCALE
+        names = (sides[i] if i < len(sides) else "", sides[i + 1] if i + 1 < len(sides) else "")
+        out.append(f'<text class="split-label" data-i="{i}" x="{float(pa[0]) + 6:.1f}" y="{float(pa[1]) - 6:.1f}" font-size="12" '
+                   f'fill="#e8743b">{src}｜{names[0]} {left:.0f}mm・{names[1]} {right:.0f}mm（模型）</text>')
+    out.append("</g>")
+    return out

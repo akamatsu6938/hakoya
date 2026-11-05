@@ -222,8 +222,10 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     foundation = union_all(pieces)
     inner_outline = outline.buffer(-band, join_style="mitre")
     f_blocks, f_recess = [], []
+    tri_zones = []                                 # 位置合わせの三角（本体を分けるときに切らない所。core/body_split.py）
     for v, e1, e2 in _pick_corners(inner_outline):
         tri = Polygon([v, v + e1 * leg, v + e2 * leg])
+        tri_zones.append(tri.buffer(clearance + min_feat, join_style="mitre"))
         f_blocks.append(prism(tri, 0.0, ftop + floor_block_h))
         f_recess.append(prism(tri.buffer(clearance, join_style="mitre"), ftop - 1, ftop + floor_block_h + clearance))
     if f_blocks:
@@ -267,6 +269,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     a_corners = _real_corners(_pick_corners(inside_a, count=4, leg=leg + clearance, avoid=avoid_a), ext1_fp, leg)
     for v, e1, e2 in a_corners:
         tri = Polygon([v, v + e1 * leg, v + e2 * leg])
+        tri_zones.append(tri.buffer(clearance + min_feat, join_style="mitre"))
         floor1 = union_all([floor1, prism(tri, zf2 - 300.0, zf2 + floor_block_h)])
         floor2 = floor2 - prism(tri.buffer(clearance, join_style="mitre"), zf2 - 1, zf2 + floor_block_h + clearance)
     notes["floor2"].append(f"1階と2階の位置合わせの三角を {len(a_corners)} か所（1階の外壁の内側の角。2階の床裏にくぼみ）")
@@ -331,6 +334,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
         inside_b = max(getattr(inside_b, "geoms", [inside_b]), key=lambda g: g.area)
         for v, e1, e2 in _real_corners(_pick_corners(inside_b, count=4, leg=leg, avoid=int1_fp), ext1_fp, leg):
             tri = Polygon([v, v + e1 * leg, v + e2 * leg])
+            tri_zones.append(tri.buffer(clearance + min_feat, join_style="mitre"))
             small = tri.buffer(-clearance, join_style="mitre")
             roof_lower_parts.append(keep_below(prism(tri, ceil1, float(lean[k]["top_z_range_mm"][1]) + 200), lean_s[k][1]))
             roof_lower_parts.append(prism(small, ceil1 - block_h, ceil1 + 1))
@@ -362,6 +366,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     r_corners = _pick_corners(inside2, leg=leg, avoid=int2_fp)
     for v, e1, e2 in r_corners:
         tri = Polygon([v, v + e1 * leg, v + e2 * leg])
+        tri_zones.append(tri.buffer(clearance + min_feat, join_style="mitre"))
         roof_parts.append(keep_below(prism(tri, ceil2, zmax), rt))
         roof_parts.append(prism(tri.buffer(-clearance, join_style="mitre"), ceil2 - block_h, ceil2 + 1))
     notes["roof"].append(f"ずれ止めの三角を {len(r_corners)} か所（2階の外壁の内側の角、2階の天井の高さではまる）")
@@ -439,14 +444,14 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
             notes[note_key[i]].append(f"辺だけで接していた所 {n} か所に、ごく細い角柱（模型 0.2mm 角）を足して面でつないだ（閉じた立体にするため）")
     foundation, floor1, exterior, roof_lower, roof_lower_ext, floor2, exterior2, roof_solid, roof_ext = parts_solids
     parts = {
-        "foundation": ModelPart("foundation", "基礎", foundation, notes=notes["foundation"]),
-        "floor1": ModelPart("floor1", "1階（床・内壁）", floor1, notes=notes["floor1"]),
+        "foundation": ModelPart("foundation", "基礎", foundation, notes=notes["foundation"], keep_out=tri_zones),
+        "floor1": ModelPart("floor1", "1階（床・内壁）", floor1, notes=notes["floor1"], keep_out=tri_zones),
         "exterior1": ModelPart("exterior1", "1階の外壁（表面）", exterior, fuzzy_skin=True, object_key="floor1"),
         "roof_lower": ModelPart("roof_lower", "下屋の屋根", roof_lower, flip_for_print=True, notes=notes["roof_lower"],
                                 print_faces=_lean_print_faces(lean)),
         "roof_lower_ext": ModelPart("roof_lower_ext", "下屋の外壁", roof_lower_ext, flip_for_print=True, fuzzy_skin=True,
                                     object_key="roof_lower"),
-        "floor2": ModelPart("floor2", "2階（床・内壁）", floor2, notes=notes["floor2"]),
+        "floor2": ModelPart("floor2", "2階（床・内壁）", floor2, notes=notes["floor2"], keep_out=tri_zones),
         "exterior2": ModelPart("exterior2", "2階の外壁（表面）", exterior2, fuzzy_skin=True, object_key="floor2"),
         "roof": ModelPart("roof", "大屋根", roof_solid, flip_for_print=True, notes=notes["roof"],
                           print_faces=roof_print_faces(main)),

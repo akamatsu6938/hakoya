@@ -226,19 +226,37 @@ def apply_last(v: np.ndarray) -> np.ndarray:
     return (v @ R.T) @ Rz.T - np.array([0, 0, zmin])
 
 
+def _verts_xy(solids: dict) -> np.ndarray:
+    pts = [np.asarray(m.to_mesh().vert_properties, dtype=np.float64)[:, :2] for m in solids.values() if not m.is_empty()]
+    return np.vstack(pts) if pts else np.zeros((0, 2))
+
+
 def split_across_eave(piece: Piece) -> list[Piece]:
-    """入らない面を、軒と直角の縦の面（下り坂の向きを含む面）で半分にする。切り口の線も記録する。"""
+    """入らない面を、縦の面で半分にする（最後の手段）。切り口の線も記録する。
+    ★11/5：前は必ず「軒と直角」に切っていたので、長い方向に下る屋根（物件G）は長い方向に沿って2回切られ、
+    細長い4枚（模型で約 37×287mm）になっていた → 軒の向き・下り坂の向きのうち、長い方を半分にする。
+    切り口の線（ざらざらを外す帯）も、本当の切り口に沿うように直した（前は傾いた面で 90° ずれていた）。"""
     a, b = float(piece.top_plane["a"]), float(piece.top_plane["b"])
-    pts = [m.bounding_box() for m in piece.solids.values() if not m.is_empty()]
-    x0, y0 = min(p[0] for p in pts), min(p[1] for p in pts)
-    x1, y1 = max(p[3] for p in pts), max(p[4] for p in pts)
-    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    xy = _verts_xy(piece.solids)
+    if not len(xy):
+        return [piece]
     if abs(a) < 1e-9 and abs(b) < 1e-9:
-        e = np.array([1.0, 0.0]) if (x1 - x0) >= (y1 - y0) else np.array([0.0, 1.0])
+        cands = [np.array([1.0, 0.0]), np.array([0.0, 1.0])]
     else:
         e = np.array([-b, a]) / math.hypot(a, b)        # 軒の向き（水平で、下り坂と直角）
-    normal = (float(e[0]), float(e[1]), 0.0)            # 切る面の法線＝軒の向き
-    offset = float(e[0] * cx + e[1] * cy)
+        g = np.array([a, b]) / math.hypot(a, b)         # 下り坂（上り坂）の向き
+        cands = [e, g]
+    ext = lambda d: float((xy @ d).max() - (xy @ d).min())
+    nd = max(cands, key=ext)                            # 切る面の法線＝長い方の向き（そこを半分にする）
+    lo_, hi_ = float((xy @ nd).min()), float((xy @ nd).max())
+    offset = (lo_ + hi_) / 2
+    normal = (float(nd[0]), float(nd[1]), 0.0)
+    d = np.array([-nd[1], nd[0]])                       # 切り口の線の向き（法線と直角）
+    c = nd * offset
+    L = 1e5
+    line = LineString([tuple(c - d * L), tuple(c + d * L)])
+    along_eave = abs(a) + abs(b) > 1e-9 and abs(float(nd @ np.array([-b, a]) / math.hypot(a, b))) > 0.99
+    msg = "造形範囲に入らないので、軒と直角に半分に切った" if along_eave else "造形範囲に入らないので、長い方を半分に切った"
     halves = []
     for sign in (1, -1):
         sub = {}
@@ -248,14 +266,43 @@ def split_across_eave(piece: Piece) -> list[Piece]:
                 continue
             pos, neg = m.split_by_plane(normal, offset)
             sub[k] = pos if sign == 1 else neg
-        L = 1e5
-        line = LineString([(cx - b * L, cy + a * L), (cx + b * L, cy - a * L)]) if (a or b) else \
-            LineString([(cx - e[1] * L, cy + e[0] * L), (cx + e[1] * L, cy - e[0] * L)])
-        msg = "造形範囲に入らないので、軒と直角に半分に切った"
         halves.append(Piece(name=piece.name + ("（右）" if sign == 1 else "（左）"), solids=sub, top_plane=piece.top_plane,
                             cuts=piece.cuts + [line],
                             warnings=piece.warnings + ([] if msg in piece.warnings else [msg])))   # 2回切っても注意は1回
     return [h for h in halves if any(not m.is_empty() for m in h.solids.values())]
+
+
+def split_by_planes(solids: dict, u, cuts: list[float], names: list[str], top_plane: dict | None = None,
+                    base_cuts: list | None = None, warnings: list[str] | None = None, settle: bool = True) -> list[Piece]:
+    """立体（部品の key → 立体）を、平面の向き u に直角な縦の面（u·p = cuts）で分ける（本体の分け目。core/body_split.py）。
+    体積は変えない。settle なら、離れた小さな塊を隣へ移す（屋根。本体は、もとから離れている塊（離れた基礎など）を
+    動かすと部品が家の端から端まで広がるので移さない。★11/5 物件G）。切り口の線を記録する（ざらざらを外す帯に使う）。"""
+    from core.builder import drop_specks
+    u = np.asarray(u, float)
+    v = np.array([-u[1], u[0]])
+    u3, nu3 = (float(u[0]), float(u[1]), 0.0), (-float(u[0]), -float(u[1]), 0.0)
+    ts = sorted(float(t) for t in cuts)
+    L = 1e5
+    lines = [LineString([tuple(u * t - v * L), tuple(u * t + v * L)]) for t in ts]
+    edges = [None] + ts + [None]
+    pieces = []
+    for i in range(len(ts) + 1):
+        a, z = edges[i], edges[i + 1]
+        sub = {}
+        for k, m in solids.items():
+            x = m
+            if not x.is_empty() and a is not None:
+                x = x.trim_by_plane(u3, a)
+            if not x.is_empty() and z is not None:
+                x = x.trim_by_plane(nu3, -z)
+            sub[k] = drop_specks(x) if not x.is_empty() else x
+        here = [lines[j] for j in (i - 1, i) if 0 <= j < len(lines)]
+        pieces.append(Piece(name=names[i] if i < len(names) else f"{i + 1}", solids=sub, top_plane=top_plane or {},
+                            cuts=list(base_cuts or []) + here, warnings=list(warnings or [])))
+    pieces = [p for p in pieces if any(not m.is_empty() for m in p.solids.values())]
+    if settle:
+        _settle_islands(pieces)
+    return pieces
 
 
 def support_area(verts: np.ndarray, tris: np.ndarray, floor_tol: float = 0.2) -> float:

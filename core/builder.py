@@ -40,6 +40,7 @@ class ModelPart:
     object_key: str | None = None         # 同じオブジェクトに入れる相手（外壁 → 1階）
     notes: list[str] = field(default_factory=list)
     print_faces: list = field(default_factory=list)   # 屋根：印刷のときに分ける面（core/print_split.py の PrintFace）
+    keep_out: list = field(default_factory=list)      # 印刷のために分けるとき、切ってはいけない所（位置合わせの三角。平面・実寸）
 
 
 # ---------------------------------------------------------------- 形の道具
@@ -597,8 +598,10 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     inner_outline = outline.buffer(-band, join_style="mitre")
     f_corners = _pick_corners(inner_outline)
     f_blocks, f_recess = [], []
+    tri_zones = []                                 # 位置合わせの三角（本体を分けるときに切らない所。core/body_split.py）
     for v, e1, e2 in f_corners:
         tri = Polygon([v, v + e1 * leg, v + e2 * leg])
+        tri_zones.append(tri.buffer(clearance + min_feat, join_style="mitre"))
         # 三角は地面から立ち上げて帯と一体にする（帯の内側は空洞なので、天端だけだと浮いてしまう）
         f_blocks.append(prism(tri, 0.0, ftop + floor_block_h))
         f_recess.append(prism(tri.buffer(clearance, join_style="mitre"), ftop - 1, ftop + floor_block_h + clearance))
@@ -734,6 +737,7 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     r_corners = _pick_corners(house_inside, leg=leg, avoid=avoid)
     for v, e1, e2 in r_corners:
         tri = Polygon([v, v + e1 * leg, v + e2 * leg])
+        tri_zones.append(tri.buffer(clearance + min_feat, join_style="mitre"))
         small = tri.buffer(-clearance, join_style="mitre")
         if z_cut is not None:
             # 継ぎ目より上は屋根の裏まで立ち上げて屋根と一体に（裏返して印刷すると屋根から生える）、下は隙間の分だけ小さくして1階の角にはめる
@@ -796,8 +800,8 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         notes[key].append(f"辺だけで接していた所 {n} か所に、ごく細い角柱（模型 0.2mm 角）を足して面でつないだ（閉じた立体にするため）")
 
     parts = {}
-    parts["foundation"] = ModelPart("foundation", "基礎", foundation, notes=notes["foundation"])
-    parts["floor1"] = ModelPart("floor1", "1階（床・内壁）", floor1, notes=notes["floor1"])
+    parts["foundation"] = ModelPart("foundation", "基礎", foundation, notes=notes["foundation"], keep_out=tri_zones)
+    parts["floor1"] = ModelPart("floor1", "1階（床・内壁）", floor1, notes=notes["floor1"], keep_out=tri_zones)
     parts["exterior1"] = ModelPart("exterior1", "1階の外壁（表面）" if band_mm else "1階の外壁", exterior,
                                    fuzzy_skin=True, object_key="floor1")
     parts["roof"] = ModelPart("roof", "屋根（屋根板・ポーチの天井）", roof_solid, flip_for_print=True, notes=notes["roof"],
