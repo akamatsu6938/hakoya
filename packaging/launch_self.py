@@ -3,6 +3,7 @@
 起動のしかた（★11/5）：自分用の exe は --mode sample（見本用）・own（自社用）・other（他社用）で選べる（HAKOYA_MODE と同じ。
 省くと HAKOYA_MODE、それもなければ既定）。例：HAKOYA.exe --mode sample
 社外用の exe は、exe の中の印（EDITION）で、いつも他社用（--mode を書いても変わらない。core/paths.py）。
+--mcp を付けると、画面の代わりに MCP の口（stdio）で起動する（社外の Claude Code とつなぐ。docs/mcp.md）。
 起動のしかたは core/paths.py を読み込んだときに決まるので、app.server を読み込む前に HAKOYA_MODE を書く。
 """
 import os
@@ -29,6 +30,9 @@ def main(argv: list[str] | None = None) -> int:
             print("--mode は own（自社用）・other（他社用）・sample（見本用）のどれかにしてください（例：HAKOYA.exe --mode sample）")
             return 2
         os.environ["HAKOYA_MODE"] = mode
+    if "--mcp" in (sys.argv[1:] if argv is None else argv):   # 社外の Claude Code とつなぐ（stdout は MCP のやりとりの道）
+        from app.mcp_server import main as mcp_main
+        return mcp_main()
     from app.server import main as serve
     return serve()
 

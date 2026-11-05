@@ -3,6 +3,7 @@
 使い方：.venv\\Scripts\\python -m tools.check_external_build dist\\external\\HAKOYA_external
 調べること：
 - Claude Agent SDK（claude_agent_sdk）と Claude Code 本体（claude.exe・claude）が入っていない
+- MCP の部品（mcp）は入っている（★11/5：社外の Claude Code とつなぐ --mcp の口。HAKOYA の道具を渡すだけで Claude は呼ばない）
 - 版の印（EDITION）が external
 - data\\（実物の図面・glb・設定）が入っていない
 - API キーらしい文字（sk-ant-…）が、文字のファイルにも、バイナリの中にもない
@@ -16,7 +17,7 @@ import sys
 from pathlib import Path
 
 KEY_RE = re.compile(rb"sk-ant-[A-Za-z0-9_\-]{20,}")
-FORBIDDEN_DIRS = ("claude_agent_sdk", "mcp")
+FORBIDDEN_DIRS = ("claude_agent_sdk",)
 FORBIDDEN_FILES = ("claude.exe", "claude")
 JP_CMAP = "UniJIS-UCS2-H.json.gz"     # 日本語の PDF の文字の表の1つ（ほかの表と一緒に pdfminer/cmap に入る）
 TEXT_EXT = {".py", ".json", ".yaml", ".yml", ".md", ".txt", ".js", ".css", ".html", ".toml", ".cfg", ".ini"}
@@ -42,6 +43,8 @@ def check(root: Path) -> list[str]:
                 continue
             if KEY_RE.search(blob):
                 problems.append(f"API キーらしい文字：{rel}")
+    if not any(p.is_dir() and p.name.lower() == "mcp" for p in root.rglob("mcp")):
+        problems.append("MCP の部品（mcp）がない（--mcp で社外の Claude Code とつなげない）")
     if not any(p.parent.name == "cmap" for p in root.rglob(JP_CMAP)):
         problems.append("PDF の日本語の文字の表（pdfminer の cmap）がない（高性能読み込みで PDF の文字が読めない）")
     marks = list(root.rglob("EDITION"))

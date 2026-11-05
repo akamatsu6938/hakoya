@@ -190,13 +190,22 @@ def render_view(ctx: ToolContext, view: str, highlight: list[str] | None = None,
     if source not in ("model", "glb"):
         raise ToolError('source は "model" か "glb" です')
     src = ctx.inspect_dir / f"{view}_{source}.png"
+    old = False
     if _image_stale(ctx, src):
         with _RENDER_LOCK:
             if _image_stale(ctx, src):           # 待っているあいだに、ほかの頼みが作り直したかもしれない
-                from core.render import render_all
-                render_all(ctx.alias)
+                from core import render
+                try:
+                    render.render_all(ctx.alias)
+                except Exception:                # glb が見つからないなど：前の図があれば、それを使う（なければ止める）
+                    if not src.exists():
+                        raise
+                    old = True
     if not highlight:
-        return {"image_path": str(src), "view": view, "source": source}
+        out = {"image_path": str(src), "view": view, "source": source}
+        if old:
+            out["note"] = "面の図を新しい模型で作り直せませんでした。前の模型の図のままです"
+        return out
     info = json.loads((ctx.inspect_dir / f"{view}.json").read_text(encoding="utf-8"))
     boxes = {e["id"]: e["bbox_px"] for e in info["elements"]}
     missing = [h for h in highlight if h not in boxes]

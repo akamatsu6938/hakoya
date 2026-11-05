@@ -14,6 +14,7 @@ dependencies = [
     "uvicorn>=0.29",
     "pillow>=10.0",
     "claude-agent-sdk>=0.2",
+    "mcp>=2.3,<3",                 # 社外の Claude Code とつなぐ口（app/mcp_server.py。mcp 1.x とは Server の形が違う）
     "anthropic>=2.3",
     "keyring>=25",
     "ezjww>=0.7.6",

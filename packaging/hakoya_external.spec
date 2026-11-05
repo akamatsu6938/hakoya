@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 # HAKOYA 社外用ビルド（AI の接続は API キーと AI なしだけ。Claude Agent SDK＝Claude Code 本体は入れない）。SPEC §7-4・§10。
+# ★11/5：MCP の部品（mcp）は入れる。HAKOYA の道具を、使う会社の人の Claude Code に渡すだけで、Claude は呼ばない（docs/mcp.md）。
 # 作り方:  .venv\Scripts\pyinstaller packaging\hakoya_external.spec --distpath dist\external --workpath build\external --noconfirm
 # できるもの: dist\external\HAKOYA_external\HAKOYA_external.exe（フォルダごと配る）。使う人のデータは exe の隣の data\ に置く。
 # 作ったら必ず: .venv\Scripts\python -m tools.check_external_build dist\external\HAKOYA_external
@@ -24,12 +25,12 @@ hiddenimports = [
 ]
 # pdfplumber・pdfminer（PDF の日本語の文字の表 cmap を含む）・pypdfium2（pdfplumber が使う部品）：高性能読み込みの PDF の図面（11/4）
 for pkg in ("manifold3d", "shapely", "trimesh", "pygltflib", "anthropic", "keyring", "ezjww",
-            "pdfplumber", "pdfminer", "pypdfium2", "pypdfium2_raw"):
+            "pdfplumber", "pdfminer", "pypdfium2", "pypdfium2_raw", "mcp", "mcp_types"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
     hiddenimports += h
-hiddenimports = [h for h in hiddenimports if not h.startswith(("claude_agent_sdk", "mcp", "anthropic.lib.tools.mcp"))]
+hiddenimports = [h for h in hiddenimports if not h.startswith(("claude_agent_sdk", "anthropic.lib.tools.mcp"))]
 
 a = Analysis(
     [os.path.join(ROOT, "packaging", "launch_self.py")],
@@ -37,7 +38,7 @@ a = Analysis(
     datas=datas,
     binaries=binaries,
     hiddenimports=hiddenimports,
-    excludes=["tkinter", "matplotlib", "scipy", "pytest", "IPython", "claude_agent_sdk", "mcp"],
+    excludes=["tkinter", "matplotlib", "scipy", "pytest", "IPython", "claude_agent_sdk"],
     noarchive=False,
 )
 # 版の印は exe の中で "EDITION" にする（core/settings_store.py が読む）

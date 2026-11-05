@@ -85,6 +85,8 @@ def data(template, tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "LOCAL_PATHS", root / "local_paths.yaml")
     monkeypatch.setattr(privacy, "LOCAL_PATHS", root / "local_paths.yaml")      # 出してはいけない言葉も架空の一覧から
     monkeypatch.setattr(mt, "_render_all", _fake_render_all)
+    from core import render
+    monkeypatch.setattr(render, "render_all", _fake_render_all)            # アプリの道具の作り直し（core/ai/tools.py）も本物を呼ばない
     monkeypatch.setattr(mt, "_write_outputs", lambda a: write_outputs(a, bambu_enabled=False))
     for k in ("HAKOYA_PORT", "HAKOYA_MODE"):
         monkeypatch.delenv(k, raising=False)
@@ -120,9 +122,10 @@ def test_alias_must_be_a_registered_property(data):
     assert mt.call("get_building", {"alias": ALIAS}).is_error
 
 
-def test_sample_view_shows_only_the_sample_houses(data):
+def test_sample_view_shows_only_the_sample_houses(data, monkeypatch):
+    from core import settings_store
     (data / "local_paths.yaml").write_text(f"{ALIAS}: {{}}\n{SAMPLE}: {{}}\n", encoding="utf-8")
-    (data / "settings.json").write_text(json.dumps({"view": "sample"}), encoding="utf-8")
+    monkeypatch.setattr(settings_store, "mode", lambda: "sample")          # ★11/5 見本用は起動のモードで決まる
     assert [p["alias"] for p in mt.call("list_properties", {}).data["properties"]] == [SAMPLE]
     assert mt.call("get_building", {"alias": ALIAS}).is_error
 

@@ -101,7 +101,11 @@ def make_tools(ctx, specs: dict | None = None, call=None) -> list:
     def make(name: str, spec: dict):
         @tool(name, spec["description"], spec["schema"])
         async def handler(args: dict[str, Any]) -> dict[str, Any]:
-            res = (call or call_tool)(ctx, name, dict(args or {}))
+            try:
+                res = (call or call_tool)(ctx, name, dict(args or {}))
+            except Exception as e:  # noqa: BLE001  SDK は例外の文（ファイルの場所が入りうる）をそのまま Claude に渡すので、種類だけ
+                return {"content": [{"type": "text", "text": json.dumps(
+                    {"error": f"道具の途中でエラーが起きました（{type(e).__name__}）"}, ensure_ascii=False)}], "is_error": True}
             text = json.dumps({k: v for k, v in res.items() if k != "image_path"}, ensure_ascii=False)
             try:
                 assert_clean(text, "Claude に送るデータ")

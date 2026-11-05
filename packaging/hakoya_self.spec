@@ -23,7 +23,7 @@ hiddenimports = [
 # pdfplumber・pdfminer（PDF の日本語の文字の表 cmap を含む）・pypdfium2（pdfplumber が使う部品）：高性能読み込みの PDF の図面（11/4）
 for pkg in ("manifold3d", "shapely", "trimesh", "pygltflib", "claude_agent_sdk", "anthropic", "keyring", "ezjww",
             "pdfplumber", "pdfminer", "pypdfium2", "pypdfium2_raw"):
-    d, b, h = collect_all(pkg)
+    d, b, h = collect_all(pkg)          # mcp・mcp_types は claude_agent_sdk と一緒に入る（--mcp の口でも使う）
     datas += d
     binaries += b
     hiddenimports += h

@@ -95,7 +95,7 @@ _LOCK = threading.Lock()           # 道具は1つずつ動かす（同じ物件
 # ---------------------------------------------------------------- 守り（物件の名前・出してよい文・エラー）
 
 def _aliases() -> list[str]:
-    """登録してある物件の仮名。見え方が見本確認用のときは、見本の家だけ（画面の物件の一覧と同じ。★11/5 審査・動画用）。"""
+    """登録してある物件の仮名。見本用で起動しているときは、見本の家だけ（画面の物件の一覧と同じ。★11/5 審査・動画用）。"""
     try:
         names = paths.aliases(paths.LOCAL_PATHS)
     except FileNotFoundError:
@@ -106,7 +106,7 @@ def _aliases() -> list[str]:
                         else f"data/local_paths.yaml を読めません（{type(e).__name__}）") from None
     try:
         from core import settings_store
-        if settings_store.load()["view"] == "sample":
+        if settings_store.mode() == "sample":            # ★11/5 見え方は起動のモードに変わった
             names = [a for a in names if settings_store.is_sample_alias(a)]
     except Exception as e:  # noqa: BLE001  設定が読めなくても一覧は出す（見本だけに絞れないときは絞らない）
         _log_error("settings", e)
@@ -625,6 +625,7 @@ def _finding_item_schema() -> dict:
     item = copy.deepcopy(FINDINGS_SCHEMA["properties"]["findings"]["items"])
     props = item["properties"]
     props.setdefault("title", {"type": "string", "description": "指摘の見出し（20字くらい）"})
+    item["required"] = [r for r in item.get("required", []) if r != "title"]     # 省いたら本文から作る（report_findings）
     props.setdefault("region", {"description": "図の上の範囲（get_elements の bbox_px）。省いてよい",
                                 "anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "number"}},
                                           {"type": "object"}]})
@@ -683,11 +684,15 @@ def report_findings(alias: str, findings: list[dict], summary: str) -> dict:
                 why = _check_proposal(ctx, f)
                 if why:
                     f["proposal"], f["proposal_error"] = None, why
+        if not str(f.get("title") or "").strip():          # 見出しを省いたら、本文の最初の文から作る（アプリと同じ）
+            from core.findings import title_of
+            f["title"] = title_of(f)
         raw.append(f)
     ctx.proposals.clear()
     items = finalize(ctx, raw)                              # 番号（F1…）・未確認・直す案の数値をコードで計算し直す
     known = _known_ids(ctx.building)
-    unknown = sorted({t.split(":")[0] for f in items for t in f.get("targets", []) if t.split(":")[0] not in known})
+    unknown = sorted({t.split(":")[0] for f in items for t in f.get("targets", []) if t.split(":")[0] not in known}
+                     | {str(t).split(":")[0] for f in items for t in f.get("unknown_targets", [])})   # ★11/5 finalize が外した番号も
     questions = _load_questions(alias)
     report = {"alias": alias, "connection": CONNECTION, "summary": summary, "findings": items,
               "questions": questions, "code_findings": code_findings(alias), "at": _now(),

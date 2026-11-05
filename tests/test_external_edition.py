@@ -44,6 +44,7 @@ def _bundle(tmp_path, edition="external"):
     (root / "_internal" / "anthropic" / "x.py").write_text("print('ok')", encoding="utf-8")
     (root / "_internal" / "EDITION").write_text(edition, encoding="utf-8")
     (root / "HAKOYA_external.exe").write_bytes(b"MZ" + b"\0" * 100)
+    (root / "_internal" / "mcp").mkdir(parents=True)                                   # MCP の部品（★11/5 社外用にも入れる）
     (root / "_internal" / "pdfminer" / "cmap").mkdir(parents=True)                     # PDF の日本語の文字の表
     (root / "_internal" / "pdfminer" / "cmap" / "UniJIS-UCS2-H.json.gz").write_bytes(b"x")
     return root
