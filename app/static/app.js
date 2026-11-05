@@ -23,13 +23,26 @@ async function call(method, path, body) {
 
 // ---------------------------------------------------------------- タブ
 document.querySelectorAll('.tabs').forEach((nav) => nav.addEventListener('click', (e) => {
-  const tab = e.target.dataset.tab; if (!tab) return;
-  nav.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.target));
+  const btn = e.target.closest('button[data-tab]'); if (!btn) return;   // タブの中の字や数を押しても、そのタブ
+  const tab = btn.dataset.tab;
+  nav.querySelectorAll('button').forEach((b) => { b.classList.toggle('on', b === btn); if (b.hasAttribute('aria-selected')) b.setAttribute('aria-selected', b === btn ? 'true' : 'false'); });
   nav.parentElement.querySelectorAll(':scope > .pane').forEach((p) => p.classList.toggle('on', p.id === tab));
   if (nav.dataset.group === 'view') { clearLasso(); setLassoMode(false); setLasso3dMode(false); }   // 囲みは表示している図だけのもの
   if (tab === 'srules') renderRules();
   if (tab === 'v3d') resize();
 }));
+// 縦のタブ（右の欄）は上下の矢印でも動ける
+document.querySelectorAll('.tabs[aria-orientation="vertical"]').forEach((nav) => nav.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const btns = [...nav.querySelectorAll('button[data-tab]')]; const k = btns.indexOf(document.activeElement); if (k < 0) return;
+  e.preventDefault();
+  const next = btns[(k + (e.key === 'ArrowDown' ? 1 : btns.length - 1)) % btns.length]; next.focus(); next.click();
+}));
+// タブの数（検品：まだ決めていない指摘・修正の履歴：件数・検査：高と中の件数）。tone：bad（高がある）／warn
+function setTabCount(tab, n, tone = '') {
+  const c = document.querySelector(`.tabs button[data-tab="${tab}"] .count`); if (!c) return;
+  c.hidden = !n; c.textContent = n ? String(n) : ''; c.className = 'count' + (tone ? ' ' + tone : '');
+}
 
 // ---------------------------------------------------------------- 3D 表示
 const holder = $('#canvas');
@@ -254,13 +267,14 @@ async function renderHistory(results) {
     const what = it.field === '_delete' ? '取り除く' : `${FIELD[it.field] || it.field}：${it.from} → ${it.to}`;
     const tgt = String(it.target).startsWith('level:') ? (LEVEL_JA[it.target.slice(6)] || it.target) : it.target;
     li.innerHTML = `<span class="tag">${it.id}</span><b>${tgt}</b> ${what}<br><span class="hint">${it.reason}（${it.value_source}・${it.at.slice(0, 16).replace('T', ' ')}）${st ? '・' + label[st.status] : ''}</span> `;
-    const undo = document.createElement('button'); undo.textContent = '取り消す';
+    const undo = document.createElement('button'); undo.textContent = '取り消す'; undo.className = 'quiet';
     undo.addEventListener('click', async () => {
       try { setStatus('取り消して組み直しています…', 'busy'); await call('DELETE', `/api/overrides/{a}/${it.id}`); await refresh(); setStatus(`${it.id} を取り消しました`, 'ok'); }
       catch (e) { setStatus('取り消せませんでした：' + e.message, 'err'); }
     });
     li.appendChild(undo); ul.appendChild(li);
   }
+  setTabCount('shist', items.length);
 }
 
 let checksSeq = 0;   // 描き直しが重なったら、最後に始めたものだけを描く（前は2回分が足され、前の物件の結果も混ざった）
@@ -301,18 +315,56 @@ async function renderChecks() {
   } catch (e) { /* 図面がない・読めないときは出さない */ }
   try {
     const s = await call('GET', '/api/model/{a}/checks.json');
+    add('<li class="lv-情報"><b>部品ごとのメモ</b>（組み立てで決めたこと）</li>');
     for (const [k, p] of Object.entries(s.parts)) for (const n of p.notes) add(`<li class="lv-情報"><span class="tag">${p.label}</span>${n}</li>`);
+    add('<li class="lv-情報"><b>検査の結果</b>（閉じた立体か・大きさ・造形範囲に入るか など）</li>');
     for (const c of s.checks) add(`<li class="lv-${c.level}"><span class="tag">${c.level}</span>${c.message}</li>`);
   } catch (e) { if (my === checksSeq) ul.innerHTML = '<li>まだ検査していません</li>'; }
+  if (my !== checksSeq) return;
+  // 確かめる所（高・中）は、画面では一覧のいちばん上に集める（style.css の order）。タブにも数を出す
+  const bad = ul.querySelectorAll('li.lv-高').length; const mid = ul.querySelectorAll('li.lv-中').length;
+  setTabCount('schk', bad + mid, bad ? 'bad' : 'warn');
+  if (bad + mid) ul.insertAdjacentHTML('afterbegin', `<li class="lv-情報 sum"><b>確かめる所 ${bad + mid} 件</b>（黄と赤の印の行を、ここに集めました）</li>`);
+}
+
+// 書き出した STL の一覧（checks.json の stl_files）から、ダウンロードの行を作る。分けた部品は print_pieces の名前（例：1階 1/2（南））
+function stlRows(s) {
+  const pieces = s.print_pieces || []; const parts = s.parts || {}; const stl = new Set(s.stl_files);
+  const rows = []; const used = new Set();
+  const isExt = (f) => /^exterior|_ext(_p\d+)?\.stl$/.test(f);
+  const objects = [...new Set(Object.keys(parts).map((k) => parts[k].object || k))];
+  for (const obj of objects) {
+    const mine = pieces.filter((pc) => pc.object === obj);
+    if (mine.length) {
+      for (const pc of mine) for (const f of pc.files) {
+        if (!stl.has(f) || used.has(f)) continue;
+        rows.push([f, `STL：${pc.name}${pc.files.length > 1 && isExt(f) ? '（外壁）' : ''}`]); used.add(f);
+      }
+    }
+    for (const k of Object.keys(parts).filter((x) => (parts[x].object || x) === obj)) {
+      const f = `${k}.stl`;
+      if (stl.has(f) && !used.has(f)) { rows.push([f, `STL：${parts[k].label}`]); used.add(f); }
+    }
+  }
+  for (const f of s.stl_files) if (!used.has(f)) rows.push([f, `STL：${f}`]);   // 名前の分からない部品も落とさない
+  return rows;
 }
 
 async function renderDownloads() {
-  const files = [['model_bambu.3mf', '3MF（Bambu Studio 形式・外壁のファジースキン設定済み）おすすめ'], ['model.3mf', '3MF（ふつうの形式・設定は手で）'], ['model.glb', 'GLB（3D 表示用）'], ['foundation.stl', 'STL：基礎'],
-    ['floor1.stl', 'STL：1階（床・内壁）'], ['exterior1.stl', 'STL：1階の外壁']];
+  const files = [['model_bambu.3mf', '3MF（Bambu Studio 形式・外壁のファジースキン設定済み）おすすめ'], ['model.3mf', '3MF（ふつうの形式・設定は手で）'], ['model.glb', 'GLB（3D 表示用）']];
+  let s = null;
+  try { s = await call('GET', '/api/model/{a}/checks.json'); } catch (e) { /* まだ書き出していない */ }
+  if (s && Array.isArray(s.stl_files) && s.stl_files.length) {   // 書き出した STL をそのまま並べる（本体を分けたときも合う）
+    const row = ([f, label], k) => `<li${k === 0 ? ' class="dl-main"' : ''}><a href="${api('/api/model/{a}/' + f)}" download>${esc(label)}</a></li>`;
+    const stls = stlRows(s);   // 1つ目（おすすめの 3MF）を大きく、STL は「部品ごと」のまとまりに分けて並べる
+    $('#downloads').innerHTML = files.map(row).join('')
+      + `<li class="dl-group">部品ごとの STL（${stls.length} 個）</li>` + stls.map((x) => row(x, -1)).join('');
+    return;
+  }
+  files.push(['foundation.stl', 'STL：基礎'], ['floor1.stl', 'STL：1階（床・内壁）'], ['exterior1.stl', 'STL：1階の外壁']);
   if (state.multi) files.push(['floor2.stl', 'STL：2階（床・内壁）'], ['exterior2.stl', 'STL：2階の外壁']);
   // 屋根は面ごとに分けて寝かせた STL（core/print_split.py）。分けていない書き出しなら前の名前
-  let pieces = [];
-  try { pieces = (await call('GET', '/api/model/{a}/checks.json')).print_pieces || []; } catch (e) { /* まだ書き出していない */ }
+  const pieces = (s && s.print_pieces) || [];
   if (pieces.length) {
     for (const pc of pieces) for (const f of pc.files) files.push([f, `STL：${pc.name}${f.includes('_ext') ? '（外壁）' : ''}`]);
   } else if (state.multi) {
@@ -360,7 +412,7 @@ function findingItem(f, withActions) {
   const acts = document.createElement('div'); acts.className = 'acts';
   const view = VIEW_OF[f.view] || 'plan';
   const img = document.createElement('img'); img.hidden = true;
-  const show = document.createElement('button'); show.textContent = '図を見る';
+  const show = document.createElement('button'); show.textContent = '図を見る'; show.className = 'quiet';
   show.addEventListener('click', () => {
     if (img.hidden) { img.src = api(`/api/inspect/{a}/image/${view}`) + `?hl=${encodeURIComponent((f.targets || []).join(','))}&t=${Date.now()}`; }
     img.hidden = !img.hidden; show.textContent = img.hidden ? '図を見る' : '図を閉じる';
@@ -369,7 +421,7 @@ function findingItem(f, withActions) {
   if (withActions) {
     for (const [action, label] of [['approve', '承認'], ['reject', '却下'], ['later', 'あとで']]) {
       if (action === 'approve' && !f.proposal) continue;
-      const b = document.createElement('button'); b.textContent = label; if (action === 'approve') b.className = 'primary';
+      const b = document.createElement('button'); b.textContent = label; b.className = { approve: 'primary', later: 'quiet' }[action] || '';
       b.addEventListener('click', async () => {
         try {
           setStatus(action === 'approve' ? '直す案を修正として記録し、模型を組み直しています…' : '記録しています…', 'busy');
@@ -387,6 +439,9 @@ function findingItem(f, withActions) {
 
 async function renderFindings() {
   const rep = await call('GET', '/api/findings/{a}');
+  state.report = rep; updateSteps();
+  const open = [...(rep.findings || []), ...(rep.code_findings || [])].filter((f) => !['承認', '却下'].includes(f.status));
+  setTabCount('sinsp', open.length, open.some((f) => f.severity === '高') ? 'bad' : '');
   const fill = (sel, items, withActions, empty) => {
     const ul = $(sel); ul.innerHTML = '';
     if (!items || !items.length) { ul.innerHTML = `<li class="hint">${empty}</li>`; return; }
@@ -477,7 +532,7 @@ async function renderRules() {
     const li = document.createElement('li');
     li.innerHTML = `<span class="tag">${esc(it.id)}</span>${esc(RKIND_JA[it.kind] || it.kind)}：${esc(it.text)}`
       + (it.key ? `（${esc(it.key)}：${esc(it.previous)} → ${esc(it.value)}）` : '') + `<br><span class="hint">根拠：${esc(it.evidence)}</span> `;
-    const b = document.createElement('button'); b.textContent = '取り消す';
+    const b = document.createElement('button'); b.textContent = '取り消す'; b.className = 'quiet';
     b.addEventListener('click', async () => {
       try { await call('DELETE', rulesApi(`/learned/${encodeURIComponent(it.id)}`)); setStatus(`${it.id} を取り消しました`, 'ok'); renderRules(); }
       catch (e) { setStatus('取り消せませんでした：' + e.message, 'err'); }
@@ -559,8 +614,88 @@ async function renderSettings() {
     const cs = $('#company');
     cs.innerHTML = (st.companies || []).map((c) => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('');
     cs.value = st.company; cs.dataset.prev = st.company;
+    applyView(st);
   } catch (e) { $('#apikey-state').textContent = '設定を読めませんでした：' + e.message; }
 }
+
+// ---------------------------------------------------------------- 見え方（★11/5：見本確認用・自社利用用・他社利用用）
+// 見本確認用：見本の家だけ（サーバーが一覧を絞る）・手順の帯・登録と細かい設定を隠す。他社利用用：プランの接続を出さない・会社ルールを前に
+const VIEW_JA = { sample: '見本確認用', own: '自社利用用', other: '他社利用用' };
+function applyView(st) {
+  state.view = st.view;
+  document.body.dataset.view = st.view;
+  document.querySelectorAll('#views [data-mode]').forEach((b) => {
+    const on = b.dataset.mode === st.view;
+    b.hidden = !(st.views || []).includes(b.dataset.mode);         // 社外用の版では自社利用用を出さない
+    b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  applyConnections(st.connections || []);
+  $('#steps').hidden = st.view !== 'sample';
+  const chip = $('#company-chip');
+  chip.hidden = st.view !== 'other';
+  chip.textContent = `会社ルール：${state.companies?.[st.company] || st.company}`;
+  $('#company-callout').hidden = !!st.company_chosen;
+  updateSteps();
+}
+
+// 版・見え方に合わせて、使えない接続（社外用の版と他社利用用ではプランの接続）の選択肢とボタンを隠す（戻せるように消さない）
+function applyConnections(connections) {
+  const plan = connections.includes('claude_code');
+  for (const sel of [$('#lasso-conn'), $('#rules-conn')]) {
+    const opt = sel.querySelector('option[value="claude_code"]');
+    if (!opt) continue;
+    opt.hidden = !plan; opt.disabled = !plan;
+    if (!plan && sel.value === 'claude_code') sel.value = 'api_key';
+  }
+  $('#inspect-ai').hidden = !plan;
+}
+
+$('#views').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-mode]');
+  if (!b || b.classList.contains('on')) return;
+  try {
+    await call('POST', '/api/settings/view', { view: b.dataset.mode });
+    await renderSettings();
+    setStatus(`見え方を「${VIEW_JA[b.dataset.mode]}」にしました`, 'ok');
+    await fillAliases(state.alias);
+  } catch (err) { setStatus('見え方を切り替えられませんでした：' + err.message, 'err'); }
+});
+$('#company-chip').addEventListener('click', () => {
+  document.querySelector('.tabs button[data-tab="sset"]').click();
+  $('#set-company').scrollIntoView({ block: 'start' }); $('#company').focus();
+});
+
+// 手順の帯（見本確認用）：組み立てていない→1、検品していない→2、承認していない直す案がある→3、ほかは→4
+const STEP_HINT = {
+  1: '「読み込んで組み立てる」を押すと、glb から模型を組み立てます',
+  2: '右の「検品」で、Claude かコードの検査に模型を見てもらいます',
+  3: '指摘の「承認」か「表で直す」で直します。直すと模型を組み直します',
+  4: '「書き出し」から 3MF を保存して、Bambu Studio で開きます',
+};
+function currentStep() {
+  const rep = state.report;
+  if (!state.alias || !state.built) return 1;
+  if (!rep || !rep.connection) return 2;
+  const pending = [...(rep.findings || []), ...(rep.code_findings || [])]
+    .filter((f) => f.proposal && !['承認', '却下'].includes(f.status)).length;
+  return pending ? 3 : 4;
+}
+function updateSteps() {
+  const cur = currentStep();
+  document.querySelectorAll('#steps [data-step]').forEach((b) => {
+    const n = Number(b.dataset.step);
+    b.classList.toggle('on', n === cur); b.classList.toggle('done', n < cur);
+    if (n === cur) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+  });
+  $('#step-hint').textContent = STEP_HINT[cur];
+}
+$('#steps').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-step]'); if (!b) return;
+  const n = Number(b.dataset.step);
+  if (n === 1) { $('#build').focus(); return; }
+  const tab = n === 2 ? 'sinsp' : n === 4 ? 'sout' : (currentStep() === 3 ? 'sinsp' : 'sedit');
+  document.querySelector(`.tabs button[data-tab="${tab}"]`).click();
+});
 $('#company').addEventListener('change', async (e) => {   // 会社ルール：作り直すのは次に「読み込んで組み立てる」を押したとき
   const sel = e.target;
   try {
@@ -668,6 +803,91 @@ $('#plan').addEventListener('pointerup', async () => {
     const res = await call('POST', '/api/lasso/{a}/select', { polygon: lasso.polygon, level: state.multi ? $('#plan-level').value : null });
     showPicked(res.selection);
   } catch (e) { setStatus('囲みを読めませんでした：' + e.message, 'err'); clearLasso(); }
+});
+
+// ---------------------------------------------------------------- 本体の分け目（平面図でドラッグ。★11/5 作者 2-1）
+// 平面図の <g id="split">（tools/plan_preview.py）の data-* を読む。分け目の位置 t は「平面の mm を向き u に投影した値」。
+// 動かせる範囲（data-ranges）の中だけ動かし、離すと全部の分け目を /api/split に送る（近くの壁の面に寄せるのはサーバー）
+const splitUi = { drag: null, busy: false };
+const MODEL_SCALE = 50;            // 1/50：両側の長さは模型の mm で見せる
+
+function splitGroup() { return $('#plan svg g#split'); }
+function splitData(g) {
+  const d = g.dataset; const parse = (s, dflt) => { try { return JSON.parse(s); } catch (e) { return dflt; } };
+  return { ux: Number(d.ux), uy: Number(d.uy), lo: Number(d.lo), hi: Number(d.hi), source: d.source,
+    ranges: parse(d.ranges || '[]', []), sides: parse(d.sides || '[]', []),
+    cuts: [...g.querySelectorAll('[data-role="split"]')].sort((a, b) => a.dataset.i - b.dataset.i).map((el) => Number(el.dataset.t)) };
+}
+function splitLabelText(sd, cuts, i, prefix) {
+  const prev = i === 0 ? sd.lo : cuts[i - 1]; const next = i === cuts.length - 1 ? sd.hi : cuts[i + 1];
+  const a = sd.sides[i] || ''; const b = sd.sides[i + 1] || '';
+  return `${prefix}｜${a} ${Math.round((cuts[i] - prev) / MODEL_SCALE)}mm・${b} ${Math.round((next - cuts[i]) / MODEL_SCALE)}mm（模型）`;
+}
+function updateSplitControls() {   // 平面図を読み直したあと：分け目のあるときだけ説明を出し、人が決めた分け目なら「自動に戻す」を出す
+  const g = splitGroup();
+  $('#split-hint').hidden = !g;
+  $('#split-reset').hidden = !(g && g.dataset.source === 'human');
+}
+
+$('#plan').addEventListener('pointerdown', (e) => {
+  const hit = e.target.closest?.('[data-role="split"]');
+  const svg = planSvg(); const g = splitGroup();
+  if (lasso.on || !hit || !svg || !g) return;
+  e.preventDefault();
+  if (splitUi.busy) { setStatus('書き出しが終わってから動かしてください', 'err'); return; }
+  const sd = splitData(g); const i = Number(hit.dataset.i);
+  splitUi.drag = { i, sd, cuts: sd.cuts.slice(), start: sd.cuts[i], svg, g, pointerId: e.pointerId };
+  g.classList.add('dragging');
+  $('#plan').setPointerCapture(e.pointerId);
+});
+$('#plan').addEventListener('pointermove', (e) => {
+  const d = splitUi.drag; if (!d) return;
+  const p = svgPoint(d.svg, e); const [mx, my] = toMm(d.svg, p.x, p.y);
+  const { sd, i } = d;
+  let t = sd.ux * mx + sd.uy * my;
+  const r = sd.ranges[i]; if (r) t = Math.min(Math.max(t, r[0]), r[1]);         // どの部品も造形範囲に入る範囲
+  if (i > 0) t = Math.max(t, d.cuts[i - 1] + 200);                               // となりの分け目を追い越さない
+  if (i < d.cuts.length - 1) t = Math.min(t, d.cuts[i + 1] - 200);
+  d.cuts[i] = t;
+  const s = Number(d.svg.dataset.scale); const dt = t - d.start;
+  const move = `translate(${(dt * sd.ux * s).toFixed(2)} ${(-dt * sd.uy * s).toFixed(2)})`;   // 平面図は Y が下向き
+  d.g.querySelectorAll(`[data-i="${i}"]`).forEach((el) => el.setAttribute('transform', move));
+  const label = d.g.querySelector(`text.split-label[data-i="${i}"]`);
+  if (label) label.textContent = splitLabelText(sd, d.cuts, i, '動かしている分け目');
+});
+async function endSplitDrag() {
+  const d = splitUi.drag; if (!d) return;
+  splitUi.drag = null; d.g.classList.remove('dragging');
+  if (Math.abs(d.cuts[d.i] - d.start) < 1) {                                      // 動かしていない（押しただけ）
+    d.g.querySelectorAll(`[data-i="${d.i}"]`).forEach((el) => el.removeAttribute('transform'));
+    return;
+  }
+  splitUi.busy = true;
+  setStatus('書き出し中…（分け目を動かして、部品を作り直しています）', 'busy');
+  try {
+    const res = await call('POST', '/api/split/{a}', { cuts_mm: d.cuts.map((t) => Math.round(t * 10) / 10) });
+    const hc = res.house_cut;
+    await loadPlan(); await renderChecks(); await renderDownloads();
+    const moved = hc && hc.cuts ? splitLabelText({ ...d.sd, lo: hc.lo, hi: hc.hi, sides: hc.sides || d.sd.sides }, hc.cuts, d.i, '分け目を動かしました') : '分け目を動かしました';
+    const snapped = hc && hc.cuts && Math.abs(hc.cuts[d.i] - d.cuts[d.i]) > 1 ? '。近くの壁の面に寄せました' : '';
+    setStatus(`${moved}${snapped}。書き出し直しました（「分け目を自動に戻す」で戻せます）`, 'ok');
+  } catch (err) {
+    setStatus('分け目を動かせませんでした：' + err.message, 'err');               // 例：その分け目では、分けた部品のどれかが造形範囲に入りません
+    try { await loadPlan(); } catch (e2) { /* 平面図は次に開いたときに読む */ }
+  } finally { splitUi.busy = false; }
+}
+$('#plan').addEventListener('pointerup', endSplitDrag);
+$('#plan').addEventListener('pointercancel', endSplitDrag);
+$('#split-reset').addEventListener('click', async () => {
+  if (splitUi.busy) return;
+  splitUi.busy = true; $('#split-reset').disabled = true;
+  setStatus('書き出し中…（分け目を自動に戻しています）', 'busy');
+  try {
+    await call('DELETE', '/api/split/{a}');
+    await loadPlan(); await renderChecks(); await renderDownloads();
+    setStatus('分け目を自動に戻して、書き出し直しました', 'ok');
+  } catch (err) { setStatus('戻せませんでした：' + err.message, 'err'); }
+  finally { splitUi.busy = false; $('#split-reset').disabled = false; }
 });
 
 // ---------------------------------------------------------------- 囲んで直す（3D）
@@ -844,6 +1064,7 @@ async function loadPlan() {   // 平面図（2階建ては選んだ階）。「�
   if (state.multi) params.push(`level=${encodeURIComponent($('#plan-level').value)}`);
   if ($('#plan-drawing').checked) params.push('drawing=1');
   $('#plan').innerHTML = await call('GET', '/api/plan/{a}' + (params.length ? '?' + params.join('&') : ''));
+  updateSplitControls();
 }
 $('#plan-drawing').addEventListener('change', async () => {
   try { setStatus($('#plan-drawing').checked ? '図面を重ねています（初回は数秒かかります）…' : '図面を外しています…', 'busy'); await loadPlan(); setStatus('', ''); }
@@ -856,7 +1077,7 @@ $('#plan-level').addEventListener('change', async () => {
 
 async function refresh() {
   const data = await call('GET', '/api/building/{a}');
-  state.building = data.building;
+  state.building = data.building; state.built = true;
   state.pick = null; clearHighlight3d();                   // 組み直したら当たり判定用の形も読み直す（次に囲むとき）
   state.multi = (data.building.levels || []).length > 1;          // 2階建てか
   renderPartToggles();
@@ -875,7 +1096,7 @@ function companyNote() {
 }
 
 async function selectAlias(alias, built) {
-  state.alias = alias; state.viewSet = false;
+  state.alias = alias; state.viewSet = false; state.built = built; state.report = null; updateSteps();
   if (!built) { setStatus(`${alias}：まだ組み立てていません。「読み込んで組み立てる」を押してください`); return; }
   try { setStatus('読み込んでいます…', 'busy'); await refresh(); setStatus(`${alias}を表示しています${companyNote()}`, 'ok'); }
   catch (e) { setStatus(e.message, 'err'); }
@@ -909,14 +1130,6 @@ for (const id of (location.hash || '').slice(1).split(',').filter(Boolean)) {
   if (btn) btn.click();
 }
 
-// 版に合わせて、使えない接続（社外用ではプランの接続）の選択肢とボタンを隠す
-async function applyEdition() {
-  let st;
-  try { st = await call('GET', '/api/settings'); } catch (e) { return; }
-  if ((st.connections || []).includes('claude_code')) return;
-  document.querySelectorAll('#lasso-conn option[value="claude_code"], #rules-conn option[value="claude_code"]').forEach((o) => o.remove());
-  $('#inspect-ai').hidden = true;
-}
 
 // ---------------------------------------------------------------- 物件の登録（設定タブ。core/registry.py）
 const reg = { glb: null, dwg: null };
@@ -977,14 +1190,30 @@ async function fillAliases(choose) {
   const sel = $('#alias');
   sel.innerHTML = props.map((p) => `<option value="${p.alias}" data-built="${p.built}">${p.alias}${p.has_glb ? '' : '（glb なし）'}</option>`).join('');
   const pick = props.find((p) => p.alias === choose) || props[0];
-  if (pick) { sel.value = pick.alias; selectAlias(pick.alias, pick.built); }
+  if (pick) { sel.value = pick.alias; selectAlias(pick.alias, pick.built); return props; }
+  clearProperty();          // 見本確認用で見本の家がないときなど：前の物件（お客様の家かもしれない）を画面に残さない
+  if (state.view === 'sample') {
+    setStatus('見本の家がありません。仮名が「デモ用」か「見本」で始まる物件だけが出ます（自社利用用に切り替えると全部出ます）', 'err');
+  } else {
+    setStatus('物件が登録されていません。「設定」タブの「物件の登録」で glb を選んで登録してください（README の手順5のように local_paths.yaml に書いても登録できます）', 'err');
+  }
   return props;
 }
 
+function clearProperty() {
+  state.alias = null; state.building = null; state.built = false; state.report = null;
+  if (state.root) { scene.remove(state.root); state.root = null; }
+  plate.visible = false; clearLasso();
+  $('#plan').innerHTML = 'まだ組み立てていません'; updateSplitControls();
+  for (const id of ['#levels', '#openings', '#walls', '#roofs', '#roof-eaves', '#history', '#checks', '#downloads',
+    '#findings', '#questions', '#code-findings', '#inspect-progress']) $(id).innerHTML = '';
+  $('#inspect-summary').textContent = '';
+  for (const t of ['sinsp', 'shist', 'schk']) setTabCount(t, 0);
+  updateSteps();
+}
+
 (async () => {
-  applyEdition();
   $('#alias').addEventListener('change', (e) => selectAlias(e.target.value, e.target.selectedOptions[0].dataset.built === 'true'));
-  const props = await fillAliases();
+  await fillAliases();
   renderRegistry();
-  if (!props.length) setStatus('物件が登録されていません。「設定」タブの「物件の登録」で glb を選んで登録してください（README の手順5のように local_paths.yaml に書いても登録できます）', 'err');
 })();

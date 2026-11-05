@@ -15,7 +15,21 @@
   <label>物件 <select id="alias"></select></label>
   <button id="build" class="primary">読み込んで組み立てる</button>
   <div id="status" class="status">物件を選んでください</div>
+  <button id="company-chip" class="chip" hidden title="会社ルールを選ぶ（設定タブ）"></button>
+  <span class="hlabel" aria-hidden="true">見え方</span>
+  <div id="views" class="seg" role="radiogroup" aria-label="見え方">
+    <button role="radio" aria-checked="false" data-mode="sample" title="審査・動画用：見本の家だけを出し、手順の帯を出します">見本確認用</button>
+    <button role="radio" aria-checked="false" data-mode="own" title="自分の会社で使う：全部の機能を出します">自社利用用</button>
+    <button role="radio" aria-checked="false" data-mode="other" title="ほかの会社で使う：AI は API キーと AI なしだけ。会社ルールを選びます">他社利用用</button>
+  </div>
 </header>
+<nav id="steps" class="steps" aria-label="手順" hidden>
+  <button data-step="1"><span class="n">1</span>組み立てる</button>
+  <button data-step="2"><span class="n">2</span>検品する</button>
+  <button data-step="3"><span class="n">3</span>直す</button>
+  <button data-step="4"><span class="n">4</span>書き出す</button>
+  <span id="step-hint" class="step-hint"></span>
+</nav>
 <main>
   <section class="viewer">
     <nav class="tabs" data-group="view">
@@ -48,6 +62,9 @@
         <button id="lasso-toggle">囲む</button>
         <label><input type="checkbox" id="plan-drawing">図面を重ねる</label>
         <span class="label" id="lasso-hint">「囲む」を押してから、平面図の上で直したい壁や窓をぐるっと囲んでください。</span>
+        <span class="sep"></span>
+        <span class="label split-hint" id="split-hint" hidden>オレンジの点線は本体の分け目です。つかんで動かせます</span>
+        <button id="split-reset" hidden>分け目を自動に戻す</button>
       </div>
       <div id="plan" class="plan">まだ組み立てていません</div>
     </div>
@@ -62,28 +79,31 @@
         </select>
         <button id="lasso-ask" class="primary">Claude に頼む</button>
         <button id="lasso-table">表で直す（AI なし）</button>
-        <button id="lasso-clear">囲みを消す</button>
+        <button id="lasso-clear" class="quiet">囲みを消す</button>
       </div>
       <div id="lasso-result"></div>
     </div>
   </section>
   <aside class="side">
-    <nav class="tabs" data-group="side">
-      <button data-tab="sinsp">検品</button>
-      <button data-tab="sedit" class="on">表で直す</button>
-      <button data-tab="shist">修正の履歴</button>
-      <button data-tab="schk">検査</button>
-      <button data-tab="sout">書き出し</button>
-      <button data-tab="srules">会社ルール</button>
-      <button data-tab="sset">設定</button>
+    <nav class="tabs rail" data-group="side" role="tablist" aria-orientation="vertical" aria-label="作業の欄">
+      <button data-tab="sinsp" role="tab" aria-selected="false"><span class="t">検品</span><span class="count" hidden></span></button>
+      <button data-tab="sedit" role="tab" aria-selected="true" class="on"><span class="t">表で<wbr>直す</span></button>
+      <button data-tab="shist" role="tab" aria-selected="false"><span class="t">修正の<wbr>履歴</span><span class="count" hidden></span></button>
+      <button data-tab="schk" role="tab" aria-selected="false"><span class="t">検査</span><span class="count" hidden></span></button>
+      <button data-tab="sout" role="tab" aria-selected="false"><span class="t">書き<wbr>出し</span></button>
+      <button data-tab="srules" role="tab" aria-selected="false" class="cfg-first"><span class="t">会社<wbr>ルール</span></button>
+      <button data-tab="sset" role="tab" aria-selected="false"><span class="t">設定</span></button>
     </nav>
-    <div id="sinsp" class="pane">
+    <div id="sinsp" class="pane" role="tabpanel">
+      <div class="pane-head">
+        <h2>検品</h2>
+        <p class="lead">Claude が東・西・南・北・平面・印刷の6つの面を同時に見比べ、食い違いを根拠つきで挙げます。直す案は「承認」すると修正として記録され、模型が組み直されます。</p>
+      </div>
       <div class="inspect-actions">
         <button id="inspect-ai" class="primary">Claude に検品してもらう</button>
         <button id="inspect-api">API キーで検品する</button>
-        <button id="inspect-off">コードの検査だけ（AI なし）</button>
+        <button id="inspect-off" class="quiet">コードの検査だけ（AI なし）</button>
       </div>
-      <p class="hint">Claude が東・西・南・北・平面・印刷の6つの面を同時に見比べ、食い違いを根拠つきで挙げます。直す案は「承認」すると修正として記録され、模型が組み直されます。</p>
       <div id="inspect-progress" class="progress"></div>
       <p id="inspect-summary" class="hint"></p>
       <h3>Claude の指摘</h3>
@@ -93,8 +113,11 @@
       <h3>コードの検査の結果</h3>
       <ul id="code-findings" class="list"></ul>
     </div>
-    <div id="sedit" class="pane on">
-      <p class="hint">値を変えて理由を書き、「承認」を押すと修正として記録され、模型が組み直されます。数値は mm（実寸）です。</p>
+    <div id="sedit" class="pane on" role="tabpanel">
+      <div class="pane-head">
+        <h2>表で直す</h2>
+        <p class="lead">値を変えて理由を書き、「承認」を押すと修正として記録され、模型が組み直されます。数値は mm（実寸）です。</p>
+      </div>
       <h3>階</h3>
       <p class="hint">床の高さや階高を変えると、その階より上のもの（壁・窓・部屋・屋根）が同じだけ上下します。基礎はそのままです。</p>
       <table id="levels"></table>
@@ -109,13 +132,39 @@
       <h3>軒の出（mm）</h3>
       <table id="roof-eaves"></table>
     </div>
-    <div id="shist" class="pane"><ul id="history" class="list"></ul></div>
-    <div id="schk" class="pane"><ul id="checks" class="list"></ul></div>
-    <div id="sout" class="pane">
-      <p class="hint">「Bambu Studio 形式」の 3MF を開くと、外壁の部品にだけファジースキン（外側の輪郭）が設定されています。ファジースキンは形には出ません。スライスしてプレビューで外壁を拡大すると、線が細かく波打って見えます。<br>ふつうの形式の 3MF は形だけ読まれるので、外壁の部品（1階の外壁・屋根の外壁）を選び、「その他」→「ファジースキン」→「外側の輪郭」にしてください。2つ目以降のパーツはプレートの外に置いてあります。プレートを足して「並べる」で配置してください。</p>
-      <ul id="downloads" class="list"></ul>
+    <div id="shist" class="pane" role="tabpanel">
+      <div class="pane-head">
+        <h2>修正の履歴</h2>
+        <p class="lead">表で直した値と、承認した直す案の記録です。新しいものが上です。「取り消す」を押すと、その修正をやめて模型を組み直します。</p>
+      </div>
+      <ul id="history" class="list"></ul>
     </div>
-    <div id="sset" class="pane">
+    <div id="schk" class="pane" role="tabpanel">
+      <div class="pane-head">
+        <h2>検査</h2>
+        <p class="lead">コードが模型を調べた結果です。会社ルールや図面と比べた結果と、部品ごとの形・大きさを並べます。黄と赤の印が付いた行は、確かめる所です。</p>
+      </div>
+      <ul id="checks" class="list"></ul>
+    </div>
+    <div id="sout" class="pane" role="tabpanel">
+      <div class="pane-head">
+        <h2>書き出し</h2>
+        <p class="lead">3D プリンターに送るファイルです。ふつうは、いちばん上の 3MF（Bambu Studio 形式）を保存して開きます。</p>
+      </div>
+      <ul id="downloads" class="list"></ul>
+      <h3>Bambu Studio で開くとき</h3>
+      <p class="hint">「Bambu Studio 形式」の 3MF を開くと、外壁の部品にだけファジースキン（外側の輪郭）が設定されています。ファジースキンは形には出ません。スライスしてプレビューで外壁を拡大すると、線が細かく波打って見えます。<br>ふつうの形式の 3MF は形だけ読まれるので、外壁の部品（1階の外壁・屋根の外壁）を選び、「その他」→「ファジースキン」→「外側の輪郭」にしてください。2つ目以降のパーツはプレートの外に置いてあります。プレートを足して「並べる」で配置してください。</p>
+    </div>
+    <div id="sset" class="pane" role="tabpanel">
+      <div class="pane-head">
+        <h2>設定</h2>
+        <p class="lead">ここで変えた設定は、この PC の HAKOYA 全体に効きます（物件ごとではありません）。</p>
+      </div>
+      <section class="set-block" id="set-view">
+      <h3>見え方</h3>
+      <p class="hint">上の帯の右で切り替えます。見本確認用＝審査・動画用（見本の家だけ・手順の帯）。自社利用用＝全部の機能。他社利用用＝ほかの会社で使う形（AI は API キーと AI なしだけ）。</p>
+      </section>
+      <section class="set-block" id="set-registry" data-hide-in="sample">
       <h3>物件の登録</h3>
       <p class="hint">Walk in home の glb（と図面のフォルダ）を選び、仮名を付けて登録します。元のファイルは読むだけで、書き換えもコピーもしません。ファイル名や場所（施主名が入ることがあります）は画面に出しません。<br>ふだんは glb だけで組み立て・検査・検品します。「高性能読み込み」を入にした物件だけ、図面とも突き合わせます（窓の注記の照合・平面図に図面を重ねる・図面を見せた検品）。スキャンした PDF は読めません。</p>
       <table id="registry-list" class="registry"></table>
@@ -130,23 +179,34 @@
         <label>出してはいけない言葉（施主名・住所など。1行に1つ。姓だけ・名前だけも1行ずつ。数字だけ（番地だけ）は入れない）<textarea id="reg-ng" rows="2" spellcheck="false"></textarea></label>
         <div><button id="reg-submit" class="primary">登録する</button> <span id="reg-msg"></span></div>
       </div>
+      </section>
+      <section class="set-block" id="set-company">
       <h3>会社ルール</h3>
+      <p class="hint other-only" id="company-callout">あなたの会社の決まりを選んでください。まだ選んでいないときは、B工務店（架空）の決まりで組み立てます。</p>
       <select id="company"></select>
       <p class="hint">「読み込んで組み立てる」で使う会社の決まり（壁の厚み・屋根板の出・外壁の仕上げ・標準の高さ・検品の考え方）。切り替えたあと、物件を選んで「読み込んで組み立てる」を押すと、その会社の決まりで作り直します。B工務店は、会社ごとに切り替えられることを見せるための架空の会社です。</p>
+      </section>
+      <section class="set-block" id="set-auto" data-hide-in="sample">
       <h3>組み立てたあとの検品</h3>
       <select id="auto-inspect"></select>
       <p class="hint">「読み込んで組み立てる」のあと、自動で検品を始めます。Claude（自分のプラン）はプランの利用枠を、Claude（API キー）はキーの持ち主の料金を使います。</p>
+      </section>
+      <section class="set-block" id="set-apikey">
       <h3>API キー（「API キーで検品する」に使う）</h3>
       <p id="apikey-state" class="hint"></p>
       <div class="apikey">
         <input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="API キーを貼り付ける">
         <button id="apikey-save" class="primary">保存</button>
-        <button id="apikey-del">消す</button>
+        <button id="apikey-del" class="quiet">消す</button>
       </div>
       <p class="hint">キーは Windows の資格情報マネージャーに保存します。画面・ファイル・記録には出しません。<br>API キーで検品すると、キーの持ち主に Claude の API の料金がかかります。1回の上限は rules/ai_models.yaml の max_budget_usd（いまは $3.00）で、超えそうになると止まります。</p>
+      </section>
     </div>
-    <div id="srules" class="pane">
-      <p class="hint">家・会社によって変わる値（窓の高さ・屋根の勾配など）は、物件ごとに glb から作ります。物件によらず同じ値（壁厚など）と細かい決まりを「会社ルール」として残し、困ったとき（glb が読めない・いつもと違う・新しい形）の予防に使います。</p>
+    <div id="srules" class="pane" role="tabpanel">
+      <div class="pane-head">
+        <h2>会社ルール</h2>
+        <p class="lead">家・会社によって変わる値（窓の高さ・屋根の勾配など）は、物件ごとに glb から作ります。物件によらず同じ値（壁厚など）と細かい決まりを「会社ルール」として残し、困ったとき（glb が読めない・いつもと違う・新しい形）の予防に使います。</p>
+      </div>
       <h3 id="rules-title">集計（コードが全物件から計算）</h3>
       <table id="rules-stats" class="rules-stats"></table>
       <h3>会社ルールの案</h3>

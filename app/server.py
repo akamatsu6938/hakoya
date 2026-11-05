@@ -128,8 +128,13 @@ def index() -> HTMLResponse:
 
 @app.get("/api/properties")
 def properties():
+    """物件の一覧。見え方が見本確認用のときは、見本の家（仮名が「デモ用」か「見本」で始まる）だけ（★11/5 審査・動画用）。"""
+    from core import settings_store
+    sample_only = settings_store.load()["view"] == "sample"
     out = []
     for a in _aliases():
+        if sample_only and not settings_store.is_sample_alias(a):
+            continue
         f = property_files(a)
         out.append({"alias": a, "has_glb": bool(f.glb and f.glb.exists()), "built": _building_path(a).exists()})
     return _safe_json(out)
@@ -780,7 +785,9 @@ def settings():
                        "connections": settings_store.available_connections(),
                        "max_budget_usd": float(load_ai_models()["limits"]["max_budget_usd"]),
                        "company": st["company"], "companies": settings_store.companies(),
-                       "default_company": default_company()})       # 会社ルールの書いていない模型に使う会社（jisha。なければ B工務店（架空））
+                       "default_company": default_company(),        # 会社ルールの書いていない模型に使う会社（jisha。なければ B工務店（架空））
+                       "company_chosen": st["company_chosen"], "view": st["view"], "views": settings_store.available_views(),
+                       "edition": settings_store.edition()})
 
 
 class CompanyIn(BaseModel):
@@ -796,6 +803,21 @@ def save_company(body: CompanyIn):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _safe_json({"company": st["company"]})
+
+
+class ViewIn(BaseModel):
+    view: str
+
+
+@app.post("/api/settings/view")
+def save_view(body: ViewIn):
+    """画面の見え方（見本確認用・自社利用用・他社利用用）を保存する。社外用の版では自社利用用は選べない（400）。"""
+    from core import settings_store
+    try:
+        st = settings_store.set_view(body.view)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _safe_json({"view": st["view"], "company": st["company"], "connections": settings_store.available_connections()})
 
 
 class AutoInspectIn(BaseModel):

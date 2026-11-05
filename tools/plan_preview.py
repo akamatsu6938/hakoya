@@ -255,8 +255,9 @@ def _split_svg(split: dict, P, x0: float, x1: float, y0: float, y1: float) -> li
     sides = split.get("sides") or []
     src = "平面図で決めた分け目" if split.get("source") == "human" else "自動の分け目"
     ranges = _json.dumps(split.get("ranges") or [])
+    names_attr = html.escape(_json.dumps([str(x) for x in sides], ensure_ascii=False))   # 部品の呼び名（画面がドラッグ中の札に使う）
     out = [f'<g id="split" data-ux="{ux:.6f}" data-uy="{uy:.6f}" data-lo="{lo:.1f}" data-hi="{hi:.1f}" '
-           f'data-source="{split.get("source", "auto")}" data-ranges=\'{ranges}\'>']
+           f'data-source="{split.get("source", "auto")}" data-ranges=\'{ranges}\' data-sides="{names_attr}">']
     edges = [lo] + [float(t) for t in split["cuts"]] + [hi]
     for i, t in enumerate(split["cuts"]):
         (ax, ay), (bx, by) = ends(float(t))
