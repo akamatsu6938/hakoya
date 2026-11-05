@@ -753,7 +753,7 @@ function requestText(f) {   // 指摘の見出しと本文から作る頼み文�
 }
 // 頼む：修正担当の window.createFixRequest（修正タブの「頼んだこと」に出し、終わったら知らせる）。まだない版では知らせるだけ。
 // 返り値は待たない（Claude の答えまで 30秒〜数分かかる）。頼めたら true
-function sendFixRequest(req) {
+function askFixFromInspect(req) {   // ★11/6：② の sendFixRequest と同じ名前だったので変えた
   if (typeof window.createFixRequest !== 'function') { toast(NO_REQUEST, { kind: 'info' }); return false; }
   let pending;
   try { pending = window.createFixRequest(req); } catch (e) { toast('頼めませんでした：' + e.message, { kind: 'err' }); return false; }
@@ -764,7 +764,7 @@ async function requestFix(f, b) {   // 直す案のない指摘の承認：こ�
   if (typeof window.createFixRequest !== 'function') { toast(NO_REQUEST, { kind: 'info' }); return; }
   if (!(await confirmFixCost('この指摘のとおりに直す案を'))) return;
   const card = b?.closest('.finding'); lockCard(card, b, '頼んでいます…');
-  if (!sendFixRequest({ text: requestText(f), ids: (f.targets || []).map(String), findingId: f.id })) { unlockCard(card); return; }
+  if (!askFixFromInspect({ text: requestText(f), ids: (f.targets || []).map(String), findingId: f.id })) { unlockCard(card); return; }
   try {
     await quietly(() => keepPlace(cardSel(f.id), async () => {
       await call('POST', `/api/findings/{a}/${encodeURIComponent(f.id)}`, { action: 'request' }); await renderFindings();
@@ -939,7 +939,7 @@ async function requestFromAnswer(q, answer, f, b) {   // 答えのとおりに�
   const text = [`検品の Claude の質問 ${q.id}「${q.question}」に、人が「${answer}」と答えました。この答えのとおりに直す案を作ってください。`,
     opts ? `選択肢：${opts}` : '', q.evidence ? `質問の根拠：${q.evidence}` : '',
     f ? `もとの指摘 ${f.id}「${headline(f)}」：${f.message || ''}` : ''].filter(Boolean).join('\n');
-  if (sendFixRequest({ text, ids: f ? (f.targets || []).map(String) : [], findingId: f ? f.id : null }) && b) {
+  if (askFixFromInspect({ text, ids: f ? (f.targets || []).map(String) : [], findingId: f ? f.id : null }) && b) {
     b.disabled = true; b.textContent = '頼みました（修正タブの「頼んだこと」）';
   }
 }
@@ -1756,11 +1756,11 @@ function showRequest(rid, switchTab = true) {   // その依頼のカードを�
 }
 
 // 頼む（囲んで直す・文字で直す・検品の指摘から）。今の接続とモデルを使う。返すのは依頼（やめたら null）
-async function sendFixRequest(body, { toastText = '' } = {}) {
+async function sendFixRequest(body, { toastText = '', confirmed = false } = {}) {
   const alias = state.alias;
   if (!alias || !state.built) { const m = '物件を開いて組み立ててから頼んでください'; setStatus(m, 'err'); throw new Error(m); }
   const connection = body.connection || $('#lasso-conn').value;
-  if (connection === 'api_key' && !confirm(COST_CONFIRM)) return null;
+  if (connection === 'api_key' && !confirmed && !confirm(COST_CONFIRM)) return null;   // 検品から頼むときは、検品の側で確かめ済み
   let req;
   try { req = await call('POST', fixUrl(alias), { ...body, connection, model: body.model || fixModel() }); }
   catch (e) { setStatus('頼めませんでした：' + e.message, 'err'); toast('頼めませんでした：' + e.message, { kind: 'err' }); throw e; }
@@ -1776,7 +1776,7 @@ async function sendFixRequest(body, { toastText = '' } = {}) {
 window.createFixRequest = async ({ text, ids = [], groups = null, findingId = null, kind = 'text' } = {}) => {
   const body = { kind, text: String(text || ''), ids: (ids || []).map(String), finding_id: findingId };
   if (groups) body.groups = groups;
-  return sendFixRequest(body, { toastText: '直す案を Claude に頼みました（修正タブ）' });
+  return sendFixRequest(body, { toastText: '直す案を Claude に頼みました（修正タブ）', confirmed: true });   // 費用は検品の側で確かめた
 };
 
 function renderFixRequests() {                 // カードは依頼ごとに作り、中身が変わったものだけ作り直す（書きかけの答えを消さない）
@@ -1957,7 +1957,7 @@ function questionEl(req, q) {                  // 質問：選択肢に番号（
   const opts = document.createElement('div'); opts.className = 'opts';
   (q.options || []).forEach((opt, k) => {
     const b = document.createElement('button'); b.textContent = `${k + 1}. ${opt}`; b.disabled = sending;
-    b.addEventListener('click', () => answerQuestion(req, q, `${k + 1}. ${opt}`));
+    b.addEventListener('click', () => answerFixQuestion(req, q, `${k + 1}. ${opt}`));
     opts.appendChild(b);
   });
   div.appendChild(opts);
@@ -1965,13 +1965,13 @@ function questionEl(req, q) {                  // 質問：選択肢に番号（
   const ans = document.createElement('div'); ans.className = 'answer';
   const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = '答えを書く（番号でも。例：2／図面の軒の出は 450）'; inp.disabled = sending;
   const send = document.createElement('button'); send.textContent = sending ? '送っています…' : '答える'; send.disabled = sending;
-  send.addEventListener('click', () => answerQuestion(req, q, inp.value));
-  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) answerQuestion(req, q, inp.value); });
+  send.addEventListener('click', () => answerFixQuestion(req, q, inp.value));
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) answerFixQuestion(req, q, inp.value); });
   ans.append(inp, send); div.appendChild(ans);
   return div;
 }
 
-async function answerQuestion(req, q, answer) {
+async function answerFixQuestion(req, q, answer) {   // ★11/6：検品の answerQuestion と同じ名前だったので変えた
   const text = String(answer || '').trim();
   if (!text) { setStatus('答えを書くか、選択肢を押してください', 'err'); return; }
   const alias = fixState.alias; const key = `${req.id}:${q.id}`;
