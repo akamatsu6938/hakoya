@@ -81,6 +81,8 @@ def data_dir(tmp_path, monkeypatch):
     from core import paths
     monkeypatch.setattr(paths, "DATA_DIR", tmp_path)
     monkeypatch.delenv("HAKOYA_EDITION", raising=False)
+    # プランの接続を試すので自社利用用で始める（自社の会社ルールがない公開の版は、既定が他社利用用でプランの接続を出さない）
+    (tmp_path / "settings.json").write_text('{"view": "own"}', encoding="utf-8")
     return tmp_path
 
 
@@ -96,6 +98,7 @@ def test_auto_inspect_store(data_dir, monkeypatch):
         ss.set_auto_inspect("anything")
     (data_dir / "settings.json").write_text("{壊れた", encoding="utf-8")
     assert ss.load()["auto_inspect"] == "off"                                  # 壊れていたら既定
+    ss.set_view("own")
     ss.set_auto_inspect("claude_code")
     monkeypatch.setenv("HAKOYA_EDITION", "external")                           # 社外用：プランの接続は出さない
     assert "claude_code" not in ss.available_connections() and ss.load()["auto_inspect"] == "off"

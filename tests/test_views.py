@@ -43,7 +43,7 @@ def test_view_is_saved_and_unknown_is_refused(data_dir):
     with pytest.raises(ValueError, match="見え方"):
         ss.set_view("everything")
     (data_dir / "settings.json").write_text('{"view": "nai"}', encoding="utf-8")
-    assert ss.load()["view"] == "own"                                         # 知らない値なら既定に戻す
+    assert ss.load()["view"] == ss.default_view()                             # 知らない値なら既定に戻す
 
 
 @needs_jisha
@@ -104,7 +104,7 @@ def test_sample_aliases():
 
 def test_view_endpoints(client):
     st = client.get("/api/settings").json()
-    assert st["view"] == "own" and st["views"] == ["sample", "own", "other"]
+    assert st["view"] == ss.default_view() and st["views"] == ["sample", "own", "other"]
     assert client.post("/api/settings/view", json={"view": "other"}).json()["view"] == "other"
     st = client.get("/api/settings").json()
     assert st["view"] == "other" and "claude_code" not in st["connections"] and st["company"] == "bkoumuten"
