@@ -59,7 +59,8 @@ def test_very_short_wall():
 
 
 @pytest.mark.realdata
-@pytest.mark.parametrize("alias,expected", [("物件A", [["W8", "W13"]]), ("物件B", [["W13", "W14"]])])
+# ★11/6：物件B の W13（外壁）と W14（単独の壁）の重なりは、家の角で外壁を止める直し（adapters/walls.py stop_at_house_corner）で消えた（14件の検査でも確かめた）
+@pytest.mark.parametrize("alias,expected", [("物件A", [["W8", "W13"]]), ("物件B", [])])
 def test_real_known_overlaps_only(alias, expected):
     """物件A・B（11/3 に下調べ）：見つかるのは知っている壁の重なりだけ（引き込み戸 O17 などは拾わない）。"""
     from core import overrides as ov
