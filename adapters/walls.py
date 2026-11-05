@@ -899,6 +899,138 @@ def envelope_standalone(walls: list[Wall], inside: Polygon, thickness: float, ga
     return changed
 
 
+OUTSIDE_UNCOVERED_MM = 20.0   # 家の外へ伸びた外壁のうち、単独の壁で覆われていなくてよい長さ（これより長く残るなら止めない）
+
+
+def stop_at_house_corner(walls: list[Wall], house: Polygon, openings: list[dict] | None = None,
+                         uncovered_mm: float = OUTSIDE_UNCOVERED_MM) -> int:
+    """外壁が家の角（基礎の外形の辺）を越えて家の外へ伸び、その外の所が同じ線の上の単独の壁（袖壁）でほぼ覆われているときは、
+    外壁を家の角で止める。止めた端の数を返す。
+    ★11/5 デモ用（作者「袖壁全体で 180 の厚みが欲しい」）：南北の外壁（162）が家の角を越えて袖壁の先まで伸び、袖壁（180）と
+    同じ所に壁が2枚あった（glb では袖壁の外の面が外壁の部材に入っている）。外壁の延びた所は袖壁より 18mm 薄く、天井より上は
+    屋根の部品に入ったため、袖壁の一部が屋根に付き、外側ほど細く見えた。
+    - 覆う単独の壁：平行・同じ線の上（中心線の差が外壁の厚みの半分以内）で、下端が外壁の下端とほぼ同じもの。
+    - 覆う単独の壁が外壁より低いとき（屋根裏に隠れる面が glb になく、上端が天井までのもの）は、外壁の代わりに屋根まで（to_roof）にする
+      （外壁は屋根まで作っていたので、見える形は厚みのほかは変わらない）。
+    - 止める所に開口があるとき・覆われていない所が uncovered_mm より長く残るときは、止めない（無理に消さない）。
+    - openings（開口。壁の始点からの位置 offset_mm を持つ）を渡すと、始点を動かした壁の開口の位置を直す。"""
+    n_fixed = 0
+    std = [w for w in walls if w.kind == "standalone" and w.length > 0]
+    if not std or house.is_empty:
+        return 0
+    for w in walls:
+        if w.kind != "exterior" or w.length <= 0:
+            continue
+        d, L = w.direction, w.length
+        nrm = np.array([-d[1], d[0]])
+        inside = LineString([w.start, w.end]).intersection(house)          # 中心線のうち家の中の所（端が家の角）
+        segs = [g for g in getattr(inside, "geoms", [inside]) if g.geom_type == "LineString" and g.length > 1.0]
+        if len(segs) != 1:
+            continue                                   # 家の中を通らない・何度も出入りする壁は触らない
+        ts = sorted(float(np.dot(np.array(c) - w.start, d)) for c in segs[0].coords)
+        t_in0, t_in1 = max(ts[0], 0.0), min(ts[-1], L)
+        cover = [s for s in std if abs(float(np.dot(s.direction, d))) > 0.999
+                 and abs(float(np.dot(s.start - w.start, nrm))) <= w.thickness / 2 and s.bottom <= w.bottom + 50.0]
+        cut0, cut1, used = 0.0, L, []
+        for a, b, side in ((0.0, t_in0, "start"), (t_in1, L, "end")):
+            if b - a <= 1.0 or not cover:
+                continue
+            spans = []
+            for s in cover:
+                s0, s1 = sorted((float(np.dot(s.start - w.start, d)), float(np.dot(s.end - w.start, d))))
+                if min(s1, b) > max(s0, a):
+                    spans.append((max(s0, a), min(s1, b), s))
+            if (b - a) - _union_length([(lo, hi) for lo, hi, _ in spans]) > uncovered_mm:
+                continue                               # 覆われていない外の所が残る
+            if openings and any(o["wall"] is w and o["offset_mm"] < b and o["offset_mm"] + o["width_mm"] > a for o in openings):
+                continue                               # 止める所に開口がある
+            if side == "start":
+                cut0 = t_in0
+            else:
+                cut1 = t_in1
+            used += [s for _, _, s in spans]
+            w.assumptions.append(f"outside_trim: 家の外で単独の壁（袖壁）と重なる所（{b - a:.0f}mm）を、家の角（基礎の外形の辺）で止めた"
+                                 "（glb では袖壁の外の面が外壁の部材に入っていた）")
+            n_fixed += 1
+        if cut0 > 0.0 or cut1 < L:
+            start = w.start + d * cut0
+            w.end = w.start + d * cut1
+            w.start = start
+            if openings and cut0 > 0.0:
+                for o in openings:
+                    if o["wall"] is w:
+                        o["offset_mm"] -= cut0
+        for s in dict.fromkeys(used):
+            if w.top is None and s.top is not None:
+                s.assumptions.append(f"outside_trim: 家の外で外壁と重なっていた所を受け持つので、外壁と同じく屋根まで（to_roof）にした"
+                                     f"（glb の単独の壁の上端は {s.top:.0f}）")
+                s.top = None
+    return n_fixed
+
+
+STANDALONE_SIDE_GAP_MM = 150.0   # 単独の壁の両側の、家の中かどうかを調べる点までの距離（面から）
+
+
+def _sides_inside(w: Wall, inside: Polygon, gap: float = STANDALONE_SIDE_GAP_MM, samples: int = 8) -> tuple[int, int, int]:
+    """壁の左右（左＝始点から終点を見て左）の、家の中にある点の数と、調べた点の数。"""
+    d = w.direction
+    n = np.array([-d[1], d[0]])
+    off = w.thickness / 2 + gap
+    pts = [w.start + (w.end - w.start) * t for t in np.linspace(0.15, 0.85, samples)]
+    left = sum(inside.contains(Point(*(p + n * off))) for p in pts)
+    right = sum(inside.contains(Point(*(p - n * off))) for p in pts)
+    return left, right, samples
+
+
+def _on_outline_line(p: np.ndarray, d: np.ndarray, house: Polygon, tol: float = 2.0) -> bool:
+    """点 p を通る向き d の線が、家の外形の辺（の延長）と同じ線か。"""
+    big = max(getattr(house, "geoms", [house]), key=lambda g: g.area)
+    pts = np.array(big.exterior.coords)
+    for a, b in zip(pts[:-1], pts[1:]):
+        e = b - a
+        le = float(np.linalg.norm(e))
+        if le < 1.0 or abs(float(d[0] * e[1] - d[1] * e[0])) / le > 0.001:
+            continue                                   # 平行でない辺
+        if abs(float((p - a)[0] * e[1] - (p - a)[1] * e[0])) / le <= tol:
+            return True
+    return False
+
+
+def outdoor_standalone(walls: list[Wall], inside: Polygon, thickness: float, house: Polygon | None = None) -> list[Wall]:
+    """両側とも家の外の単独の壁（袖壁・ポーチの壁・その上の梁など）を、会社ルールの単独の壁の厚み（walls.standalone_thickness_mm）にする。
+    ★11/5 作者：単独の壁は、室内に比べて両側に通気層などがあるので、外壁より厚い（自社 180。glb の値と同じ）。
+    厚みを変えるときは、家の外形の辺の延長の上にある面（家の外の面に続く袖壁の面）を動かさない。なければ、家から遠い方の面を
+    動かさない（袖壁の先をつなぐ梁の外の面が、袖壁の先とそろうように）。どちらとも決まらなければ中心線のまま。"""
+    changed = []
+    for w in walls:
+        if w.kind != "standalone" or w.length <= 0:
+            continue
+        left, right, _ = _sides_inside(w, inside)
+        if left or right:
+            continue                                   # 片側でも家の中（外壁の一部・家の中の壁）は別の決まり
+        w._thickness_rule = "walls.standalone_thickness_mm"   # type: ignore[attr-defined]
+        old = w.thickness
+        if abs(old - thickness) < 0.5:
+            continue
+        d = w.direction
+        n = np.array([-d[1], d[0]])
+        mid = (w.start + w.end) / 2
+        shift = np.zeros(2)
+        if house is not None and not house.is_empty:
+            on = [_on_outline_line(mid + n * sgn * old / 2, d, house) for sgn in (1, -1)]
+            if on[0] != on[1]:
+                keep = 1 if on[0] else -1              # 家の外形の辺の延長の上にある面を動かさない
+            else:
+                far = [LineString([w.start + n * sgn * old / 2, w.end + n * sgn * old / 2]).distance(house) for sgn in (1, -1)]
+                keep = 0 if abs(far[0] - far[1]) < 1.0 else (1 if far[0] > far[1] else -1)
+            shift = -n * keep * (thickness - old) / 2
+        w.start, w.end, w.thickness = w.start + shift, w.end + shift, thickness
+        w.assumptions.append(f"standalone_rule: 両側とも家の外の単独の壁なので、会社ルール walls.standalone_thickness_mm の厚み "
+                             f"{thickness:g}mm にした（glb は {old:g}mm）")
+        changed.append(w)
+    return changed
+
+
 def footprint(walls: list[Wall]) -> Polygon:
     return unary_union([w.rect() for w in walls])
 

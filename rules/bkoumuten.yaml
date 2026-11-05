@@ -6,6 +6,7 @@ name_ja: B工務店（架空）
 walls:
   exterior_thickness_mm: 190       # 外張り断熱＋通気層＋サイディングで厚い（架空）。模型で 3.8mm
   interior_thickness_mm: 150       # 4寸柱（120）＋石膏ボード 12.5×2（架空）。模型で 3.0mm
+  standalone_thickness_mm: 208     # 両側が外になる単独の壁（袖壁など）。両側に通気層などがあるので外壁より厚い（架空。外壁 190 に合わせた値）
 levels:
   gl_to_foundation_top_mm: 450     # 基礎の高さ（架空）
   gl_to_1fl_mm: 600                # 1階の床の高さ（架空）

@@ -5,9 +5,9 @@
 
 パーツ（平屋）：
 - foundation  基礎：外周の帯＋内壁の下の帯（中は空ける）、ポーチ・段、玄関の土間、袖壁などの下の基礎
-- floor1      1階：床の板＋内壁（外壁と重なる所は除く）
+- floor1      1階：床の板＋内壁（外壁と重なる所は除く）＋家の外の単独の壁（袖壁）とその上をつなぐ梁（天井で分けない。★11/5 作者）
 - exterior1   1階の外壁（ファジースキンを効かせるため別の部品。1階と同じオブジェクトに入れる）
-- roof        屋根：屋根板＋ずれ止めの三角＋ポーチの上の垂れ壁・屋根まで届く袖壁（★仮の決め：作者に確認）
+- roof        屋根：屋根板＋ずれ止めの三角＋ポーチの上の垂れ壁＋天井より上の外壁
 - soffit      ポーチの天井：平らな板
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from manifold3d import CrossSection, FillRule, Manifold, OpType
 from shapely.affinity import translate
-from shapely.geometry import LineString, Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import nearest_points, unary_union
 
 from core.lintel import LINTEL_MARGIN_MM, band_of, seam_runs
@@ -26,6 +26,8 @@ from core.roof_geom import MultiPlane, surfaces as roof_surfaces
 from core.print_split import roof_print_faces
 
 UPPER_WALL_ABOVE_FL = 1500.0   # 下端がこれより上の壁は「途中から始まる壁」（ポーチの上の垂れ壁など）
+REACH_ROOF_MM = 50.0           # 上端が屋根の下の面からこれ以内の壁は「屋根まで届く」
+SLEEVE_TOUCH_MM = 5.0          # 梁の端が袖壁にこれ以内なら「袖壁に接する」（袖壁の上をつなぐ梁）
 DOMA_UNDER_WALL_MM = 100.0     # 土間を壁の下まで広げる幅（実寸）
 GAP_FILL_MM = 40.0             # ポーチの天井の板で埋める細いすき間の幅（実寸）
 LOWERED_JOIN_MM = 60.0         # 下がり天井の板に足す壁を探す範囲（天井の形からの距離、実寸）
@@ -126,6 +128,37 @@ def wall_rect(w: dict, extra: float = 0.0, t0: float | None = None, t1: float | 
 
 def _wall_top(w: dict) -> float | None:
     return None if w["height"] == "to_roof" else float(w["height"])
+
+
+def outside_house(w: dict, outline: Polygon) -> bool:
+    """壁の長方形の半分以上が、家の外形（基礎の外形）の外にあるか。"""
+    r = wall_rect(w)
+    return r.area > 0 and r.intersection(outline).area / r.area < 0.5
+
+
+def sleeve_walls(walls: list[dict], outline: Polygon, fl: float) -> tuple[list[dict], list[dict]]:
+    """家の外の単独の壁（袖壁。床から立つもの）と、その上をつなぐ梁（両端が袖壁に接する、途中から始まる単独の壁）。
+    ★11/5 作者「袖壁は屋根ではなく家に付くように」「袖壁全体で 180 の厚み」：どちらも天井で分けず、まるごと1階の部品に入れる
+    （前は屋根まで届く袖壁を屋根の部品に入れていて、袖壁の一部が屋根に付いて見えた。梁は屋根から 4mm 離れて浮いていた）。
+    ポーチの垂れ壁など、ほかの途中から始まる壁は今までどおり屋根の部品。"""
+    sleeves = [w for w in walls if w["kind"] == "standalone" and float(w["bottom_mm"]) < fl + UPPER_WALL_ABOVE_FL
+               and outside_house(w, outline)]
+    rects = [wall_rect(w) for w in sleeves]
+    beams = [w for w in walls if rects and w["kind"] == "standalone" and float(w["bottom_mm"]) >= fl + UPPER_WALL_ABOVE_FL
+             and outside_house(w, outline)
+             and all(min(r.distance(Point(float(p[0]), float(p[1]))) for r in rects) <= SLEEVE_TOUCH_MM for p in (w["start"], w["end"]))]
+    return sleeves, beams
+
+
+def sleeve_skin_zone(ws: list[dict], band: float, margin: float, ops_by: dict, house: Polygon, z0: float, z1: float) -> Manifold:
+    """袖壁・梁の、外に見える面の薄い層（幅 band。ざらざらにする所）の範囲の立体（z0〜z1）。窓・ドアのまわり（margin）と家の中は外す。
+    この範囲と1階の部品の重なりを、ざらざらの部品へ移す（外壁の外の面の層と同じ考え）。"""
+    ring = unary_union([r.difference(r.buffer(-band, join_style="mitre")) for r in (wall_rect(w) for w in ws)])
+    skin = prism(ring.difference(house), z0, z1)
+    keep = [prism(wall_rect(w, extra=40, t0=o["offset_mm"] - margin, t1=o["offset_mm"] + o["width_mm"] + margin),
+                  float(o["sill_mm"]) - margin, float(o["head_mm"]) + margin)
+            for w in ws for o in ops_by.get(w["id"], [])]
+    return skin - union_all(keep) if keep else skin
 
 
 def openings_by_wall_of(walls: list[dict], openings: list[dict]) -> dict[str, list[dict]]:
@@ -435,20 +468,21 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     def is_upper(w):
         return w["bottom_mm"] >= fl + UPPER_WALL_ABOVE_FL
 
-    def outside_house(w):
-        r = wall_rect(w)
-        return r.intersection(outline).area / r.area < 0.5
-
     def reaches_roof(w):
         top = _wall_top(w)
         if top is None:
             return True
         mid = (np.array(w["start"]) + np.array(w["end"])) / 2
-        return top >= plane_z(rb, *mid) - 50
+        return top >= plane_z(rb, *mid) - REACH_ROOF_MM
 
+    # 家の外の単独の壁（袖壁）と、その上をつなぐ梁は、天井で分けず、まるごと1階の部品へ（★11/5 作者。sleeve_walls）
+    sleeves, beams = sleeve_walls(walls, outline, fl)
+    on_floor1 = {id(w) for w in sleeves + beams}
     ext_walls, int_walls, roof_walls, std_in = [], [], [], []
     for w in walls:
-        if w["kind"] in ("exterior", "standalone") and (is_upper(w) or (outside_house(w) and reaches_roof(w))):
+        if id(w) in on_floor1:
+            continue
+        if w["kind"] in ("exterior", "standalone") and (is_upper(w) or (outside_house(w, outline) and reaches_roof(w))):
             roof_walls.append(w)
         elif w["kind"] == "exterior":
             ext_walls.append(w)
@@ -477,6 +511,15 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
                 head = roof_zmax
             cuts.append(prism(wall_rect(w, extra=40, t0=o["offset_mm"], t1=o["offset_mm"] + o["width_mm"]), sill, head))
         return s - union_all(cuts) if cuts else s
+
+    def sleeve_top(w: dict) -> float:
+        """袖壁・梁の上の端の高さ（立体を作る高さ）：屋根まで届くものは屋根の下の面で切るので、屋根の上まで。"""
+        return roof_zmax if reaches_roof(w) else float(_wall_top(w))
+
+    def sleeve_solid(w: dict) -> Manifold:
+        """袖壁・梁（1階の部品）：屋根まで届くもの（上端が屋根の下の面から REACH_ROOF_MM 以内）は、上端を屋根の下の面に合わせる。
+        届かないもの（ポーチの天井の高さで止まる袖壁など）は自分の上端まで。開口は抜く。"""
+        return wall_solid({**w, "height": "to_roof"} if reaches_roof(w) else w)
 
     def window_frames(w: dict) -> list[Manifold]:
         """窓の簡略化した枠（SPEC §8）：太さは最小の太さ、奥行きは壁の厚みの半分（壁の真ん中）。
@@ -626,15 +669,23 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         lo, up = split_wall(w)
         std_lo.append(lo)
         std_up.append(up)
-    floor1 = union_all([prism(floor_poly, ftop, fl)] + [lower_part(wall_solid(w)) for w in int_walls] + std_lo)
+    floor1 = union_all([prism(floor_poly, ftop, fl)] + [lower_part(wall_solid(w)) for w in int_walls] + std_lo
+                       + [sleeve_solid(w) for w in sleeves + beams])
     raised, raised_ids = raised_floors(b.get("rooms", []), fl, walls_fp)
     if raised:
         floor1 = union_all([floor1] + raised)
         notes["floor1"].append("小上がり（床が FL より高い部屋）" + "・".join(raised_ids) + " は、床の上に台を作った（畳の部屋など）")
     floor1 = floor1 - exterior
+    if sleeves:
+        notes["floor1"].append("家の外の単独の壁（袖壁）" + "・".join(w["id"] for w in sleeves) + " は、天井で分けず、まるごと1階の部品に入れた"
+                               "（屋根まで届くものは、上端を屋根の下の面に合わせた）")
+    if beams:
+        notes["floor1"].append("袖壁の上をつなぐ梁 " + "・".join(w["id"] for w in beams) + " も1階の部品に入れた。梁の下には何もないので、"
+                               "Bambu Studio でサポート材（ツリー）を付けて印刷する")
     # 窓の枠は「床・内壁」の部品に入れる（外壁の部品に入れると、ファジースキンで枠までざらざらになるため）
     # 窓の枠は会社ルールで切り替え（★自社は作らない：1/50 では枠が柱と紛らわしく、3連窓で線が増えるため）
     frames = ([lower_part(f) for w in ext_walls + int_walls + std_in for f in window_frames(w)]
+              + [f for w in sleeves for f in window_frames(w)]
               if m.get("window_frames", True) else [])
     if frames:
         floor1 = union_all([floor1] + frames)
@@ -656,7 +707,7 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     pieces += [prism(d.buffer(DOMA_UNDER_WALL_MM, join_style="mitre").intersection(outline), 0.0, float(r["floor_mm"]))
                for d, r in zip(doma, [r for r in b.get("rooms", []) if r["floor_mm"] < fl - 50])]
     for w in walls:  # 基礎の外に立つ壁（袖壁など）の下も基礎にする
-        if w["kind"] in ("standalone", "exterior") and not is_upper(w) and outside_house(w):
+        if w["kind"] in ("standalone", "exterior") and not is_upper(w) and outside_house(w, outline):
             pieces.append(prism(wall_rect(w), 0.0, float(w["bottom_mm"])))
     foundation = union_all(pieces)
     low_floors = unary_union(doma_holes) if doma_holes else Polygon()
@@ -708,9 +759,18 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
         floor1 = union_all([floor1, exterior_core])      # 中身はざらざらにしない部品（1階の床・内壁と同じ部品）へ
         exterior = exterior_skin
         notes["floor1"].append(f"ファジースキンは外壁の外の面から {band_mm}mm（模型）の層だけ。窓・ドアのまわり {m.get('fuzzy_skin_opening_margin_mm')}mm は外す")
+        if sleeves or beams:
+            # 袖壁・梁（家の外の単独の壁）も外壁と同じ塗り壁：外に見える面の同じ厚みの層だけざらざらにする（窓・ドアのまわりは外す）。
+            # ★11/5：袖壁を1階の部品に移すと、前は屋根の外壁の部品でざらざらだった袖壁の上までなめらかになり、袖壁が塗られていない色になったため
+            s_skin = sleeve_skin_zone(sleeves + beams, band, margin, openings_by_wall, house, ftop - 1, roof_zmax)
+            sleeve_skin = floor1 ^ s_skin
+            if not sleeve_skin.is_empty():
+                exterior = union_all([exterior, sleeve_skin])
+                floor1 = floor1 - s_skin
+                notes["floor1"].append("家の外の単独の壁（袖壁）・梁も、外に見える面の同じ厚みの層をざらざらにする（外壁と同じ塗り壁）")
 
     # 屋根のオブジェクト：①屋根板（4辺を板金の分だけ出す）＋ポーチの天井＋ずれ止めの三角
-    #                     ②屋根の外壁（天井より上の外壁・ポーチの垂れ壁・屋根まで届く袖壁。ファジースキン）
+    #                     ②屋根の外壁（天井より上の外壁・ポーチの垂れ壁。ファジースキン。袖壁は1階の部品：★11/5）
     overhang = float(m.get("roof_overhang_mm", 0.0)) * scale
     slab_poly = slab_outline(roof)
     slab_poly = slab_poly.buffer(overhang, join_style="mitre") if overhang else slab_poly
@@ -743,7 +803,9 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     roof_ext_parts = ext_up + std_up
     # ★11/4 デモ用：屋根まで届く袖壁（屋根の部品）が、同じ所の外壁（1階の部品）と重なっていた（glb で同じ所に壁が2枚）。
     # 組むとぶつかるので、1階の部品の壁がある所は、はめあいの隙間を付けて屋根の部品から除く（組むと1階の壁が受け持つ）
-    first_fp = unary_union([wall_rect(o) for o in ext_walls + std_in + int_walls]) if (ext_walls or std_in or int_walls) else None
+    # 屋根まで届かない袖壁（前は家の中の単独の壁と一緒に扱っていた）も、今までどおり入れる（物件A のポーチの袖壁など）
+    first_walls = ext_walls + std_in + int_walls + [w for w in sleeves if not reaches_roof(w)]
+    first_fp = unary_union([wall_rect(o) for o in first_walls]) if first_walls else None
     first_top = z_cut if z_cut is not None else roof_zmax
     trimmed = []
     for w in roof_walls:
@@ -759,8 +821,9 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
                     trimmed.append(w["id"])
                 s = cut
         roof_ext_parts.append(s)
-    if roof_walls:
-        notes["roof"].append("ポーチの上の垂れ壁と屋根まで届く袖壁（" + "・".join(w["id"] for w in roof_walls) + "）は屋根と一緒に印刷する")
+    if roof_walls:   # 袖壁（家の外の単独の壁）は1階の部品（★11/5）。ここに来るのは途中から始まる壁と、家の外で屋根まで届く外壁
+        what = "ポーチの上の垂れ壁" + ("・家の外で屋根まで届く外壁" if any(not is_upper(w) for w in roof_walls) else "")
+        notes["roof"].append(f"{what}（" + "・".join(w["id"] for w in roof_walls) + "）は屋根と一緒に印刷する")
     if trimmed:
         notes["roof"].append("屋根の部品の壁（" + "・".join(trimmed) + "）は、1階の部品の壁と重なる所を除いた（glb で同じ所に壁が2枚。"
                              "組むと1階の壁がそこを受け持つ）")
@@ -818,6 +881,14 @@ def build_model(b: dict, rules: dict) -> dict[str, ModelPart]:
     notes["roof"].append(f"ずれ止めの三角を {len(r_corners)} か所（外壁の内側の角" + ("、天井の高さで1階にはまる）" if z_cut else "）"))
     roof_ext = union_all(roof_ext_parts)
     roof_solid = union_all(roof_parts) - roof_ext          # 同じオブジェクトの部品どうしは重ねない
+    if sleeves or beams:
+        # 1階の部品に入れた袖壁・梁のまわりは、屋根の部品（天井より上の外壁・ポーチの天井の板・軒天など）を、はめあいの隙間の分だけ
+        # 空ける（屋根を載せるとき、袖壁の横をすべって下りる）。高さは袖壁の上端（屋根の下の面）までなので、屋根板は削らない
+        room = union_all([keep_below(prism(wall_rect(w).buffer(clearance, join_style="mitre"), float(w["bottom_mm"]) - 1.0,
+                                           sleeve_top(w)), rb) for w in sleeves + beams])
+        if (roof_ext ^ room).volume() + (roof_solid ^ room).volume() > 1.0:
+            roof_ext, roof_solid = roof_ext - room, roof_solid - room
+            notes["roof"].append("1階の部品の袖壁・梁のまわりは、屋根の部品をはめあいの隙間の分だけ空けた（屋根を載せるときにぶつからない）")
     if band_parts:   # 窓の上の帯は1階の部品が受け持つ。屋根の部品からは同じ所をちょうど除く（重ねない・すき間も空けない）
         band_all = union_all(band_parts)
         roof_ext, roof_solid = roof_ext - band_all, roof_solid - band_all

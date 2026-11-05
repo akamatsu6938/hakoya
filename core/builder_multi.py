@@ -22,10 +22,10 @@ from shapely.ops import unary_union
 from core.roof_geom import surfaces as roof_surfaces
 from core.print_split import roof_print_faces
 
-from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
+from core.builder import (DOMA_UNDER_WALL_MM, GAP_FILL_MM, REACH_ROOF_MM, UPPER_WALL_ABOVE_FL, ModelPart, _pick_corners, _wall_top,
                           drop_loose_bits, drop_specks, keep_above, keep_below, plane_z, prism, union_all, wall_rect, eave_note,
                           slab_outline, slab_solid, opening_keep_out, openings_by_wall_of, smooth_near_openings,
-                          raised_floors, eave_soffit_solid, bridge_edge_contacts, OVERLAP_TRIM_MM3)
+                          raised_floors, eave_soffit_solid, bridge_edge_contacts, OVERLAP_TRIM_MM3, sleeve_skin_zone, sleeve_walls)
 
 Z_LO, Z_HI = -10000.0, 100000.0       # 「下・上の限りなし」の代わりの高さ（実寸 mm）
 BIG = box(-1e6, -1e6, 1e6, 1e6)
@@ -150,8 +150,40 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     upper1 = [w for w in walls1 if w["kind"] in ("exterior", "standalone") and is_upper(w, fl1)]
     hanging1 = [w for w in walls1 if w["kind"] == "interior" and is_upper(w, fl1)
                 and _wall_top(w) is not None and abs(_wall_top(w) - ceil1) <= 1.0]
+    # ★11/5（平屋と同じ考え。core/builder.py sleeve_walls）：家の外の単独の壁（袖壁）と、その上をつなぐ梁は、天井で分けず1階の部品へ。
+    # 下屋の下（区域B）では、前は1階の天井で分けて上を下屋の屋根の部品に入れていた → 下屋の屋根の下の面まで1階の部品に入れる。
+    # 区域A（2階の下）は2階の床板の裏まで、区域C は1階の天井まで（今までどおり）
+    sleeves1, beams1 = sleeve_walls(walls1, outline, fl1)
+    sleeve_ids = {id(w) for w in sleeves1 + beams1}
+
+    def lean_of(w: dict) -> int | None:
+        """壁の真ん中が下屋の下（区域B）なら、その下屋の番号。"""
+        mx, my = (np.array(w["start"], float) + np.array(w["end"], float)) / 2
+        zone, k = zone_of(mx, my)
+        return k if zone == "B" else None
+
+    def sleeve_z1(w: dict) -> float:
+        """袖壁・梁の立体の上の端：下屋の屋根まで届くもの（上端が下屋の屋根の下の面から REACH_ROOF_MM 以内）は限りなし（下屋の屋根で切る）。"""
+        top, k = _wall_top(w), lean_of(w)
+        mid = (np.array(w["start"], float) + np.array(w["end"], float)) / 2
+        if top is None or (k is not None and top >= plane_z(lean_s[k][0], *mid) - REACH_ROOF_MM):
+            return Z_HI
+        return top
+
+    def sleeve_part(w: dict) -> Manifold:
+        part = full_wall(w, float(w["bottom_mm"]), sleeve_z1(w)) - union_all([prism(zone_a, zf2, Z_HI), prism(zone_c, ceil1, Z_HI)])
+        for k, zb in enumerate(zone_b):
+            inb = part ^ prism(zb, Z_LO, Z_HI)
+            if not inb.is_empty():
+                part = union_all([part - prism(zb, Z_LO, Z_HI), keep_below(inb, lean_s[k][0])])
+        return part
+
+    std1 += [sleeve_part(w) for w in sleeves1 + beams1]
+    if sleeves1 + beams1:
+        notes["floor1"].append("家の外の単独の壁（袖壁）・梁 " + "・".join(w["id"] for w in sleeves1 + beams1) + " は、天井で分けず1階の部品に入れた"
+                               "（下屋の下では下屋の屋根の下の面まで）" + ("。梁の下はサポート材で印刷する" if beams1 else ""))
     for w in walls1:
-        if w in upper1 or w in hanging1:
+        if w in upper1 or w in hanging1 or id(w) in sleeve_ids:
             continue
         top = _wall_top(w)
         if w["kind"] == "interior":
@@ -200,7 +232,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     for w in upper1:   # 区域Aの途中から始まる壁（ポーチの上の梁）は塊と一緒に ②、区域Bは ③
         mx, my = (np.array(w["start"]) + np.array(w["end"])) / 2
         zone, k = zone_of(mx, my)
-        if zone == "A":
+        if zone == "A" and id(w) not in sleeve_ids:      # 袖壁の上をつなぐ梁は、上で袖壁と一緒に入れた
             floor1 = union_all([floor1, full_wall(w, float(w["bottom_mm"]), zf2) ^ prism(zone_a, Z_LO, zf2)])
 
     # ---------------------------------------------------------------- ① 基礎（平屋と同じ）＋ 基礎→1階の三角
@@ -298,7 +330,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
         sp, z = Polygon(s["polygon"]), float(s["z_mm"])
         if sp.intersection(zone_a).area >= 0.5 * sp.area:
             continue
-        hang = [wall_rect(w) for w in upper1 if abs(float(w["bottom_mm"]) - z) <= 1.0]
+        hang = [wall_rect(w) for w in upper1 if abs(float(w["bottom_mm"]) - z) <= 1.0 and id(w) not in sleeve_ids]
         pp = unary_union([sp] + hang).buffer(GAP_FILL_MM / 2, join_style="mitre").buffer(-GAP_FILL_MM / 2, join_style="mitre")
         pp = pp.difference(zone_a.buffer(clearance, join_style="mitre"))
         roof_lower_parts.append(prism(pp, z, z + plate_t))
@@ -307,7 +339,7 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     for w in upper1:   # 区域Bの途中から始まる壁（へこみの上の垂れ壁など）：天井の板の上から下屋の屋根まで
         mx, my = (np.array(w["start"]) + np.array(w["end"])) / 2
         zone, k = zone_of(mx, my)
-        if zone != "B":
+        if zone != "B" or id(w) in sleeve_ids:            # 袖壁の上をつなぐ梁は1階の部品（上で袖壁と一緒に入れた）
             continue
         bottom = float(w["bottom_mm"])
         for pp, top in lower_soffit_tops.values():
@@ -342,6 +374,13 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
     notes["roof_lower"].append(f"ずれ止めの三角を {len(b_corners)} か所（下屋の下の1階の外壁の内側の角）。2階の外壁とは隙間を空けた（別々に外せる）")
     roof_lower_ext = union_all(lower_ext)
     roof_lower = union_all(roof_lower_parts) - roof_lower_ext
+    lean_sleeves = [w for w in sleeves1 + beams1 if lean_of(w) is not None]
+    if lean_sleeves:   # 1階の部品の袖壁・梁のまわりは、下屋の屋根の部品をはめあいの隙間の分だけ空ける（平屋と同じ）
+        room = union_all([keep_below(prism(wall_rect(w).buffer(clearance, join_style="mitre"), float(w["bottom_mm"]) - 1.0, sleeve_z1(w)),
+                                     lean_s[lean_of(w)][0]) for w in lean_sleeves])
+        if (roof_lower ^ room).volume() + (roof_lower_ext ^ room).volume() > 1.0:
+            roof_lower, roof_lower_ext = roof_lower - room, roof_lower_ext - room
+            notes["roof_lower"].append("1階の部品の袖壁・梁のまわりは、下屋の屋根の部品をはめあいの隙間の分だけ空けた（載せるときにぶつからない）")
 
     # ---------------------------------------------------------------- ⑤ 大屋根（平屋の屋根と同じ作り方を2階の値で）
     rb, rt = main_b, main_t
@@ -390,6 +429,11 @@ def build_multi(b: dict, rules: dict) -> dict[str, ModelPart]:
             return solid ^ skin, solid - skin
         exterior, core1 = skin_split(exterior, Polygon(outline.exterior), ftop, zf2, ext1_walls)
         floor1 = union_all([floor1, core1])
+        if sleeves1 or beams1:   # 袖壁・梁も外壁と同じ塗り壁：外に見える面の同じ厚みの層をざらざらに（平屋と同じ。★11/5）
+            s_skin = sleeve_skin_zone(sleeves1 + beams1, fb, margin, ops_by, Polygon(outline.exterior), ftop - 1, Z_HI)
+            moved = floor1 ^ s_skin
+            if not moved.is_empty():
+                exterior, floor1 = union_all([exterior, moved]), floor1 - s_skin
         exterior2, core2 = skin_split(exterior2, zone_a, zf2, ceil2, [w for w in walls2 if w["kind"] == "exterior"])
         floor2 = union_all([floor2, core2])
         # 下屋の外壁・大屋根の外壁も、窓・ドアのまわりはざらざらにしない（天井の高さに上端がある窓・ドアの上の帯）

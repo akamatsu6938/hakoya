@@ -3,7 +3,7 @@
 - 指摘は1件ずつ「承認／却下／あとで」。承認すると直す案を人が承認した修正（overrides）として記録する。
 - 修正の履歴から取り消したら、その指摘は「未確認」に戻す。
 - コードの検査からも指摘を作る（code_findings）：glb の例外（背中合わせの外壁など）・未解決の所・検査の警告・
-  窓の間の柱が1階の部品の中で上がつながらない所（直す案つき。core/lintel.py）。
+  窓の間の柱が1階の部品の中で上がつながらない所（直す案つき。core/lintel.py）・形の検査（core/shape_checks.py）。
   AI なし（off）のときは、これだけを出す（SPEC §9-2）。
 """
 from __future__ import annotations
@@ -129,6 +129,14 @@ def code_findings(alias: str) -> list[dict]:
                     "title": "窓の間の柱の検査が止まった",
                     "message": f"窓の間の柱の検査が途中で止まりました（{type(e).__name__}）。ほかの検査の結果は出ています",
                     "evidence": ["コードの検査（窓の間の柱）"]})
+    try:   # 形の検査：ざらざらの層から外れた外壁・glb の基礎がない壁・家の外の外壁の分かれ方（★11/5。core/shape_checks.py）
+        from core.shape_checks import shape_findings
+        out += shape_findings(ov.apply(b, ov.load(alias))[0], company)
+    except Exception as e:  # noqa: BLE001  この検査の失敗で、ほかの指摘を止めない（失敗したことは知らせる）
+        out.append({"view": "plan", "kind": "shape", "severity": "低", "targets": [], "source": "code",
+                    "title": "形の検査が止まった",
+                    "message": f"形の検査（ざらざらの層・glb の基礎）が途中で止まりました（{type(e).__name__}）。ほかの検査の結果は出ています",
+                    "evidence": ["コードの検査（形）"]})
     try:
         from core.paths import property_files
         has_drawings = bool(property_files(alias).jww)

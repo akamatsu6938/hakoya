@@ -17,6 +17,9 @@ field に "_delete" を指定すると、その部材を取り除く（to は使
 "eave_tip_mm"（軒先の高さ＝屋根の上の面のいちばん低い所）。当てるときにコードが面の式を計算し直す。
 軒天の高さは field "soffit_z_mm"（GL から）。glb に軒天（typeESnok）がある屋根だけ。屋根を上下させると軒天も一緒に動く。
 窓の上の帯は、外壁・単独の壁の field "lintel_band_mm"（実寸 mm。building.json にはなく、ないときは 0＝帯なし。core/lintel.py）。
+外壁（kind=exterior）の厚み thickness_mm は、外の面を動かさず内側（家の中の側）へ厚く・薄くする（★11/5：中心線のまわりに
+厚くすると外の面が外へ出て、ファジースキンの層から外れ、外壁がざらざらにならなかった）。単独の壁・内壁は中心線のまわり。
+壁の上端 height は "to_roof"（屋根まで）か、GL からの mm（下端より上）。
 """
 from __future__ import annotations
 
@@ -44,6 +47,9 @@ PITCH_RANGE = (0.5, 12.0)                                 # 勾配（10 に対�
 SIDES = ("S", "N", "E", "W")
 REACH_ROOF_MM = 150.0                                     # 屋根の下の面からこれ以内に上端がある壁は「屋根まで届いている」
 LINTEL_FIELD = "lintel_band_mm"   # 窓の上の帯（外壁・単独の壁。ないときは 0。決定 2-4・core/lintel.py）
+HEIGHT_FIELD = "height"           # 壁の上端（"to_roof"＝屋根まで、か GL からの mm）
+TO_ROOF = "to_roof"
+WALL_TOP_MAX_MM = 20000.0         # 壁の上端（GL から）の上限
 
 
 def overrides_path(alias: str) -> Path:
@@ -122,6 +128,9 @@ def check_value(field: str, to, target: str = "") -> None:
     家全体を見ないと決まらないもの（天井と屋根の間など）は level_problems で確かめる。"""
     if field == SOFFIT_FIELD and (not isinstance(to, (int, float)) or isinstance(to, bool) or not 500 <= float(to) <= 20000):
         raise ValueError("軒天の高さは GL からの mm（500〜20000）で入れてください")
+    if field == HEIGHT_FIELD and to != TO_ROOF and (not isinstance(to, (int, float)) or isinstance(to, bool)
+                                                    or not 0 < float(to) <= WALL_TOP_MAX_MM):
+        raise ValueError(f"壁の上端は「{TO_ROOF}」（屋根まで）か、GL からの mm（{WALL_TOP_MAX_MM:.0f} まで）で入れてください")
     if field == LINTEL_FIELD:
         from core.lintel import BAND_RANGE_MM
         lo, hi = BAND_RANGE_MM
@@ -503,11 +512,43 @@ def apply(building: dict, items: list[dict]) -> tuple[dict, list[dict]]:
     return b, results
 
 
+def _inward(b: dict, w: dict):
+    """外壁の内側（家の中の側）を向く、壁に直角な向き（単位ベクトル）。家の外形（1階は基礎の外形、上の階はその階の外形）で、
+    壁の両側の点が家の中かを3か所で調べて決める。決まらなければ None（中心線のまわりに厚くする）。"""
+    import math
+
+    from shapely.geometry import Point, Polygon
+    if "start" not in w or "end" not in w:
+        return None
+    levels = b.get("levels") or []
+    idx = next((i for i, lv in enumerate(levels) if lv.get("name") == w.get("level")), 0)
+    ring = (levels[idx].get("outline") if idx > 0 else None) or (b.get("foundation") or {}).get("outline")
+    if not ring or len(ring) < 3:
+        return None
+    poly = Polygon(ring)
+    (sx, sy), (ex, ey) = map(float, w["start"]), map(float, w["end"])
+    L = math.hypot(ex - sx, ey - sy)
+    if L <= 0:
+        return None
+    nx, ny = -(ey - sy) / L, (ex - sx) / L
+    off = float(w["thickness_mm"]) / 2 + 30.0
+    votes = 0
+    for t in (0.25, 0.5, 0.75):
+        px, py = sx + (ex - sx) * t, sy + (ey - sy) * t
+        a, c = poly.contains(Point(px + nx * off, py + ny * off)), poly.contains(Point(px - nx * off, py - ny * off))
+        votes += 1 if (a and not c) else (-1 if (c and not a) else 0)
+    return (nx, ny) if votes > 0 else ((-nx, -ny) if votes < 0 else None)
+
+
 def _apply_one(b: dict, ov: dict) -> dict:
     """修正を1件、b に当てる（b を書き換える）。結果を返す。"""
     obj = _find(b, ov["target"])
     if obj is None:
         return {"id": ov["id"], "status": "failed", "reason": f"{ov['target']} が見つからない（作り直しでなくなった可能性）"}
+    if ov["field"] == HEIGHT_FIELD and ov["target"][:1] == "W":
+        check_value(HEIGHT_FIELD, ov["to"])
+        if ov["to"] != TO_ROOF and isinstance(obj.get("bottom_mm"), (int, float)) and float(ov["to"]) <= float(obj["bottom_mm"]) + 1:
+            raise ValueError(f"壁の上端（{ov['to']}）は、下端（{obj['bottom_mm']}）より上にしてください")
     if ov["field"] == DELETE:
         coll = COLLECTIONS.get(ov["target"][:1]) if ov["target"][:1] in DELETABLE else None
         if coll is None:
@@ -525,7 +566,13 @@ def _apply_one(b: dict, ov: dict) -> dict:
             return {"id": ov["id"], "status": "failed", "reason": f"階の {ov['field']} は直せない（直せるのは床の高さと天井の高さ）"}
         check_value(ov["field"], ov["to"], ov["target"])          # 数値でない値は当てない（ValueError → 当てられない）
     before = get_field(obj, ov["field"])
+    # 外壁の厚み：外の面を動かさず、内側（家の中の側）へ厚くする（中心線を内側へ差の半分ずらす）。★11/5
+    inward = _inward(b, obj) if ov["field"] == "thickness_mm" and obj.get("kind") == "exterior" else None
     _write(obj, ov["field"], ov["to"])
+    if inward is not None and isinstance(before, (int, float)) and isinstance(ov["to"], (int, float)):
+        half = (float(ov["to"]) - float(before)) / 2
+        for k in ("start", "end"):
+            obj[k] = [round(float(obj[k][0]) + inward[0] * half, 1), round(float(obj[k][1]) + inward[1] * half, 1)]
     twin = _roof_twin(b, ov["target"])
     if twin is not None and has_field(twin, ov["field"]):
         _write(twin, ov["field"], ov["to"])

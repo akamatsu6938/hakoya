@@ -580,6 +580,8 @@ def walls_to_json(walls: list[wl.Wall], level, level_of: dict[int, int] | None =
             d["thickness_rule"] = "walls.exterior_thickness_mm"
         elif w.kind == "interior":
             d["thickness_rule"] = "walls.interior_thickness_mm"
+        elif getattr(w, "_thickness_rule", None):       # 両側とも外の単独の壁（袖壁など。★11/5）
+            d["thickness_rule"] = w._thickness_rule
         if w.assumptions:
             d["assumption"] = w.assumptions
             for a in w.assumptions:
@@ -627,13 +629,22 @@ def build(alias: str, company: str | None = None, return_debug: bool = False):
                           clip=_filled(rec["exterior_fp"]).buffer(1, join_style="mitre"))
     porch_list = xp.porches(model.by_role("porch"))
     porch_union = unary_union([Polygon(p["polygon"]) for p in porch_list])
+    # ★11/5 デモ用（作者「袖壁全体で 180」）：家の角を越えて袖壁と重なる外壁は、家の角（基礎の外形の辺）で止める（1階だけ）
+    if found.get("outline"):
+        wl.stop_at_house_corner(rec["walls"], Polygon(found["outline"]), rec["openings"])
     # 単独の壁で、片側が家の中・反対側が外のものは外壁の一部 → 外壁の厚み（作者 2026-11-03）。
     # 「家の中」＝基礎の外形の内側からポーチを除いた範囲（部屋の床だけだと、窓際の腰掛けのくぼみが外に見える）。上の階はその階の外形
+    # 両側とも外のもの（袖壁など）は、会社ルールの単独の壁の厚み（★11/5 作者：両側に通気層などがあるので外壁より厚い）
+    t_std = _standalone_thickness(rules)
     if found.get("outline"):
         inside = Polygon(found["outline"]).difference(porch_union)
         wl.envelope_standalone(rec["walls"], inside, t_ext)
+        if t_std is not None:
+            wl.outdoor_standalone(rec["walls"], inside, t_std, Polygon(found["outline"]))
     for r in recs[1:]:
         wl.envelope_standalone(r["walls"], _filled(r["exterior_fp"]), t_ext)
+        if t_std is not None:
+            wl.outdoor_standalone(r["walls"], _filled(r["exterior_fp"]), t_std, _filled(r["exterior_fp"]))
 
     # ポーチの天井・下がり天井：「家の中」は、天井と同じ階の部屋の床の範囲で判断する
     # （基礎の外形はポーチ北のへこみも含むため。★物件B のポーチの天井は2階の部屋の真下にある）
@@ -737,6 +748,14 @@ def build(alias: str, company: str | None = None, return_debug: bool = False):
     if multi:
         _add_upper_level_info(building, recs, levels, found)
     return (building, rec) if return_debug else building
+
+
+def _standalone_thickness(rules: dict) -> float | None:
+    """会社ルールの単独の壁の厚み（walls.standalone_thickness_mm）。項目のない会社ルールなら None（glb の厚みのまま）。"""
+    try:
+        return float(rule(rules, "walls.standalone_thickness_mm"))
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 FILL_GAP_MM = 30.0   # 外形を求めるとき、壁と壁の間のこれ以下のすき間・角の1点だけの接触を埋める
