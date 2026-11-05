@@ -42,6 +42,7 @@ FACE_SHIFT_MM = 0.5                        # 壁の面ちょうどで切ると�
 NEAR_SLICE_MM = 2.0                        # 薄いかけらを調べる「すぐ横」の断面の位置（面ちょうどだと厚みゼロの形を見誤るので、少し離す）
 PARALLEL_SIN = math.sin(math.radians(3))   # 壁が切る線と平行（u と直角）とみなす角度
 OBLIQUE_SIN = math.sin(math.radians(30))   # 切る線と 30° より浅く交わる壁は、くさびのかけらになる
+STANDALONE_STUB_MM = 900.0                 # 単独の壁を切ってよいのは、切った両側にこれだけ残るとき（短い単独の壁・柱は切らない。実寸）
 ISLAND_SHARE = 0.02
 
 
@@ -187,12 +188,14 @@ def hard_problems(b: dict, u: np.ndarray, t: float, walls: list[dict], keep_out,
             continue
         if not (min(su, eu) <= t <= max(su, eu)):
             continue
-        if w.get("kind") == "standalone":
+        k = (t - su) / du                                   # 壁の始まりから、分け目までの長さ
+        # 単独の壁：短いもの（柱など）や端の近くは切らない。家の長い方向に通る長い壁（デモの家の西の上の壁など）を
+        # 直角に切るのはよい（両側とも長く残り、それぞれの床に載る。★11/5 これを断っていて、どの候補も落ちていた）
+        if w.get("kind") == "standalone" and min(k, L - k) < STANDALONE_STUB_MM:
             probs.append(f"単独の壁 {w['id']} を切る")
             continue
         if abs(du) < OBLIQUE_SIN:
             probs.append(f"壁 {w['id']} と斜めに交わる")
-        k = (t - su) / du                                   # 壁の始まりから、分け目までの長さ
         for o in ops_by.get(w["id"], []):
             a = float(o["offset_mm"])
             if a - margin <= k <= a + float(o["width_mm"]) + margin:

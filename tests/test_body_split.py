@@ -94,6 +94,23 @@ def test_window_at_the_best_face_is_avoided():
     assert bs.hard_problems(b, h.u, 6000.0 - 65.5, b["walls"], None, 150.0)        # 窓の所は「窓を通る」になる
 
 
+def test_long_standalone_wall_along_the_house_does_not_block_the_cut():
+    """家の長い方向に通る単独の壁（デモの家の西の上の壁など）は、直角に切ってよい。短い単独の壁・柱と、端の近くは切らない。
+    ★11/5：単独の壁を通る分け目をすべて断っていたので、長い単独の壁がある家は、どの候補も落ちて「真ん中」になっていた。"""
+    b = _long_house()
+    b["walls"].append({"id": "W95", "level": "1F", "kind": "standalone", "start": [3000.0, 200.0], "end": [3000.0, L - 200.0],
+                       "thickness_mm": 180.0, "bottom_mm": 624, "height": 3024})
+    post = {"id": "W96", "level": "1F", "kind": "standalone", "start": [5000.0, 5800.0], "end": [5000.0, 6400.0], "thickness_mm": 180.0}
+    u = np.array([0.0, 1.0])
+    walls = b["walls"] + [post]
+    assert not [p for p in bs.hard_problems(b, u, 7500.0, walls, None, 150.0) if "W95" in p]   # 長い単独の壁は、真ん中なら切ってよい
+    assert any("W95" in p for p in bs.hard_problems(b, u, 600.0, walls, None, 150.0))          # 端の近く（短い切れ端が残る）は切らない
+    assert any("W96" in p for p in bs.hard_problems(b, u, 6100.0, walls, None, 150.0))         # 短い単独の壁は切らない
+    h = bs.choose(b, build_model(b, RULES), RULES)
+    assert h is not None and "内壁" in h.reasons[0]                                           # 横に通る内壁の面で切れる（真ん中に逃げない）
+    assert not any("見つからなかった" in x for x in h.warnings)
+
+
 def test_human_cut_is_used_and_a_cut_that_does_not_fit_falls_back(built):
     b, parts, h = built
     mine = bs.choose(b, parts, RULES, {"u": [0.0, 1.0], "cuts": [7000.0], "source": "human"})
