@@ -130,3 +130,23 @@ def test_sample_view_lists_only_sample_houses(client):
     assert [p["alias"] for p in client.get("/api/properties").json()] == ["デモ用", "見本の家"]
     client.post("/api/settings/view", json={"view": "other"})
     assert len(client.get("/api/properties").json()) == 4                     # 他社利用用も全部
+
+
+def test_findings_older_than_the_last_build_are_marked_stale(client, data_dir):
+    """検品のあとに「読み込んで組み立てる」で作り直したら、見本確認用の手順の帯は「2 検品する」に戻る（stale）。
+    承認は building.json を書かないので、承認のあとは stale にならない。"""
+    import os
+    import time
+    from urllib.parse import quote
+    d = data_dir / "out" / "デモ用"
+    d.mkdir(parents=True)
+    url = "/api/findings/" + quote("デモ用")
+    assert client.get(url).json()["stale"] is False                            # まだ検品していない
+    (d / "findings.json").write_text('{"findings": [], "code_findings": [], "connection": "off"}', encoding="utf-8")
+    (d / "building.json").write_text("{}", encoding="utf-8")
+    now = time.time()
+    os.utime(d / "findings.json", (now - 100, now - 100))
+    os.utime(d / "building.json", (now, now))
+    assert client.get(url).json()["stale"] is True                             # 検品のあとに組み立て直した
+    os.utime(d / "findings.json", (now + 5, now + 5))
+    assert client.get(url).json()["stale"] is False                            # 検品し直した（承認で findings.json だけ書いても同じ）

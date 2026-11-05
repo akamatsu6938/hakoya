@@ -648,7 +648,8 @@ function applyConnections(connections) {
     const opt = sel.querySelector('option[value="claude_code"]');
     if (!opt) continue;
     opt.hidden = !plan; opt.disabled = !plan;
-    if (!plan && sel.value === 'claude_code') sel.value = 'api_key';
+    if (!plan && sel.value === 'claude_code') { sel.value = 'api_key'; sel.dataset.autoApi = '1'; }
+    else if (plan && sel.dataset.autoApi) { sel.value = 'claude_code'; delete sel.dataset.autoApi; }   // 隠したときに変えた分だけ戻す
   }
   $('#inspect-ai').hidden = !plan;
 }
@@ -668,7 +669,7 @@ $('#company-chip').addEventListener('click', () => {
   $('#set-company').scrollIntoView({ block: 'start' }); $('#company').focus();
 });
 
-// 手順の帯（見本確認用）：組み立てていない→1、検品していない→2、承認していない直す案がある→3、ほかは→4
+// 手順の帯（見本確認用）：組み立てていない→1、検品していない（検品のあとに組み立て直した）→2、承認していない直す案がある→3、ほかは→4
 const STEP_HINT = {
   1: '「読み込んで組み立てる」を押すと、glb から模型を組み立てます',
   2: '右の「検品」で、Claude かコードの検査に模型を見てもらいます',
@@ -678,7 +679,7 @@ const STEP_HINT = {
 function currentStep() {
   const rep = state.report;
   if (!state.alias || !state.built) return 1;
-  if (!rep || !rep.connection) return 2;
+  if (!rep || !rep.connection || rep.stale) return 2;
   const pending = [...(rep.findings || []), ...(rep.code_findings || [])]
     .filter((f) => f.proposal && !['承認', '却下'].includes(f.status)).length;
   return pending ? 3 : 4;
@@ -703,8 +704,9 @@ $('#company').addEventListener('change', async (e) => {   // 会社ルール：�
   const sel = e.target;
   try {
     await call('POST', '/api/settings/company', { company: sel.value });
-    setStatus(`会社ルールを「${state.companies?.[sel.value] || sel.value}」にしました。「読み込んで組み立てる」を押すと、この決まりで作り直します`, 'ok');
     sel.dataset.prev = sel.value;
+    await renderSettings();                                   // 上の帯の「会社ルール：…」と、選んでくださいの案内を直す
+    setStatus(`会社ルールを「${state.companies?.[sel.value] || sel.value}」にしました。「読み込んで組み立てる」を押すと、この決まりで作り直します`, 'ok');
   } catch (err) { setStatus('会社ルールを切り替えられませんでした：' + err.message, 'err'); sel.value = sel.dataset.prev; }
 });
 $('#auto-inspect').addEventListener('change', async (e) => {
@@ -739,7 +741,7 @@ $('#apikey-del').addEventListener('click', async () => {
   } catch (e) { setStatus('消せませんでした：' + e.message, 'err'); }
   await renderSettings();
 });
-renderSettings();
+const settingsReady = renderSettings();     // 物件の一覧は、見え方を読んでから出す（下の始まりの所で待つ）
 
 // ---------------------------------------------------------------- 囲んで直す（平面図、SPEC §9-3）
 // 囲みの中の部材はサーバー（コード）が決める。画面は囲んだ点を平面の mm に直して送るだけ。
@@ -855,8 +857,10 @@ $('#plan').addEventListener('pointermove', (e) => {
   const s = Number(d.svg.dataset.scale); const dt = t - d.start;
   const move = `translate(${(dt * sd.ux * s).toFixed(2)} ${(-dt * sd.uy * s).toFixed(2)})`;   // 平面図は Y が下向き
   d.g.querySelectorAll(`[data-i="${i}"]`).forEach((el) => el.setAttribute('transform', move));
-  const label = d.g.querySelector(`text.split-label[data-i="${i}"]`);
-  if (label) label.textContent = splitLabelText(sd, d.cuts, i, '動かしている分け目');
+  for (const j of [i - 1, i, i + 1]) {                                            // となりの分け目の札も、間の部品の長さが変わる
+    const label = d.g.querySelector(`text.split-label[data-i="${j}"]`);
+    if (label) label.textContent = splitLabelText(sd, d.cuts, j, j === i ? '動かしている分け目' : label.textContent.split('｜')[0]);
+  }
 });
 async function endSplitDrag() {
   const d = splitUi.drag; if (!d) return;
@@ -1099,8 +1103,12 @@ function companyNote() {
 }
 
 async function selectAlias(alias, built) {
+  if (!built) {
+    clearProperty();          // 前の物件の模型・表・書き出しを残さない（残ると、書き出しが前の物件のまま・承認が新しい物件に飛ぶ）
+    state.alias = alias; state.viewSet = false;
+    setStatus(`${alias}：まだ組み立てていません。「読み込んで組み立てる」を押してください`); return;
+  }
   state.alias = alias; state.viewSet = false; state.built = built; state.report = null; updateSteps();
-  if (!built) { setStatus(`${alias}：まだ組み立てていません。「読み込んで組み立てる」を押してください`); return; }
   try { setStatus('読み込んでいます…', 'busy'); await refresh(); setStatus(`${alias}を表示しています${companyNote()}`, 'ok'); }
   catch (e) { setStatus(e.message, 'err'); }
 }
@@ -1217,6 +1225,7 @@ function clearProperty() {
 
 (async () => {
   $('#alias').addEventListener('change', (e) => selectAlias(e.target.value, e.target.selectedOptions[0].dataset.built === 'true'));
+  await settingsReady.catch(() => {});      // 見え方（state.view）が分かってから。見本確認用で見本の家がないときの案内を正しく出す
   await fillAliases();
   renderRegistry();
 })();

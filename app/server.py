@@ -434,7 +434,12 @@ def inspection_status(alias: str):
 @app.get("/api/findings/{alias}")
 def findings(alias: str):
     _check_alias(alias)
-    return _safe_json(fd.load(alias) or {"findings": [], "code_findings": [], "summary": "まだ検品していません"})
+    rep = fd.load(alias) or {"findings": [], "code_findings": [], "summary": "まだ検品していません"}
+    # 検品のあとに「読み込んで組み立てる」で作り直したか（見本確認用の手順の帯を「検品する」に戻す。
+    # building.json を書くのは組み立てだけで、承認は書かない）
+    fp, bp = fd.findings_path(alias), _building_path(alias)
+    rep["stale"] = fp.exists() and bp.exists() and bp.stat().st_mtime > fp.stat().st_mtime
+    return _safe_json(rep)
 
 
 class DecisionIn(BaseModel):
