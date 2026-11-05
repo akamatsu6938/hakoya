@@ -29,6 +29,30 @@ const baseId = (id) => String(id || '').split(':')[0];
 
 function setStatus(text, cls = '') { const s = $('#status'); s.textContent = text; s.title = text; s.className = 'status ' + cls; }
 
+// お知らせ（右下に数秒だけ出る札）。画面を移らずに「直しました」などを知らせる（★11/5 夜 作者「承認すると画面が移って消える」）。
+// kind：ok（済み）・err（失敗）・info（知らせ）・busy（しているところ。自分では消えない → 返り値の close() で消す）
+// action：{ label, fn } を渡すと、札の中にボタンを出す（例：取り消す・見る）
+function toast(text, { kind = 'ok', action = null, ms = null } = {}) {
+  const box = $('#toasts'); if (!box) { setStatus(text, kind === 'busy' ? 'busy' : kind); return { close() {}, update() {} }; }
+  const el = document.createElement('div'); el.className = 'toast ' + kind; el.setAttribute('role', kind === 'err' ? 'alert' : 'status');
+  const msg = document.createElement('span'); msg.className = 'toast-text'; msg.textContent = text; el.appendChild(msg);
+  let timer = null;
+  const close = () => { clearTimeout(timer); el.classList.add('out'); setTimeout(() => el.remove(), 180); };
+  if (action && action.label) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'toast-act'; b.textContent = action.label;
+    b.addEventListener('click', () => { try { action.fn?.(); } finally { close(); } });
+    el.appendChild(b);
+  }
+  const x = document.createElement('button'); x.type = 'button'; x.className = 'toast-x'; x.textContent = '×'; x.title = '閉じる'; x.addEventListener('click', close);
+  el.appendChild(x);
+  box.appendChild(el);
+  while (box.children.length > 4) box.firstElementChild.remove();      // 出しすぎない（古いものから消す）
+  const life = ms ?? (kind === 'busy' ? 0 : kind === 'err' ? 9000 : action ? 8000 : 4500);
+  if (life > 0) timer = setTimeout(close, life);
+  return { close, update(t, k) { msg.textContent = t; if (k) { el.className = 'toast ' + k; if (k !== 'busy') timer = setTimeout(close, k === 'err' ? 9000 : 4500); } } };
+}
+window.toast = toast;
+
 async function call(method, path, body) {
   const res = await fetch(api(path), { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   if (!res.ok) { let msg = res.statusText; try { msg = (await res.json()).detail || msg; } catch (e) { /* 本文なし */ } const err = new Error(msg); err.status = res.status; throw err; }

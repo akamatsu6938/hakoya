@@ -650,6 +650,24 @@ body[data-mode="other"] .prefs-lead { order: -2; }
 .plan g#split.dragging, .plan g#split.dragging [data-role="split"] { cursor: grabbing; }
 .plan g#split.dragging .split-line { stroke-width: 3.5; }
 
+/* ---- お知らせ（右下に数秒だけ出る札。app.js の toast()） */
+.toasts { position: fixed; right: 12px; bottom: calc(var(--h-status) + 10px); z-index: 60; display: flex; flex-direction: column;
+  align-items: flex-end; gap: 6px; pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; min-width: 220px; max-width: 420px; padding: 8px 6px 8px 12px;
+  background: var(--c-raised); border: 1px solid var(--hair-2); border-left: 3px solid var(--ok); color: var(--ink); font-size: var(--fs-m);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45); animation: hk-toast-in .16s ease-out; }
+.toast.err { border-left-color: var(--bad); } .toast.info { border-left-color: var(--gold); } .toast.busy { border-left-color: var(--gold); }
+.toast.out { opacity: 0; transform: translateY(4px); transition: opacity .16s, transform .16s; }
+.toast-text { flex: 1; min-width: 0; }
+.toast.busy .toast-text::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 7px; vertical-align: -1px;
+  border: 1.5px solid var(--c-press); border-top-color: var(--gold); border-radius: 50%; animation: hk-spin .8s linear infinite; }
+.toast-act { flex: none; height: 22px; padding: 0 9px; background: transparent; border: 1px solid var(--gold-line); color: var(--gold-hi); font: inherit; cursor: pointer; }
+.toast-act:hover { background: var(--gold-soft); }
+.toast-x { flex: none; width: 22px; height: 22px; background: transparent; border: 0; color: var(--ink-3); font-size: 14px; cursor: pointer; }
+.toast-x:hover { color: var(--ink); }
+@keyframes hk-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } .toast.busy .toast-text::before { animation: none; } }
+
 /* ---- モードで隠すもの */
 body:not([data-mode="own"]) .own-only { display: none !important; }
 body[data-mode="sample"] .no-sample { display: none !important; }
