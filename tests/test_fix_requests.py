@@ -258,10 +258,13 @@ def test_approve_once_and_undo_returns_to_pending(client, monkeypatch):
 
 
 def test_fix_that_does_not_change_the_model_is_undone(client, data, monkeypatch):
-    """窓の上の帯は、天井の高さに届く窓がない壁では形に出ない（★試した：名札がぴったり同じ）→ 取り消して知らせる。"""
-    _fake(monkeypatch, plan=[("propose_override", {"target": "W1", "field": "lintel_band_mm",
-                                                   "value_source": "rule:model.lintel_band_mm", "reason": "窓の上をつなぐ"})])
-    client.post(URL, json={"text": "窓の上をつなげて", "connection": "claude_code", "ids": ["W1"]})
+    """承認して組み直しても模型の形が変わらない直しは、取り消して知らせる。
+    ★11/6：前は「天井に届く窓がない壁の窓の上の帯」で試していたが、その案は直す案を作る時点で断るようになった
+    （core/ai/tools.py。組み立て担当の直し）。ここでは形の比べ（core/shape_diff.py）が「変わらない」と答えた場合を直接確かめる。"""
+    from core import shape_diff as sd
+    _fake(monkeypatch, plan=[W9_TO_MAJORITY])
+    monkeypatch.setattr(sd, "changed_parts", lambda before, after: [])
+    client.post(URL, json={"text": "ほかとそろえて", "connection": "claude_code", "ids": ["W9"]})
     assert _wait(client, "R1")["proposals"][0]["state"] == "pending"
     res = client.post(f"{URL}/R1/approve", json={"index": 0}).json()
     assert res["changed"] is False and res["changed_parts"] == []
@@ -421,3 +424,11 @@ def test_part_hints_and_roof_ids_from_build_notes():
 def test_old_lasso_endpoint_still_works(client):
     sel = client.post(f"/api/lasso/{A}/select", json={"polygon": box(800, 500, 1200, 1500)}).json()["selection"]
     assert [r["id"] for r in sel] == ["W9"] and sel[0]["part"] == "家（1階の床・内壁）"
+
+
+def test_lintel_band_on_a_wall_without_a_band_is_refused_before_approval(client, monkeypatch):
+    """★11/6（11/5 夜の作者の試しで、効かない窓の上の帯が承認された）：帯ができない壁への案は、依頼の答えに出ない。"""
+    _fake(monkeypatch, plan=[("propose_override", {"target": "W1", "field": "lintel_band_mm",
+                                                   "value_source": "rule:model.lintel_band_mm", "reason": "窓の上をつなぐ"})])
+    client.post(URL, json={"text": "窓の上をつなげて", "connection": "claude_code", "ids": ["W1"]})
+    assert _wait(client, "R1")["proposals"] == []
