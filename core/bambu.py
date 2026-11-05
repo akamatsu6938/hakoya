@@ -50,6 +50,23 @@ def resolve_preset(folder: Path, name: str) -> dict:
     return merged
 
 
+# 取り込み（include）の設定から写さない項目
+TEMPLATE_SKIP = {"name", "instantiation", "from", "inherits", "setting_id", "type", "include"}
+
+
+def full_preset(folder: Path, name: str) -> dict:
+    """引き継ぎ（inherits。resolve_preset）に、取り込み（include）も足した完全な設定。
+    ★2026-11-06（Bambu Studio 02.08.02）：A1 の設定は、始めと終わり・層の変わり目などの G-code を別のファイル
+    （"Bambu Lab A1 0.4 nozzle template machine_start_gcode" など）に分けて include で取り込む。引き継ぎだけをたどると、
+    それらが共通の設定の G-code（始めは 22 行の短いもので、ベッドを温める命令がない。A1 用は 612 行）のまま 3MF に入っていた
+    （印刷の見込みを測る道具 tools/print_estimate.py を作っていて見つけた）。"""
+    data = resolve_preset(folder, name)
+    for inc in data.pop("include", None) or []:
+        template = json.loads((folder / f"{inc}.json").read_text(encoding="utf-8"))
+        data.update({k: v for k, v in template.items() if k not in TEMPLATE_SKIP})
+    return data
+
+
 def to_bambu_3mf(src: Path, dst: Path, exe: Path | None = None, presets: dict | None = None, timeout: int = 180) -> dict:
     """src（私たちの 3MF）を Bambu Studio のコマンドで読ませ、Bambu 形式の 3MF を dst に書き出す。"""
     exe = exe or find_exe()
@@ -61,7 +78,7 @@ def to_bambu_3mf(src: Path, dst: Path, exe: Path | None = None, presets: dict | 
         t = Path(tmp)
         files = {}
         for kind in ("machine", "process", "filament"):
-            data = resolve_preset(profiles / kind, presets[kind])
+            data = full_preset(profiles / kind, presets[kind])     # 取り込み（include）もたどる（★11/6）
             files[kind] = t / f"{kind}.json"           # パスは英字だけにする（コマンドに日本語を渡さない）
             files[kind].write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         shutil.copyfile(src, t / "in.3mf")

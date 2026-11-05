@@ -58,7 +58,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.bambu import PRESETS, find_exe, resolve_preset  # noqa: E402
+from core.bambu import PRESETS, TEMPLATE_SKIP, find_exe, full_preset, resolve_preset  # noqa: E402  ★11/6 full_preset は core へ移した
 
 DEFAULT_TIMEOUT_S = 900
 EXIT_GRACE_S = 30           # 結果（result.json）ができてから、Bambu Studio が自分で終わるのを待つ秒数
@@ -68,7 +68,6 @@ PRICE_SOURCE = ("Bambu PLA Basic 1kg・税込：Bambu Lab の日本の公式ス�
 # 日本語の結果には出さない（JSON には残す）
 QUIET_WARNINGS = {"not_support_traditional_timelapse"}
 HEIGHT_GAP_MM = 1.0         # 模型の高さより、印刷される高さがこれ以上低ければ知らせる
-TEMPLATE_SKIP = {"name", "instantiation", "from", "inherits", "setting_id", "type", "include"}
 SETTING_KEYS = {"printer": "printer_settings_id", "process": "print_settings_id", "filament": "filament_settings_id",
                 "layer_height_mm": "layer_height", "wall_loops": "wall_loops", "infill": "sparse_infill_density",
                 "infill_pattern": "sparse_infill_pattern", "top_layers": "top_shell_layers",
@@ -80,20 +79,6 @@ NOTES = [
     "重さは押し出すフィラメントの長さ × 断面 × 密度から。失敗や試しの印刷の分は入らない",
     "ファジースキンは点をでたらめに揺らすので、スライスのたびに時間が少し変わる（試しで 0.1% ほど）",
 ]
-
-
-def full_preset(folder: Path, name: str) -> dict:
-    """引き継ぎ（inherits。core/bambu.py の resolve_preset）に、取り込み（include）も足した完全な設定。
-
-    ★2026-11-06（Bambu Studio 02.08.02）：A1 の設定は、始めと終わり・層の変わり目・縮時撮影・フィラメントの交換の G-code を
-    別のファイル（"Bambu Lab A1 0.4 nozzle template machine_start_gcode" など）に分けて include で取り込む。
-    引き継ぎだけをたどると、それらが共通の設定の G-code（始めは 22 行の短いもの。A1 用は 612 行）のままになり、
-    見込みの時間が 1 回の印刷につき 8〜16 分 短く出た（見本の家）。"""
-    data = resolve_preset(folder, name)
-    for inc in data.pop("include", None) or []:
-        template = json.loads((folder / f"{inc}.json").read_text(encoding="utf-8"))
-        data.update({k: v for k, v in template.items() if k not in TEMPLATE_SKIP})
-    return data
 
 
 def parse_slice_info(text: str) -> dict:

@@ -28,3 +28,13 @@ def test_bambu_3mf_keeps_fuzzy_only_on_exterior():
     assert info["printer_model"] == "Bambu Lab A1" and info["printable_area"][2] == "256x256"
     fuzzy = sorted(n for n, p in info["parts"].items() if p.get("fuzzy_skin") == "external")
     assert fuzzy == ["1階の外壁（表面）", "屋根の外壁"]
+
+
+def test_full_preset_takes_the_a1_start_gcode_from_include():
+    """★11/6：A1 の始めの G-code は include で取り込む。たどらないと共通の短い G-code（ベッドを温めない）のままになっていた。"""
+    from core.bambu import full_preset
+    prof = find_exe().parent / "resources" / "profiles" / "BBL"
+    short = resolve_preset(prof / "machine", "Bambu Lab A1 0.4 nozzle").get("machine_start_gcode", "")
+    full = full_preset(prof / "machine", "Bambu Lab A1 0.4 nozzle")
+    assert "include" not in full
+    assert len(full["machine_start_gcode"].splitlines()) > 100 > len(short.splitlines())
