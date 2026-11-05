@@ -616,6 +616,9 @@ def _combine(members: list[Wall], start: np.ndarray, end: np.ndarray) -> Wall:
     return w
 
 
+JOIN_TOL_MM = 40.0     # L 字の角で、相手の壁の端の先をどこまで「ぶつかる」と見るか（厚みの半分＋これ）
+
+
 def extend_to_junctions(walls: list[Wall], targets: list[Wall], zone: Polygon | None = None,
                         short_ext: float = 400.0, max_ext: float = 2000.0, zone_ratio: float = 0.9) -> None:
     """内壁の端を、ぶつかる壁の中心線まで伸ばす（壁どうしをすき間なくつなぐため）。
@@ -623,6 +626,10 @@ def extend_to_junctions(walls: list[Wall], targets: list[Wall], zone: Polygon | 
     short_ext までは無条件に伸ばす（部屋の角から交わる壁の中心線まで）。
     それより遠くても、伸ばす部分が zone（内壁の範囲・ドアの位置・外壁）の中を通るなら max_ext まで伸ばす
     （ドアの手前で途切れた壁を、ドアの向こうの壁までつなぐため）。
+    ★11/5（デモの家の検品・作者「建物としておかしい所は直す」）：L 字の角では、両方の壁の端が相手の仕上げ面
+    （中心線から 72.5mm）で止まっていて、相手の線を厚みの半分（65）延ばしても届かず、7.5mm のすき間が残っていた。
+    → 相手の線を「厚みの半分＋JOIN_TOL_MM」まで延ばして当たりを探し、相手の端の先に当たったとき（L 字）は、
+    相手の外の面まで伸ばす（中心線で止めると、角の外側に厚みの半分の四角い欠けが残るため）。
     """
     for w in walls:
         for which in ("start", "end"):
@@ -634,14 +641,23 @@ def extend_to_junctions(walls: list[Wall], targets: list[Wall], zone: Polygon | 
                 if t is w:
                     continue
                 td = t.direction
-                ext = t.thickness / 2
+                ext = t.thickness / 2 + JOIN_TOL_MM
                 seg = LineString([t.start - td * ext, t.end + td * ext])
                 hit = ray.intersection(seg)
                 if hit.is_empty or hit.geom_type != "Point":
                     continue
-                dist = float(np.linalg.norm(np.array(hit.coords[0]) - p))
-                if dist > 1e-6:
-                    hits.append((dist, np.array(hit.coords[0])))
+                q = np.array(hit.coords[0])
+                dist = float(np.linalg.norm(q - p))
+                if dist <= 1e-6:
+                    continue
+                s = float(np.dot(q - t.start, td))
+                if s < -1e-6 or s > t.length + 1e-6:          # 相手の端の先（L 字の角）→ 相手の外の面まで
+                    corner_only = s < -t.thickness / 2 or s > t.length + t.thickness / 2
+                    q = q + d * (t.thickness / 2)
+                    dist = float(np.linalg.norm(q - p))
+                    if corner_only and dist > short_ext:
+                        continue      # 前は当たらなかった所（L 字の角のためだけの当たり）は、遠くまで伸ばす決まりに使わない
+                hits.append((dist, q))
             for dist, q in sorted(hits, key=lambda h: h[0]):
                 if dist <= short_ext:
                     setattr(w, which, q)
