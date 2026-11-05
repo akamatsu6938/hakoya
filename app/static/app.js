@@ -413,7 +413,7 @@ async function renderHistory(results) {
   const label = { applied: '当てた', applied_changed: '当てた（自動の値が変わっていた）', failed: '当てられない' };
   for (const it of items.slice().reverse()) {
     const li = document.createElement('li'); const st = status[it.id];
-    const what = it.field === '_delete' ? '取り除く' : `${FIELD[it.field] || it.field}：${it.from} → ${it.to}`;
+    const what = it.field === '_delete' ? '取り除く' : `${FIELD[it.field] || it.field}：${valText(it.from)} → ${valText(it.to)}`;
     const t = String(it.target);
     const tgt = t.startsWith('level:') ? `<b>${esc(LEVEL_JA[t.slice(6)] || t)}</b> ` : isElementId(t) ? `<button class="idc" data-id="${esc(t)}" title="${esc(t)} を模型で光らせる">${esc(t)}</button>` : `<b>${esc(t)}</b> `;
     li.innerHTML = `<div class="what"><span class="tag">${esc(it.id)}</span>${tgt}${esc(what)}</div>`
@@ -434,7 +434,7 @@ async function undoOverride(it) {
 }
 $('#undo-last').addEventListener('click', () => {   // 道具の帯の「取り消す」：いちばん新しい直し
   const it = state.overrides[state.overrides.length - 1]; if (!it) return;
-  const what = it.field === '_delete' ? '取り除く' : `${FIELD[it.field] || it.field} ${it.from} → ${it.to}`;
+  const what = it.field === '_delete' ? '取り除く' : `${FIELD[it.field] || it.field} ${valText(it.from)} → ${valText(it.to)}`;
   if (!confirm(`いちばん新しい直し（${it.id}：${it.target} の ${what}）を取り消します。よろしいですか？`)) return;
   undoOverride(it);
 });
@@ -594,7 +594,8 @@ const VIEW_JA = { S: '南の面', N: '北の面', E: '東の面', W: '西の面'
 
 const FIELD = { thickness_mm: '厚み', width_mm: '幅', offset_mm: '壁の端からの位置', sill_fl_mm: '下端 FL+', head_fl_mm: '上端 FL+',
   fl_mm: '床の高さ', ceiling_mm: '天井の高さ', pitch: '勾配（10 に対して）', low_side: '低い側', eave_tip_mm: '軒先の高さ', soffit_z_mm: '軒天の高さ',
-  lintel_band_mm: '窓の上の帯（実寸 mm）' };
+  lintel_band_mm: '窓の上の帯（実寸 mm）', height: '上端の高さ' };
+const valText = (v) => (v === 'to_roof' ? '屋根まで' : v);   // 壁の高さ「屋根まで」（★11/6 直す案で壁の height を直せるようにした）
 const LEVEL_JA = { '1F': '1階', '2F': '2階' };
 for (const s of 'WESN') FIELD[`eave_mm.${s}`] = `軒の出（${SIDE[s]}）`;
 
@@ -605,18 +606,19 @@ function sourceText(vs) {   // 数値の出どころを日本語にする（例�
   if (s.startsWith('human:number:')) return `人が書いた数値 ${s.slice(13)}`;
   if (s === 'human:table') return '表で直した';
   if (s === 'glb') return '元の形（glb）';
+  if (s === 'to_roof') return '屋根まで（屋根の下の面）';
   return s;
 }
 
 function proposalText(p) {
   if (!p) return '';
   if (p.field === '_delete') return `${esc(p.target)} を取り除く`;
-  return `${esc(p.target)} の ${esc(FIELD[p.field] || p.field)}：${esc(p.from)} → <b>${esc(p.to)}</b>（数値の出どころ：${esc(sourceText(p.value_source))}）`;
+  return `${esc(p.target)} の ${esc(FIELD[p.field] || p.field)}：${esc(valText(p.from))} → <b>${esc(valText(p.to))}</b>（数値の出どころ：${esc(sourceText(p.value_source))}）`;
 }
 function proposalLine(p) {     // カードの1行：何を・いくつから・いくつへ
   if (!p) return '';
   if (p.field === '_delete') return `<b>${esc(p.target)}</b> を取り除く`;
-  return `${esc(p.target)} の${esc(FIELD[p.field] || p.field)}　${esc(p.from)}<span class="arrow">→</span><b>${esc(p.to)}</b>`;
+  return `${esc(p.target)} の${esc(FIELD[p.field] || p.field)}　${esc(valText(p.from))}<span class="arrow">→</span><b>${esc(valText(p.to))}</b>`;
 }
 // 見出し：title（20字ほど）。古い指摘は本文の最初の「。」「：」「、」まで、なければ 30 字ほど
 function headline(f) {
@@ -666,7 +668,7 @@ async function keepPlace(sel, fn) {
 function fixedText(p) {   // 直したことの一言（お知らせ）。例：O7（上端 FL+）を 2400 → 2300 に直しました
   if (!p) return '直しました';
   if (p.field === '_delete') return `${p.target} を取り除きました`;
-  return `${p.target}（${FIELD[p.field] || p.field}）を ${p.from} → ${p.to} に直しました`;
+  return `${p.target}（${FIELD[p.field] || p.field}）を ${valText(p.from)} → ${valText(p.to)} に直しました`;
 }
 async function relight(f, p) {   // 直したあと：直した部材と指摘の部材を光らせ直す（読み直すと印が消えるため。カメラは動かさない）
   const ids = [...new Set([p && p.field !== '_delete' ? String(p.target) : null, ...(f.targets || []).map(String)].filter(Boolean))]

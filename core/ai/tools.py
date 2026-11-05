@@ -385,7 +385,7 @@ def ask_question(ctx: ToolContext, question: str, options: list[str], evidence: 
         raise ToolError("選択肢は2〜3個にしてください（SPEC §5-2）")
     q = {"id": f"Q{len(ctx.questions) + 1}", "question": question, "options": options, "evidence": evidence}
     ctx.questions.append(q)
-    return {"queued": q["id"], "note": "人の答えを待ちます。答えは rules/answers.jsonl に残ります"}
+    return {"queued": q["id"], "note": "人の答えを待ちます（答えは画面で受け取り、物件ごとに残して次の検品・次の頼みで渡します）"}
 
 
 # ---------------------------------------------------------------- 道具の一覧（説明は Claude が読む）

@@ -651,7 +651,7 @@ body[data-mode="other"] .prefs-lead { order: -2; }
 .plan g#split.dragging .split-line { stroke-width: 3.5; }
 
 /* ---- お知らせ（右下に数秒だけ出る札。app.js の toast()） */
-.toasts { position: fixed; right: 12px; bottom: calc(var(--h-status) + 10px); z-index: 60; display: flex; flex-direction: column;
+.toasts { position: fixed; right: calc(var(--insp-w) + 14px); bottom: calc(var(--h-status) + 10px);   /* 真ん中の 3D の右下（右の欄のボタンを隠さない。★11/6） */ z-index: 60; display: flex; flex-direction: column;
   align-items: flex-end; gap: 6px; pointer-events: none; }
 .toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; min-width: 220px; max-width: 420px; padding: 8px 6px 8px 12px;
   background: var(--c-raised); border: 1px solid var(--hair-2); border-left: 3px solid var(--ok); color: var(--ink); font-size: var(--fs-m);
