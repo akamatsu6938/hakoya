@@ -12,10 +12,30 @@ from PyInstaller.utils.hooks import collect_all
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 
+# 自社だけのもの（自社の会社ルール・自社の Skill・会社の家の作り方についての答え）は入れない
+# （★11/5 夜 作者「社外用の exe からは自社のルールは抜く」。公開の書き出し tools/make_submission_repo.py の REMOVE と同じもの）。
+# 入れないと、会社ルールの既定は B工務店（架空）になる（core/rules.py default_company）。
+OWN_ONLY_FILES = {os.path.join("rules", "jisha.yaml"), os.path.join("rules", "answers.jsonl")}
+OWN_ONLY_DIRS = {os.path.join("skills", "company-jisha")}
+
+
+def _tree(rel_dir):
+    """rel_dir の中のファイルを1つずつ（自社だけのものと __pycache__ を除く）。(元の場所, exe の中のフォルダ)。"""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(os.path.join(ROOT, rel_dir)):
+        rel = os.path.relpath(dirpath, ROOT)
+        dirnames[:] = [d for d in dirnames if d != "__pycache__" and os.path.join(rel, d) not in OWN_ONLY_DIRS]
+        for name in filenames:
+            if os.path.join(rel, name) in OWN_ONLY_FILES or name.startswith("jisha."):
+                continue
+            out.append((os.path.join(dirpath, name), rel))
+    return out
+
+
 datas = [
     (os.path.join(ROOT, "app", "static"), os.path.join("app", "static")),
-    (os.path.join(ROOT, "rules"), "rules"),
-    (os.path.join(ROOT, "skills"), "skills"),
+    *_tree("rules"),
+    *_tree("skills"),
     (os.path.join(ROOT, "packaging", "EDITION_external"), "."),   # 版の印（exe の中で "EDITION" という名前にする）
 ]
 binaries = []

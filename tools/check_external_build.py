@@ -8,6 +8,8 @@
 - data\\（実物の図面・glb・設定）が入っていない
 - API キーらしい文字（sk-ant-…）が、文字のファイルにも、バイナリの中にもない
 - PDF の日本語の文字の表（pdfminer の cmap）が入っている（ないと、高性能読み込みで PDF の日本語が読めない。★11/4）
+- 自社だけのもの（自社の会社ルール rules/jisha.yaml・自社の Skill skills/company-jisha・会社の答え rules/answers.jsonl）が入っていない
+  （★11/5 夜 作者「社外用の exe からは自社のルールは抜く」）
 見つけた内容は出さない（場所と種類だけ）。問題があれば終了コード 1。
 """
 from __future__ import annotations
@@ -36,6 +38,9 @@ def check(root: Path) -> list[str]:
             problems.append(f"Claude Code 本体らしいファイル：{rel}")
         if "data" in parts and rel.parts[0].lower() == "data":
             problems.append(f"data フォルダが入っている：{rel}")
+        if (p.is_dir() and p.name.lower() == "company-jisha") or (p.is_file() and (p.name.lower().startswith("jisha.")
+                or (p.name.lower() == "answers.jsonl" and p.parent.name.lower() == "rules"))):
+            problems.append(f"自社だけのもの（会社ルール・Skill・答え）が入っている：{rel}")
         if p.is_file() and p.stat().st_size < 200_000_000:
             try:
                 blob = p.read_bytes()

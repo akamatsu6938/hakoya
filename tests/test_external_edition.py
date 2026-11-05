@@ -63,10 +63,23 @@ def test_build_check_finds_forbidden_things(tmp_path):
     fake_key = "sk-" + "ant-" + "a1" * 20                                     # 架空のキー（リポジトリにキーの形の文字を置かない）
     (root / "_internal" / "anthropic" / "y.json").write_text(fake_key, encoding="utf-8")
     (root / "_internal" / "pdfminer" / "cmap" / "UniJIS-UCS2-H.json.gz").unlink()
+    (root / "_internal" / "rules").mkdir(parents=True)                                     # 自社だけのもの（★11/5 夜 入れない）
+    (root / "_internal" / "rules" / "jisha.yaml").write_text("walls: {}", encoding="utf-8")
     problems = " / ".join(check(root))
-    for word in ("claude_agent_sdk", "Claude Code 本体", "data フォルダ", "API キーらしい文字", "external でない", "日本語の文字の表"):
+    for word in ("claude_agent_sdk", "Claude Code 本体", "data フォルダ", "API キーらしい文字", "external でない", "日本語の文字の表",
+                 "自社だけのもの"):
         assert word in problems, word
     assert fake_key not in problems                                           # 見つけた中身は出さない
+
+
+def test_build_check_finds_own_company_skill_and_answers(tmp_path):
+    root = _bundle(tmp_path)
+    (root / "_internal" / "skills" / "company-jisha").mkdir(parents=True)
+    (root / "_internal" / "rules").mkdir(parents=True)
+    (root / "_internal" / "rules" / "answers.jsonl").write_text("{}", encoding="utf-8")
+    (root / "_internal" / "rules" / "bkoumuten.yaml").write_text("walls: {}", encoding="utf-8")   # 架空の会社は入れてよい
+    problems = check(root)
+    assert len(problems) == 2 and all("自社だけのもの" in p for p in problems)
 
 
 def test_properties_empty_when_no_local_paths(monkeypatch):
