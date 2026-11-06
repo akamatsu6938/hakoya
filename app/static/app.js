@@ -1050,7 +1050,9 @@ let rulesDone = new Set();       // 承認・却下した案の印（最後の�
 async function renderRules() {
   let d;
   try { d = await call('GET', rulesApi()); } catch (e) { $('#rules-stats').innerHTML = `<tr><td>${esc(e.message)}</td></tr>`; return; }
-  $('#rules-title').textContent = `集計（コードが計算。物件 ${d.properties.length} 件：${d.properties.join('・')}）`;
+  $('#rules-title').textContent = d.properties.length
+    ? `集計（コードが計算。物件 ${d.properties.length} 件：${d.properties.join('・')}）`
+    : '集計（コードが計算。物件はまだありません）';
   $('#rules-stats').innerHTML = '<tr><th>項目</th><th>物件ごとの値</th><th>判定</th></tr>' + d.stats.map((s) =>
     `<tr><td>${esc(s.label)}</td><td>${esc(s.agreement)}</td><td><span class="st st-${s.status}">${STATUS_JA[s.status] || s.status}</span></td></tr>`).join('');
   const values = Object.entries(d.learned.values).map(([k, v]) => ({ ...v, key: k }));
