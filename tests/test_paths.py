@@ -86,6 +86,29 @@ def test_jww_detected_when_not_written(tmp_path):
     assert set(f.jww) == {"elevation"}
 
 
+def test_sample_mode_also_reads_own_global_words(tmp_path, monkeypatch):
+    """見本用は、写したあとで自社用に足した全体の言葉も読む（★11/6：社名・地域・屋号が見本用に入っていなかった）。"""
+    import core.paths as paths
+    import core.privacy as privacy
+    own = tmp_path / "own"
+    own.mkdir()
+    _yaml(own, {"ng_words": ["山田", "架空工務店"], "物件A": {"glb": "x", "ng_words": ["鈴木"]}})
+    sample = own / "sample"
+    sample.mkdir()
+    sample_yaml = _yaml(sample, {"ng_words": ["山田"], "デモ用": {"glb": "y"}})    # 写したときの古い言葉
+    monkeypatch.setattr(paths, "own_data_dir", lambda: own)
+    monkeypatch.setattr(paths, "LOCAL_PATHS", sample_yaml)
+    monkeypatch.setattr(privacy, "LOCAL_PATHS", sample_yaml)
+    monkeypatch.setattr(paths, "MODE", "sample")
+    assert ng_words() == ["山田", "架空工務店"]          # 重ねない・物件ごとの言葉（自社用の物件A）は足さない
+    assert ng_words(sample_yaml) == ["山田"]              # 場所を指定したときは、その中だけ
+    monkeypatch.setattr(paths, "MODE", "other")
+    assert ng_words() == ["山田"]                         # 他社用は足さない
+    monkeypatch.setattr(paths, "MODE", "sample")
+    sample_yaml.unlink()                                  # 見本用の設定がまだなくても、自社用の言葉で見張る
+    assert ng_words() == ["山田", "架空工務店"]
+
+
 def test_ng_words_include_each_property(tmp_path):
     p = _yaml(tmp_path, {"ng_words": ["山田"], "物件A": {"glb": "x"}, "物件C": {"glb": "y", "ng_words": ["鈴木", " "]}})
     assert ng_words(p) == ["山田", "鈴木"]

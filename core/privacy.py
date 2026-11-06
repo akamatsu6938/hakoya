@@ -24,16 +24,32 @@ def clean_words(items) -> list[str]:
     return [str(w) for w in items if w is not None and str(w).strip()]
 
 
-def ng_words(path: Path | None = None) -> list[str]:
-    """全体の ng_words と、物件ごとの ng_words（画面の「物件の登録」で書く）を合わせたもの。"""
-    p = path or LOCAL_PATHS
-    if not p.exists():
+def own_global_words() -> list[str]:
+    """見本用（start_sample.bat）のときだけ、自社用の data/local_paths.yaml の全体の ng_words。ほかの起動のしかたでは空。
+    ★11/6：見本用の local_paths.yaml は最初に一度だけ自社用から写すので、あとで自社用に足した言葉（社名・地域・屋号）が
+    見本用に入っていなかった → 見本用は、自社用の全体の言葉も毎回読む。"""
+    from core import paths                       # 起動のしかたは呼ぶときに見る（テストで差し替えられるように）
+    if paths.MODE != "sample":
         return []
-    conf = load_local_paths(p)
-    words = clean_words(conf.get("ng_words"))
-    for v in conf.values():
-        if isinstance(v, dict):
-            words += clean_words(v.get("ng_words"))
+    own = paths.own_data_dir() / "local_paths.yaml"
+    if not own.exists() or own.resolve() == Path(paths.LOCAL_PATHS).resolve():
+        return []
+    return clean_words(load_local_paths(own).get("ng_words"))
+
+
+def ng_words(path: Path | None = None) -> list[str]:
+    """全体の ng_words と、物件ごとの ng_words（画面の「物件の登録」で書く）を合わせたもの。
+    場所を指定しないときは、見本用なら自社用の全体の言葉も足す（own_global_words）。"""
+    p = path or LOCAL_PATHS
+    words: list[str] = []
+    if p.exists():
+        conf = load_local_paths(p)
+        words = clean_words(conf.get("ng_words"))
+        for v in conf.values():
+            if isinstance(v, dict):
+                words += clean_words(v.get("ng_words"))
+    if path is None:
+        words += [w for w in own_global_words() if w not in words]
     return words
 
 
