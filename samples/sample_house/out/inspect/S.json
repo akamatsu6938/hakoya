@@ -1,0 +1,81 @@
+{
+  "view": "S",
+  "label": "南の立面",
+  "px_per_mm": 0.06,
+  "size_px": [
+    653,
+    370
+  ],
+  "uv_lo": [
+    -9990.0,
+    0.0
+  ],
+  "uv_hi": [
+    -769.0,
+    4001.739990234375
+  ],
+  "elements": [
+    {
+      "id": "W2",
+      "type": "wall",
+      "kind": "exterior",
+      "bbox_px": [
+        152,
+        50,
+        600,
+        261
+      ]
+    },
+    {
+      "id": "W5",
+      "type": "wall",
+      "kind": "standalone",
+      "bbox_px": [
+        98,
+        50,
+        130,
+        261
+      ]
+    },
+    {
+      "id": "W6",
+      "type": "wall",
+      "kind": "standalone",
+      "bbox_px": [
+        130,
+        50,
+        152,
+        261
+      ]
+    },
+    {
+      "id": "O3",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W2",
+      "bbox_px": [
+        270,
+        108,
+        372,
+        142
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    },
+    {
+      "id": "O4",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W2",
+      "bbox_px": [
+        380,
+        108,
+        427,
+        142
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    }
+  ],
+  "direction_assumption": "glb の +Y を北とした（推定）"
+}

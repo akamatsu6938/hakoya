@@ -1,0 +1,351 @@
+{
+  "alias": "見本の家",
+  "connection": "api_key",
+  "summary": "指摘は4件です。南の W2 と西の W3 で、天井まで届く窓の間の柱が細く、上がつながりません（W2 は3人が報告したため1件にまとめました。W3 は壁の上端が天井と同じなので、帯を残せるか質問を付けました）。ほかに、屋根 Y1 の軒の出がほぼない点と、室内の戸が天井まで届く点を確かめたいです。北と東の面は指摘なしです。基礎の天端 480、床 624、外壁の厚み 132 が会社ルールと違う点は、物件全体の「いつもと違う」という注意なので、指摘には入れていません。サポート材、面や辺だけで接する所、glb にだけある樋などは、仕様どおりなので除きました。",
+  "findings": [
+    {
+      "view": "S",
+      "kind": "print",
+      "severity": "中",
+      "title": "南の窓 O3・O4 の間の柱が細い",
+      "message": "南の外壁 W2 の窓 O3・O4 は、上端が天井の高さ（FL+2400）に届いています。そのため間の細い柱（約120〜160mm）は1階の部品の中で下だけでつながり、印刷や組み立てで折れやすくなります。",
+      "targets": [
+        "W2",
+        "O3",
+        "O4"
+      ],
+      "evidence": [
+        "get_elements（S・plan）で O3・O4 の head_fl がどちらも 2400",
+        "窓一覧の値から、柱の幅は 3790−(1970+1700)=120mm（印刷担当）。平面の図では約160mm",
+        "W2 の上端は屋根まで届き（top_glb 3892）、天井の高さ（GL 3024）で部品が分かれる",
+        "W2 の lintel_band_mm は 0。run_checks は同じ案を出していない",
+        "南・平面・印刷の3人の担当が同じ食い違いを報告"
+      ],
+      "proposal": {
+        "target": "W2",
+        "field": "lintel_band_mm",
+        "from": 0,
+        "to": 100.0,
+        "value_source": "rule:model.lintel_band_mm",
+        "reason": "平屋で、天井の高さに届く窓が2つ並び、間に細い柱がある。model-rules の「窓の上の帯」の条件に当たる",
+        "finding": "F1"
+      },
+      "question": null,
+      "confidence": "高",
+      "id": "F1",
+      "status": "未確認"
+    },
+    {
+      "view": "W",
+      "kind": "print",
+      "severity": "中",
+      "title": "西の窓 O5〜O9 の間の柱が細い",
+      "message": "西の外壁 W3 の窓 O5〜O9 は、上端が天井の高さ（FL+2400）に届いています。窓の間の柱（約100〜160mm）は上がつながらず、折れやすくなります。ただし印刷担当の報告では、W3 は壁の上端が天井と同じ高さで、屋根の部品の側に壁がありません。帯を残せるかどうか確かめが必要です。",
+      "targets": [
+        "W3",
+        "O5",
+        "O6",
+        "O7",
+        "O8",
+        "O9"
+      ],
+      "evidence": [
+        "get_elements（W・plan）で O5〜O9 の head_fl が 2400",
+        "W3 の lintel_band_mm は 0。run_checks は同じ案を出していない",
+        "西・平面の担当が帯の案を出し、コードの計算は通った",
+        "印刷担当によると W3 の上端は 3024 で天井の高さと同じ。屋根は西が低い片流れ"
+      ],
+      "proposal": {
+        "target": "W3",
+        "field": "lintel_band_mm",
+        "from": 0,
+        "to": 100.0,
+        "value_source": "rule:model.lintel_band_mm",
+        "reason": "平屋で、天井の高さに届く窓が並び、間に細い柱がある。ただし壁の上端が天井と同じなので、承認の前に質問の答えで確かめる",
+        "finding": "F2"
+      },
+      "question": {
+        "question": "西の外壁 W3 は、壁の上端が天井の高さと同じで、窓が壁の上端まで届いています。窓の間の細い柱の上をどうつなぎますか。",
+        "options": [
+          "窓の上に帯を残す（屋根板の下に帯の分を作る）",
+          "そのままにする（柱の上は屋根を載せて支える）"
+        ],
+        "evidence": "W3・O5〜O9 の head_fl は 2400。W3 の上端は 3024（印刷担当の報告）"
+      },
+      "confidence": "低",
+      "id": "F2",
+      "status": "未確認"
+    },
+    {
+      "view": "W",
+      "kind": "roof",
+      "severity": "中",
+      "title": "屋根 Y1 の軒の出がほぼない",
+      "message": "glb の屋根板の出は、4辺とも 1mm です。B工務店は軒が深い家が多く、軒の出が 100mm より小さい家は珍しいので、軒の入れ忘れでないか確かめたいです。",
+      "targets": [
+        "Y1:W",
+        "Y1:E",
+        "Y1:S",
+        "Y1:N"
+      ],
+      "evidence": [
+        "get_building の roof.eave_mm が W・E・S・N とも 1",
+        "樋を含めた軒の出は、西だけ 146",
+        "company-bkoumuten：軒の出が 100mm より小さい家は珍しい。軒がなければ図面を確かめ、図面がなければ質問する"
+      ],
+      "proposal": null,
+      "question": {
+        "question": "屋根 Y1 の軒の出は、glb では4辺ともほぼ 0 です。このままでよいですか。",
+        "options": [
+          "glb のとおり軒なしで作る",
+          "図面の軒の出を確かめてから入れる"
+        ],
+        "evidence": "get_building の roof.eave_mm がすべて 1mm"
+      },
+      "confidence": "中",
+      "id": "F3",
+      "status": "未確認"
+    },
+    {
+      "view": "plan",
+      "kind": "rule",
+      "severity": "低",
+      "title": "室内の戸 O11〜O20 が天井まで届く",
+      "message": "室内の戸 O11〜O17・O19・O20 は、上端が FL+2400（天井まで）です。会社の標準は FL+2000 で、O18 だけが標準の高さです。ハイドア（特注）か、入力違いかを確かめたいです。",
+      "targets": [
+        "O11",
+        "O12",
+        "O13",
+        "O14",
+        "O15",
+        "O16",
+        "O17",
+        "O19",
+        "O20"
+      ],
+      "evidence": [
+        "get_elements の head_fl_mm が 2400",
+        "会社ルール openings.door_top_fl_mm",
+        "get_building の company_rule_check にも同じ注意がある"
+      ],
+      "proposal": null,
+      "question": {
+        "question": "室内の戸 O11〜O17・O19・O20 は天井まで届いています。ハイドアのままにしますか、標準の高さにそろえますか。",
+        "options": [
+          "ハイドアのまま（FL+2400）",
+          "標準の高さ（openings.door_top_fl_mm）にそろえる"
+        ],
+        "evidence": "平面の担当の質問 Q1。O18 だけが標準の高さ"
+      },
+      "confidence": "中",
+      "id": "F4",
+      "status": "未確認"
+    }
+  ],
+  "at": "2026-11-06T13:14:13+09:00",
+  "cost_usd": 0.4332,
+  "duration_s": 58.1,
+  "turns": 18,
+  "tokens": {
+    "input": 12467,
+    "output": 12271,
+    "cache_write": 84359,
+    "cache_read": 114875
+  },
+  "models": {
+    "inspect_face": "claude-sonnet-5-5",
+    "inspect_merge": "claude-opus-5-5"
+  },
+  "faces": {
+    "S": "済み",
+    "N": "済み",
+    "E": "済み",
+    "W": "済み",
+    "plan": "済み",
+    "print": "済み"
+  },
+  "questions": [
+    {
+      "id": "Q1",
+      "question": "室内の戸 O11〜O17・O19・O20 は上端が天井の高さ(FL+2400)まであります。会社の標準は FL+2000 です。ハイドアですか。",
+      "options": [
+        "ハイドアのまま(FL+2400)",
+        "標準の高さ(FL+2000)にそろえる"
+      ],
+      "evidence": "平面図 O11〜O17・O19・O20 の head_fl_mm=2400。会社ルール openings.door_top_fl_mm=2000。O18 だけ 2000。"
+    }
+  ],
+  "code_findings": [
+    {
+      "view": "plan",
+      "kind": "shape",
+      "severity": "低",
+      "title": "glb の例外：上がり框の位置",
+      "message": "glb の例外（上がり框の位置）：上がり框の位置。壁は作らない（框・靴箱などの造作は模型に入れない）",
+      "targets": [],
+      "evidence": [
+        "glb:typeEAgar#5"
+      ],
+      "source": "code",
+      "id": "C1",
+      "status": "未確認"
+    },
+    {
+      "view": "plan",
+      "kind": "shape",
+      "severity": "低",
+      "title": "glb の例外：床より高い所から始まる戸",
+      "message": "glb の例外（床より高い所から始まる戸）：glb では室内の戸が FL+400 から始まっていた（下は壁の面）。床からのドアにした",
+      "targets": [
+        "O20"
+      ],
+      "evidence": [
+        "glb:typeETate#31"
+      ],
+      "source": "code",
+      "id": "C2",
+      "status": "未確認"
+    },
+    {
+      "view": "plan",
+      "kind": "shape",
+      "severity": "低",
+      "title": "glb の例外：床より高い所から始まる戸",
+      "message": "glb の例外（床より高い所から始まる戸）：glb では室内の戸が FL+400 から始まっていた（下は壁の面）。床からのドアにした",
+      "targets": [
+        "O17"
+      ],
+      "evidence": [
+        "glb:typeETate#43"
+      ],
+      "source": "code",
+      "id": "C3",
+      "status": "未確認"
+    },
+    {
+      "view": "plan",
+      "kind": "rule",
+      "severity": "中",
+      "title": "基礎の天端（GL から）が会社ルールと違う",
+      "message": "基礎の天端（GL から）が会社ルール（450）と違う：480（基礎）。glb の読み違いか、特別な物件か確かめてください",
+      "targets": [],
+      "evidence": [
+        "会社ルール levels.gl_to_foundation_top_mm"
+      ],
+      "source": "code",
+      "id": "C4",
+      "status": "未確認"
+    },
+    {
+      "view": "plan",
+      "kind": "rule",
+      "severity": "中",
+      "title": "1階の床（GL から）が会社ルールと違う",
+      "message": "1階の床（GL から）が会社ルール（600）と違う：624（1F）。glb の読み違いか、特別な物件か確かめてください",
+      "targets": [],
+      "evidence": [
+        "会社ルール levels.gl_to_1fl_mm"
+      ],
+      "source": "code",
+      "id": "C5",
+      "status": "未確認"
+    },
+    {
+      "view": "plan",
+      "kind": "rule",
+      "severity": "中",
+      "title": "外壁の厚み（glb で測った値）が会社ルールと違う",
+      "message": "外壁の厚み（glb で測った値）が会社ルール（190）と違う：132（1F）。glb の読み違いか、特別な物件か確かめてください",
+      "targets": [],
+      "evidence": [
+        "会社ルール walls.exterior_thickness_mm"
+      ],
+      "source": "code",
+      "id": "C6",
+      "status": "未確認"
+    },
+    {
+      "view": "plan",
+      "kind": "rule",
+      "severity": "中",
+      "title": "室内のドアの上端（そろえる前の glb の値）が会社ルール…",
+      "message": "室内のドアの上端（そろえる前の glb の値）が会社ルール（FL+2000）と違う：FL+2400（O11）・FL+2400（O12）・FL+2400（O13）・FL+2400（O14）・FL+2400（O15）・FL+2400（O16） ほか3か所。glb の読み違いか、特別な物件か確かめてください",
+      "targets": [],
+      "evidence": [
+        "会社ルール openings.door_top_fl_mm"
+      ],
+      "source": "code",
+      "id": "C7",
+      "status": "未確認"
+    },
+    {
+      "view": "S",
+      "kind": "print",
+      "severity": "中",
+      "message": "外壁 W2 の窓 O3・O4 の間の柱（1 本、幅 模型 2.4mm・高さ 約 11mm）が、1階の部品の中で上がつながっていません（窓の上端が天井の高さの継ぎ目に届き、上は屋根の部品に入るため。印刷・組み立てで折れやすい）。直す案：窓の上に帯（模型 2mm）を残す",
+      "title": "南の窓の間の柱が折れやすい",
+      "targets": [
+        "W2",
+        "O3",
+        "O4"
+      ],
+      "evidence": [
+        "コードの検査（窓の間の柱）"
+      ],
+      "source": "code",
+      "proposal": {
+        "target": "W2",
+        "field": "lintel_band_mm",
+        "from": 0.0,
+        "to": 100.0,
+        "value_source": "rule:model.lintel_band_mm",
+        "reason": "窓 O3・O4 の間の柱の上を、1階の部品の中でつなぐ（上端＋100mm まで外壁を残し、屋根の部品の外壁から同じ所を除く）"
+      },
+      "id": "C8",
+      "status": "未確認"
+    },
+    {
+      "view": "W",
+      "kind": "print",
+      "severity": "中",
+      "message": "外壁 W3 の窓 O5・O6・O7・O8・O9 の間の柱（3 本、幅 模型 2.4mm・高さ 約 48mm）が、1階の部品の中で上がつながっていません（窓の上端が天井の高さの継ぎ目に届き、上は屋根の部品に入るため。印刷・組み立てで折れやすい）。直す案：窓の上に帯（模型 2mm）を残す",
+      "title": "西の窓の間の柱が折れやすい",
+      "targets": [
+        "W3",
+        "O5",
+        "O6",
+        "O7",
+        "O8",
+        "O9"
+      ],
+      "evidence": [
+        "コードの検査（窓の間の柱）"
+      ],
+      "source": "code",
+      "proposal": {
+        "target": "W3",
+        "field": "lintel_band_mm",
+        "from": 0.0,
+        "to": 100.0,
+        "value_source": "rule:model.lintel_band_mm",
+        "reason": "窓 O5・O6・O7・O8・O9 の間の柱の上を、1階の部品の中でつなぐ（上端＋100mm まで外壁を残し、屋根の部品の外壁から同じ所を除く）"
+      },
+      "id": "C9",
+      "status": "未確認"
+    },
+    {
+      "view": "print",
+      "kind": "print",
+      "severity": "中",
+      "title": "屋根にサポートが要りそう",
+      "message": "屋根：サポートが要りそうな面が約 4129mm²（ポーチの天井の板・下がり天井の板の下など。見えない側）",
+      "targets": [],
+      "evidence": [
+        "コードの検査"
+      ],
+      "source": "code",
+      "id": "C10",
+      "status": "未確認"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "view": "E",
+  "label": "東の立面",
+  "px_per_mm": 0.06,
+  "size_px": [
+    772,
+    370
+  ],
+  "uv_lo": [
+    -11061.0,
+    0.0
+  ],
+  "uv_hi": [
+    141.0,
+    4001.739990234375
+  ],
+  "elements": [
+    {
+      "id": "W1",
+      "type": "wall",
+      "kind": "exterior",
+      "bbox_px": [
+        53,
+        50,
+        719,
+        261
+      ]
+    },
+    {
+      "id": "O1",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W1",
+      "bbox_px": [
+        335,
+        108,
+        437,
+        138
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    },
+    {
+      "id": "O2",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W1",
+      "bbox_px": [
+        553,
+        108,
+        655,
+        138
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    }
+  ],
+  "direction_assumption": "glb の +Y を北とした（推定）"
+}

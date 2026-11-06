@@ -1,0 +1,197 @@
+{
+  "parts": {
+    "foundation": {
+      "label": "基礎",
+      "fuzzy_skin": false,
+      "object": "foundation",
+      "flip_for_print": false,
+      "notes": [
+        "位置合わせの三角を 4 か所（基礎の帯の内側の角）",
+        "1階の壁と重なる所（基礎の天端より高いポーチなど）は、基礎の方を削った（組むときにぶつからないように）"
+      ]
+    },
+    "floor1": {
+      "label": "1階（床・内壁）",
+      "fuzzy_skin": false,
+      "object": "floor1",
+      "flip_for_print": false,
+      "notes": [
+        "家の外の単独の壁（袖壁）W6・W8・W5 は、天井で分けず、まるごと1階の部品に入れた（屋根まで届くものは、上端を屋根の下の面に合わせた）",
+        "袖壁の上をつなぐ梁 W7 も1階の部品に入れた。梁の下には何もないので、Bambu Studio でサポート材（ツリー）を付けて印刷する",
+        "土間（床が FL より低い部屋）1 か所は床の板を抜き、基礎のパーツに土間を作った",
+        "外壁は天井の高さ（3024）で分けた。それより上は屋根と一緒に印刷する",
+        "ファジースキンは外壁の外の面から 1.2mm（模型）の層だけ。窓・ドアのまわり 1.5mm は外す",
+        "家の外の単独の壁（袖壁）・梁も、外に見える面の同じ厚みの層をざらざらにする（外壁と同じ塗り壁）"
+      ]
+    },
+    "exterior1": {
+      "label": "1階の外壁（表面）",
+      "fuzzy_skin": true,
+      "object": "floor1",
+      "flip_for_print": false,
+      "notes": []
+    },
+    "roof": {
+      "label": "屋根（屋根板・ポーチの天井）",
+      "fuzzy_skin": false,
+      "object": "roof",
+      "flip_for_print": false,
+      "notes": [
+        "屋根板を外壁から4辺とも 1.0mm（模型）出した（板金の分）",
+        "ポーチの天井は屋根と一緒に印刷する（作者指定）",
+        "下がり壁（W20）は屋根と一緒に印刷する。屋根の裏まで立ち上げ、天井より上の部分は組むと屋根裏に隠れる",
+        "天井の高さ（3024）より上の部分を屋根の外壁に入れた壁：W1・W2・W3・W4",
+        "ずれ止めの三角を 4 か所（外壁の内側の角、天井の高さで1階にはまる）",
+        "1階の部品の袖壁・梁のまわりは、屋根の部品をはめあいの隙間の分だけ空けた（屋根を載せるときにぶつからない）",
+        "屋根の外壁も、窓・ドアのまわり 1.5mm はざらざらにしない（天井の高さに上端がある窓・ドアの上の帯）"
+      ]
+    },
+    "roof_ext": {
+      "label": "屋根の外壁",
+      "fuzzy_skin": true,
+      "object": "roof",
+      "flip_for_print": false,
+      "notes": []
+    }
+  },
+  "overrides": [],
+  "checks": [
+    {
+      "part": "all",
+      "level": "情報",
+      "item": "overlap",
+      "message": "組んだときに、パーツどうしは重なっていません"
+    },
+    {
+      "part": "foundation",
+      "level": "情報",
+      "item": "watertight",
+      "message": "基礎：閉じた立体です"
+    },
+    {
+      "part": "foundation",
+      "level": "情報",
+      "item": "build_volume",
+      "message": "基礎：大きさ 183.4×222.0×11.1mm（造形範囲に収まる）"
+    },
+    {
+      "part": "foundation",
+      "level": "情報",
+      "item": "volume",
+      "message": "基礎：体積 67.4cm³（樹脂の目安）"
+    },
+    {
+      "part": "floor1",
+      "level": "情報",
+      "item": "watertight",
+      "message": "1階（床・内壁）：閉じた立体です"
+    },
+    {
+      "part": "floor1",
+      "level": "情報",
+      "item": "build_volume",
+      "message": "1階（床・内壁）：大きさ 166.2×220.8×60.9mm（造形範囲に収まる）"
+    },
+    {
+      "part": "floor1",
+      "level": "情報",
+      "item": "volume",
+      "message": "1階（床・内壁）：体積 262.5cm³（樹脂の目安）"
+    },
+    {
+      "part": "exterior1",
+      "level": "情報",
+      "item": "watertight",
+      "message": "1階の外壁（表面）：閉じた立体です"
+    },
+    {
+      "part": "exterior1",
+      "level": "情報",
+      "item": "build_volume",
+      "message": "1階の外壁（表面）：大きさ 167.4×222.0×60.9mm（造形範囲に収まる）"
+    },
+    {
+      "part": "exterior1",
+      "level": "情報",
+      "item": "volume",
+      "message": "1階の外壁（表面）：体積 48.1cm³（樹脂の目安）"
+    },
+    {
+      "part": "roof",
+      "level": "低",
+      "item": "watertight",
+      "message": "屋根：閉じた立体です。ただ、面や辺だけで接している所があります（STL を開くと Bambu Studio が「修復」を勧めることがあります）"
+    },
+    {
+      "part": "roof",
+      "level": "情報",
+      "item": "build_volume",
+      "message": "屋根：大きさ 169.8×224.0×23.7mm（造形範囲に収まる）"
+    },
+    {
+      "part": "roof",
+      "level": "情報",
+      "item": "volume",
+      "message": "屋根：体積 123.1cm³（樹脂の目安）"
+    },
+    {
+      "part": "roof",
+      "level": "中",
+      "item": "support",
+      "message": "屋根：サポートが要りそうな面が約 4129mm²（ポーチの天井の板・下がり天井の板の下など。見えない側）"
+    },
+    {
+      "part": "roof",
+      "level": "情報",
+      "item": "print_split",
+      "message": "屋根：上の面を床に付けて置いた（上の面にサポートが付かない）"
+    },
+    {
+      "part": "export",
+      "level": "情報",
+      "item": "bambu_3mf",
+      "message": "Bambu 形式の 3MF（model_bambu.3mf）を作りました。ざらざら（ファジースキン）は付けていません。付けるときは、印刷タブの「外壁の仕上げ」で選べます"
+    }
+  ],
+  "bambu_3mf": {
+    "ok": true,
+    "presets": {
+      "machine": "Bambu Lab A1 0.4 nozzle",
+      "process": "0.20mm Standard @BBL A1",
+      "filament": "Bambu PLA Basic @BBL A1"
+    }
+  },
+  "print_pieces": [
+    {
+      "object": "roof",
+      "name": "屋根",
+      "face": "屋根",
+      "files": [
+        "roof.stl",
+        "roof_ext.stl"
+      ],
+      "yaw_deg": 0.0,
+      "size_mm": [
+        169.8,
+        224.0,
+        23.7
+      ],
+      "support_mm2": 4129,
+      "fits": true,
+      "warnings": []
+    }
+  ],
+  "fuzzy_skin": {
+    "on": false,
+    "source": "company",
+    "company_default": false
+  },
+  "house_cut": null,
+  "stl_files": [
+    "exterior1.stl",
+    "floor1.stl",
+    "foundation.stl",
+    "roof.stl",
+    "roof_ext.stl"
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "view": "W",
+  "label": "西の立面",
+  "px_per_mm": 0.06,
+  "size_px": [
+    772,
+    370
+  ],
+  "uv_lo": [
+    -141.0,
+    0.0
+  ],
+  "uv_hi": [
+    11061.0,
+    4001.739990234375
+  ],
+  "elements": [
+    {
+      "id": "W3",
+      "type": "wall",
+      "kind": "exterior",
+      "bbox_px": [
+        63,
+        50,
+        708,
+        261
+      ]
+    },
+    {
+      "id": "W7",
+      "type": "wall",
+      "kind": "standalone",
+      "bbox_px": [
+        63,
+        81,
+        708,
+        108
+      ]
+    },
+    {
+      "id": "O5",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        116,
+        108,
+        218,
+        141
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    },
+    {
+      "id": "O6",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        225,
+        108,
+        327,
+        141
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    },
+    {
+      "id": "O7",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        553,
+        108,
+        600,
+        252
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O8",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        608,
+        108,
+        655,
+        252
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O9",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        662,
+        108,
+        707,
+        252
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 740.0
+    },
+    {
+      "id": "O10",
+      "type": "opening",
+      "kind": "entrance_door",
+      "wall": "W3",
+      "bbox_px": [
+        425,
+        119,
+        493,
+        258
+      ],
+      "head_fl_mm": 2225,
+      "width_mm": 1140.0
+    }
+  ],
+  "direction_assumption": "glb の +Y を北とした（推定）"
+}

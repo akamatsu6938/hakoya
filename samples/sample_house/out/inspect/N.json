@@ -1,0 +1,42 @@
+{
+  "view": "N",
+  "label": "北の立面",
+  "px_per_mm": 0.06,
+  "size_px": [
+    653,
+    370
+  ],
+  "uv_lo": [
+    769.0,
+    0.0
+  ],
+  "uv_hi": [
+    9990.0,
+    4001.739990234375
+  ],
+  "elements": [
+    {
+      "id": "W4",
+      "type": "wall",
+      "kind": "exterior",
+      "bbox_px": [
+        53,
+        50,
+        500,
+        261
+      ]
+    },
+    {
+      "id": "W8",
+      "type": "wall",
+      "kind": "standalone",
+      "bbox_px": [
+        500,
+        50,
+        555,
+        261
+      ]
+    }
+  ],
+  "direction_assumption": "glb の +Y を北とした（推定）"
+}

@@ -1,0 +1,2049 @@
+{
+  "source": {
+    "glb": "見本の家.glb",
+    "generator": "WIH",
+    "wih_version": "Walk in home 2024 Standard Rel.1.30",
+    "company_rules": "bkoumuten"
+  },
+  "ground": {
+    "gl_mm": 0,
+    "foundation_top_mm": 480,
+    "foundation_source": "glb:typeEKiso#3",
+    "gl_source": "glb:typeESiki#7"
+  },
+  "levels": [
+    {
+      "name": "1F",
+      "fl_mm": 624,
+      "source": "glb:typeEHeya#11",
+      "ceiling_mm": 2400,
+      "ceiling_source": "glb:typeEHeya#8"
+    }
+  ],
+  "walls": [
+    {
+      "id": "W1",
+      "level": "1F",
+      "kind": "exterior",
+      "start": [
+        -915.0,
+        -11010.0
+      ],
+      "end": [
+        -915.0,
+        90.0
+      ],
+      "thickness_mm": 190.0,
+      "bottom_mm": 480,
+      "height": "to_roof",
+      "top_glb_mm": 3899,
+      "source": "glb:typeEGaih#4",
+      "thickness_rule": "walls.exterior_thickness_mm"
+    },
+    {
+      "id": "W2",
+      "level": "1F",
+      "kind": "exterior",
+      "start": [
+        -8280.0,
+        -10915.0
+      ],
+      "end": [
+        -820.0,
+        -10915.0
+      ],
+      "thickness_mm": 190.0,
+      "bottom_mm": 480,
+      "height": "to_roof",
+      "top_glb_mm": 3892,
+      "source": "glb:typeEGaih#4",
+      "thickness_rule": "walls.exterior_thickness_mm",
+      "assumption": [
+        "outside_trim: 家の外で単独の壁（袖壁）と重なる所（910mm）を、家の角（基礎の外形の辺）で止めた（glb では袖壁の外の面が外壁の部材に入っていた）"
+      ]
+    },
+    {
+      "id": "W3",
+      "level": "1F",
+      "kind": "exterior",
+      "start": [
+        -8185.0,
+        -90.0
+      ],
+      "end": [
+        -8185.0,
+        -10830.0
+      ],
+      "thickness_mm": 190.0,
+      "bottom_mm": 480,
+      "height": "to_roof",
+      "top_glb_mm": 3024,
+      "source": "glb:typeEGaih#4",
+      "thickness_rule": "walls.exterior_thickness_mm"
+    },
+    {
+      "id": "W4",
+      "level": "1F",
+      "kind": "exterior",
+      "start": [
+        -820.0,
+        -5.0
+      ],
+      "end": [
+        -8280.0,
+        -5.0
+      ],
+      "thickness_mm": 190.0,
+      "bottom_mm": 480,
+      "height": "to_roof",
+      "top_glb_mm": 3892,
+      "source": "glb:typeEGaih#4",
+      "thickness_rule": "walls.exterior_thickness_mm",
+      "assumption": [
+        "outside_trim: 家の外で単独の壁（袖壁）と重なる所（910mm）を、家の角（基礎の外形の辺）で止めた（glb では袖壁の外の面が外壁の部材に入っていた）"
+      ]
+    },
+    {
+      "id": "W5",
+      "level": "1F",
+      "kind": "standalone",
+      "start": [
+        -9190.0,
+        -10906.0
+      ],
+      "end": [
+        -8645.0,
+        -10906.0
+      ],
+      "thickness_mm": 208.0,
+      "bottom_mm": 480,
+      "height": "to_roof",
+      "source": "glb:typeEKabe#35",
+      "thickness_rule": "walls.standalone_thickness_mm",
+      "assumption": [
+        "outside_trim: 家の外で外壁と重なっていた所を受け持つので、外壁と同じく屋根まで（to_roof）にした（glb の単独の壁の上端は 3481）",
+        "standalone_rule: 両側とも家の外の単独の壁なので、会社ルール walls.standalone_thickness_mm の厚み 208mm にした（glb は 180mm）"
+      ]
+    },
+    {
+      "id": "W6",
+      "level": "1F",
+      "kind": "standalone",
+      "start": [
+        -8645.0,
+        -10906.0
+      ],
+      "end": [
+        -8280.0,
+        -10906.0
+      ],
+      "thickness_mm": 208.0,
+      "bottom_mm": 480,
+      "height": "to_roof",
+      "source": "glb:typeEKabe#32",
+      "thickness_rule": "walls.standalone_thickness_mm",
+      "assumption": [
+        "outside_trim: 家の外で外壁と重なっていた所を受け持つので、外壁と同じく屋根まで（to_roof）にした（glb の単独の壁の上端は 3024）",
+        "standalone_rule: 両側とも家の外の単独の壁なので、会社ルール walls.standalone_thickness_mm の厚み 208mm にした（glb は 180mm）"
+      ]
+    },
+    {
+      "id": "W7",
+      "level": "1F",
+      "kind": "standalone",
+      "start": [
+        -9086.0,
+        -10830.0
+      ],
+      "end": [
+        -9086.0,
+        -90.0
+      ],
+      "thickness_mm": 208.0,
+      "bottom_mm": 3024,
+      "height": 3481,
+      "source": "glb:typeEKabe#36",
+      "thickness_rule": "walls.standalone_thickness_mm",
+      "assumption": [
+        "standalone_rule: 両側とも家の外の単独の壁なので、会社ルール walls.standalone_thickness_mm の厚み 208mm にした（glb は 180mm）"
+      ]
+    },
+    {
+      "id": "W8",
+      "level": "1F",
+      "kind": "standalone",
+      "start": [
+        -9190.0,
+        -14.0
+      ],
+      "end": [
+        -8280.0,
+        -14.0
+      ],
+      "thickness_mm": 208.0,
+      "bottom_mm": 480,
+      "height": "to_roof",
+      "source": "glb:typeEKabe#6",
+      "thickness_rule": "walls.standalone_thickness_mm",
+      "assumption": [
+        "outside_trim: 家の外で外壁と重なっていた所を受け持つので、外壁と同じく屋根まで（to_roof）にした（glb の単独の壁の上端は 3481）",
+        "standalone_rule: 両側とも家の外の単独の壁なので、会社ルール walls.standalone_thickness_mm の厚み 208mm にした（glb は 180mm）"
+      ]
+    },
+    {
+      "id": "W9",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -8185.0,
+        -7280.0
+      ],
+      "end": [
+        -915.0,
+        -7280.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#11",
+      "sources": [
+        "glb:typeEHeya#11",
+        "glb:typeEHeya#14",
+        "glb:typeEHeya#28",
+        "glb:typeEHeya#30",
+        "glb:typeEHeya#8"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W10",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -4550.0,
+        -7280.0
+      ],
+      "end": [
+        -4550.0,
+        -4550.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#11",
+      "sources": [
+        "glb:typeEHeya#11",
+        "glb:typeEHeya#30",
+        "glb:typeEHeya#34",
+        "glb:typeEHeya#37"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W11",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -2730.0,
+        -7280.0
+      ],
+      "end": [
+        -2730.0,
+        -2730.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#10",
+      "sources": [
+        "glb:typeEHeya#10",
+        "glb:typeEHeya#11",
+        "glb:typeEHeya#8",
+        "glb:typeEHeya#9",
+        "glb:typeEShuu#33"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W12",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -5460.0,
+        -5535.0
+      ],
+      "end": [
+        -5460.0,
+        -5.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#12",
+      "sources": [
+        "glb:typeEHeya#12",
+        "glb:typeEHeya#13",
+        "glb:typeEHeya#30",
+        "glb:typeEHeya#34",
+        "glb:typeEHeya#37"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W13",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -8185.0,
+        -5460.0
+      ],
+      "end": [
+        -5460.0,
+        -5460.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#13",
+      "sources": [
+        "glb:typeEHeya#13",
+        "glb:typeEHeya#14",
+        "glb:typeEHeya#30"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W14",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -4625.0,
+        -4550.0
+      ],
+      "end": [
+        -915.0,
+        -4550.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#10",
+      "sources": [
+        "glb:typeEHeya#10",
+        "glb:typeEHeya#11",
+        "glb:typeEHeya#30",
+        "glb:typeEHeya#8",
+        "glb:typeEHeya#9"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W15",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -3640.0,
+        -4550.0
+      ],
+      "end": [
+        -3640.0,
+        -2730.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#10",
+      "sources": [
+        "glb:typeEHeya#10",
+        "glb:typeEHeya#30",
+        "glb:typeEShuu#33"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W16",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -4550.0,
+        -3598.8
+      ],
+      "end": [
+        -4550.0,
+        -835.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#11",
+      "sources": [
+        "glb:typeEHeya#11",
+        "glb:typeEHeya#30",
+        "glb:typeEHeya#34",
+        "glb:typeEHeya#37"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W17",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -3640.0,
+        -3033.3
+      ],
+      "end": [
+        -2730.0,
+        -3033.3
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#10",
+      "sources": [
+        "glb:typeEHeya#10",
+        "glb:typeEShuu#33"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W18",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -8185.0,
+        -2730.0
+      ],
+      "end": [
+        -5460.0,
+        -2730.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#12",
+      "sources": [
+        "glb:typeEHeya#12",
+        "glb:typeEHeya#13",
+        "glb:typeEHeya#30",
+        "glb:typeEHeya#34",
+        "glb:typeEHeya#9",
+        "glb:typeEShuu#33"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W19",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -4550.0,
+        -2730.0
+      ],
+      "end": [
+        -915.0,
+        -2730.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#12",
+      "sources": [
+        "glb:typeEHeya#12",
+        "glb:typeEHeya#13",
+        "glb:typeEHeya#30",
+        "glb:typeEHeya#34",
+        "glb:typeEHeya#9",
+        "glb:typeEShuu#33"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W20",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -5460.0,
+        -1820.0
+      ],
+      "end": [
+        -4550.0,
+        -1820.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 2624,
+      "height": 3024,
+      "source": "glb:typeEHeya#30",
+      "sources": [
+        "glb:typeEHeya#30",
+        "glb:typeEHeya#37"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    },
+    {
+      "id": "W21",
+      "level": "1F",
+      "kind": "interior",
+      "start": [
+        -5460.0,
+        -910.0
+      ],
+      "end": [
+        -4550.0,
+        -910.0
+      ],
+      "thickness_mm": 150.0,
+      "bottom_mm": 624,
+      "height": 3024,
+      "source": "glb:typeEHeya#34",
+      "sources": [
+        "glb:typeEHeya#34",
+        "glb:typeEHeya#37"
+      ],
+      "thickness_rule": "walls.interior_thickness_mm",
+      "assumption": [
+        "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+      ]
+    }
+  ],
+  "openings": [
+    {
+      "id": "O1",
+      "wall": "W1",
+      "kind": "window",
+      "style": "sliding",
+      "offset_mm": 4700.0,
+      "width_mm": 1700.0,
+      "sill_mm": 2524,
+      "head_mm": 3024,
+      "sill_fl_mm": 1900,
+      "head_fl_mm": 2400,
+      "center": [
+        -889.4,
+        -5460.0
+      ],
+      "source": "glb:typeETate#23",
+      "level": "1F"
+    },
+    {
+      "id": "O2",
+      "wall": "W1",
+      "kind": "window",
+      "style": "sliding",
+      "offset_mm": 8340.0,
+      "width_mm": 1700.0,
+      "sill_mm": 2524,
+      "head_mm": 3024,
+      "sill_fl_mm": 1900,
+      "head_fl_mm": 2400,
+      "center": [
+        -889.4,
+        -1820.0
+      ],
+      "source": "glb:typeETate#47",
+      "level": "1F"
+    },
+    {
+      "id": "O3",
+      "wall": "W2",
+      "kind": "window",
+      "style": "sliding",
+      "offset_mm": 1970.0,
+      "width_mm": 1700.0,
+      "sill_mm": 2454,
+      "head_mm": 3024,
+      "sill_fl_mm": 1830,
+      "head_fl_mm": 2400,
+      "center": [
+        -5460.0,
+        -10940.6
+      ],
+      "source": "glb:typeETate#27",
+      "level": "1F"
+    },
+    {
+      "id": "O4",
+      "wall": "W2",
+      "kind": "window",
+      "style": "fixed",
+      "offset_mm": 3790.0,
+      "width_mm": 790.0,
+      "sill_mm": 2454,
+      "head_mm": 3024,
+      "sill_fl_mm": 1830,
+      "head_fl_mm": 2400,
+      "center": [
+        -4095.0,
+        -10940.6
+      ],
+      "source": "glb:typeETate#24",
+      "level": "1F"
+    },
+    {
+      "id": "O5",
+      "wall": "W3",
+      "kind": "window",
+      "style": "sliding",
+      "offset_mm": 880.0,
+      "width_mm": 1700.0,
+      "sill_mm": 2474,
+      "head_mm": 3024,
+      "sill_fl_mm": 1850,
+      "head_fl_mm": 2400,
+      "center": [
+        -8210.6,
+        -1820.0
+      ],
+      "source": "glb:typeETate#42",
+      "level": "1F"
+    },
+    {
+      "id": "O6",
+      "wall": "W3",
+      "kind": "window",
+      "style": "sliding",
+      "offset_mm": 2700.0,
+      "width_mm": 1700.0,
+      "sill_mm": 2474,
+      "head_mm": 3024,
+      "sill_fl_mm": 1850,
+      "head_fl_mm": 2400,
+      "center": [
+        -8210.6,
+        -3640.0
+      ],
+      "source": "glb:typeETate#41",
+      "level": "1F"
+    },
+    {
+      "id": "O7",
+      "wall": "W3",
+      "kind": "window",
+      "style": "sliding",
+      "offset_mm": 8160.0,
+      "width_mm": 790.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -8210.6,
+        -8645.0
+      ],
+      "source": "glb:typeETate#45",
+      "level": "1F"
+    },
+    {
+      "id": "O8",
+      "wall": "W3",
+      "kind": "window",
+      "style": "sliding",
+      "offset_mm": 9070.0,
+      "width_mm": 790.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -8210.6,
+        -9555.0
+      ],
+      "source": "glb:typeETate#46",
+      "level": "1F"
+    },
+    {
+      "id": "O9",
+      "wall": "W3",
+      "kind": "window",
+      "style": "sliding",
+      "offset_mm": 9980.0,
+      "width_mm": 740.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -8210.6,
+        -10440.0
+      ],
+      "source": "glb:typeETate#44",
+      "level": "1F"
+    },
+    {
+      "id": "O10",
+      "wall": "W3",
+      "kind": "entrance_door",
+      "style": "entrance",
+      "offset_mm": 6023.8,
+      "width_mm": 1140.0,
+      "sill_mm": 519,
+      "head_mm": 2849,
+      "sill_fl_mm": -105,
+      "head_fl_mm": 2225,
+      "center": [
+        -8210.6,
+        -6683.8
+      ],
+      "source": "glb:typeETate#26",
+      "level": "1F"
+    },
+    {
+      "id": "O11",
+      "wall": "W11",
+      "kind": "door",
+      "style": "outset_sliding",
+      "offset_mm": 1955.0,
+      "width_mm": 715.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -2716.3,
+        -4967.5
+      ],
+      "source": "glb:typeETate#22",
+      "level": "1F"
+    },
+    {
+      "id": "O12",
+      "wall": "W12",
+      "kind": "door",
+      "style": "hinged",
+      "offset_mm": 1940.0,
+      "width_mm": 790.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -5460.0,
+        -3200.0
+      ],
+      "source": "glb:typeETate#16",
+      "level": "1F"
+    },
+    {
+      "id": "O13",
+      "wall": "W12",
+      "kind": "door",
+      "style": "hinged",
+      "offset_mm": 2865.0,
+      "width_mm": 790.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -5460.0,
+        -2275.0
+      ],
+      "source": "glb:typeETate#15",
+      "level": "1F"
+    },
+    {
+      "id": "O14",
+      "wall": "W14",
+      "kind": "door",
+      "style": "outset_sliding",
+      "offset_mm": 135.0,
+      "width_mm": 715.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -4132.5,
+        -4563.6
+      ],
+      "source": "glb:typeETate#25",
+      "level": "1F"
+    },
+    {
+      "id": "O15",
+      "wall": "W14",
+      "kind": "door",
+      "style": "sliding_pair",
+      "offset_mm": 1955.0,
+      "width_mm": 790.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -2275.0,
+        -4550.0
+      ],
+      "source": "glb:typeETate#18",
+      "level": "1F"
+    },
+    {
+      "id": "O16",
+      "wall": "W15",
+      "kind": "door",
+      "style": "outset_sliding",
+      "offset_mm": 60.0,
+      "width_mm": 615.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -3626.3,
+        -4182.5
+      ],
+      "source": "glb:typeETate#17",
+      "level": "1F"
+    },
+    {
+      "id": "O17",
+      "wall": "W16",
+      "kind": "door",
+      "style": "hinged",
+      "offset_mm": 928.8,
+      "width_mm": 790.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -4550.0,
+        -2275.0
+      ],
+      "source": "glb:typeETate#43",
+      "level": "1F",
+      "glb_original": {
+        "sill_fl_mm": 400
+      },
+      "assumption": [
+        "door_from_floor: glb では FL+400 から始まる戸。床からのドアにした"
+      ]
+    },
+    {
+      "id": "O18",
+      "wall": "W20",
+      "kind": "door",
+      "style": "hinged",
+      "offset_mm": 60.0,
+      "width_mm": 790.0,
+      "sill_mm": 624,
+      "head_mm": 2624,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2000,
+      "center": [
+        -5005.0,
+        -1820.0
+      ],
+      "source": "glb:typeETate#40",
+      "level": "1F",
+      "assumption": [
+        "under_hanging_wall: 下がり壁の下の開口（壁は開口の上端より上だけ）。穴は開けない"
+      ]
+    },
+    {
+      "id": "O19",
+      "wall": "W9",
+      "kind": "door",
+      "style": "outset_sliding",
+      "offset_mm": 2785.0,
+      "width_mm": 790.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -5005.0,
+        -7295.8
+      ],
+      "source": "glb:typeETate#29",
+      "level": "1F"
+    },
+    {
+      "id": "O20",
+      "wall": "W9",
+      "kind": "door",
+      "style": "outset_sliding",
+      "offset_mm": 5515.0,
+      "width_mm": 790.0,
+      "sill_mm": 624,
+      "head_mm": 3024,
+      "sill_fl_mm": 0,
+      "head_fl_mm": 2400,
+      "center": [
+        -2275.0,
+        -7293.6
+      ],
+      "source": "glb:typeETate#31",
+      "level": "1F",
+      "glb_original": {
+        "sill_fl_mm": 400
+      },
+      "assumption": [
+        "door_from_floor: glb では FL+400 から始まる戸。床からのドアにした"
+      ]
+    }
+  ],
+  "roof": {
+    "source": "glb:typeEYane#38",
+    "shape": "shed",
+    "pitch": [
+      0.5,
+      10
+    ],
+    "slope": 0.05,
+    "low_side": "W",
+    "low_side_assumption": "glb の +Y を北とした（推定：ポーチが西側にあることと一致）",
+    "top_plane": {
+      "a": 0.05,
+      "b": -0.0,
+      "c": 4040.19
+    },
+    "bottom_plane": {
+      "a": 0.05,
+      "b": -0.0,
+      "c": 3940.06
+    },
+    "thickness_mm": 100.0,
+    "top_z_range_mm": [
+      3581,
+      3999
+    ],
+    "footprint": [
+      [
+        -819.0,
+        -11011.0
+      ],
+      [
+        -9191.0,
+        -11011.0
+      ],
+      [
+        -9191.0,
+        91.0
+      ],
+      [
+        -819.0,
+        91.0
+      ]
+    ],
+    "eave_mm": {
+      "W": 1,
+      "E": 1,
+      "S": 1,
+      "N": 1
+    },
+    "eave_with_gutter_mm": {
+      "W": 146,
+      "E": 1,
+      "S": 1,
+      "N": 1
+    },
+    "gutter_note": "軒樋（YANE_NTOI）を含めた出。模型では樋は省く（include.gutter）"
+  },
+  "roofs": [
+    {
+      "id": "Y1",
+      "level": "1F",
+      "kind": "main",
+      "source": "glb:typeEYane#38",
+      "shape": "shed",
+      "pitch": [
+        0.5,
+        10
+      ],
+      "slope": 0.05,
+      "low_side": "W",
+      "low_side_assumption": "glb の +Y を北とした（推定：ポーチが西側にあることと一致）",
+      "top_plane": {
+        "a": 0.05,
+        "b": -0.0,
+        "c": 4040.19
+      },
+      "bottom_plane": {
+        "a": 0.05,
+        "b": -0.0,
+        "c": 3940.06
+      },
+      "thickness_mm": 100.0,
+      "top_z_range_mm": [
+        3581,
+        3999
+      ],
+      "footprint": [
+        [
+          -819.0,
+          -11011.0
+        ],
+        [
+          -9191.0,
+          -11011.0
+        ],
+        [
+          -9191.0,
+          91.0
+        ],
+        [
+          -819.0,
+          91.0
+        ]
+      ],
+      "eave_mm": {
+        "W": 1,
+        "E": 1,
+        "S": 1,
+        "N": 1
+      },
+      "eave_with_gutter_mm": {
+        "W": 146,
+        "E": 1,
+        "S": 1,
+        "N": 1
+      },
+      "gutter_note": "軒樋（YANE_NTOI）を含めた出。模型では樋は省く（include.gutter）"
+    }
+  ],
+  "foundation": {
+    "top_mm": 480,
+    "outline": [
+      [
+        -8280.0,
+        90.0
+      ],
+      [
+        -820.0,
+        90.0
+      ],
+      [
+        -820.0,
+        -11010.0
+      ],
+      [
+        -8280.0,
+        -11010.0
+      ]
+    ],
+    "area_m2": 82.81,
+    "footings": [
+      {
+        "polygon": [
+          [
+            -9175.0,
+            -10995.0
+          ],
+          [
+            -9175.0,
+            -10845.0
+          ],
+          [
+            -8265.0,
+            -10845.0
+          ],
+          [
+            -8265.0,
+            -10995.0
+          ]
+        ],
+        "note": "袖壁などの下の基礎（底の形）"
+      },
+      {
+        "polygon": [
+          [
+            -8265.0,
+            75.0
+          ],
+          [
+            -8265.0,
+            -75.0
+          ],
+          [
+            -9175.0,
+            -75.0
+          ],
+          [
+            -9175.0,
+            75.0
+          ]
+        ],
+        "note": "袖壁などの下の基礎（底の形）"
+      }
+    ],
+    "source": "glb:typeEKiso#3"
+  },
+  "porches": [
+    {
+      "id": "P1",
+      "polygon": [
+        [
+          -9390.0,
+          -7460.0
+        ],
+        [
+          -9390.0,
+          -5460.0
+        ],
+        [
+          -8265.0,
+          -5460.0
+        ],
+        [
+          -8265.0,
+          -7460.0
+        ]
+      ],
+      "top_mm": 540,
+      "bottom_mm": 0,
+      "area_m2": 2.25,
+      "source": "glb:typeEPoch#49"
+    },
+    {
+      "id": "P2",
+      "polygon": [
+        [
+          -9390.0,
+          -5460.0
+        ],
+        [
+          -9390.0,
+          -7460.0
+        ],
+        [
+          -9690.0,
+          -7460.0
+        ],
+        [
+          -9690.0,
+          -5460.0
+        ]
+      ],
+      "top_mm": 360,
+      "bottom_mm": 0,
+      "area_m2": 0.6,
+      "source": "glb:typeEPoch#50"
+    },
+    {
+      "id": "P3",
+      "polygon": [
+        [
+          -9690.0,
+          -5460.0
+        ],
+        [
+          -9690.0,
+          -7460.0
+        ],
+        [
+          -9990.0,
+          -7460.0
+        ],
+        [
+          -9990.0,
+          -5460.0
+        ]
+      ],
+      "top_mm": 180,
+      "bottom_mm": 0,
+      "area_m2": 0.6,
+      "source": "glb:typeEPoch#48"
+    }
+  ],
+  "porch_soffits": [
+    {
+      "id": "S1",
+      "polygon": [
+        [
+          -9010.0,
+          -10830.0
+        ],
+        [
+          -9010.0,
+          -90.0
+        ],
+        [
+          -8280.0,
+          -90.0
+        ],
+        [
+          -8280.0,
+          -10830.0
+        ]
+      ],
+      "z_mm": 3024,
+      "area_m2": 7.84,
+      "source": "glb:typeESten#39"
+    }
+  ],
+  "lowered_ceilings": [],
+  "rooms": [
+    {
+      "id": "R1",
+      "level": "1F",
+      "polygon": [
+        [
+          -3525.2,
+          -3875.0
+        ],
+        [
+          -3567.5,
+          -3875.0
+        ],
+        [
+          -3567.5,
+          -3105.8
+        ],
+        [
+          -2802.5,
+          -3105.8
+        ],
+        [
+          -2802.5,
+          -4477.5
+        ],
+        [
+          -3525.2,
+          -4477.5
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 1.04,
+      "source": "glb:typeEHeya#10"
+    },
+    {
+      "id": "R2",
+      "level": "1F",
+      "polygon": [
+        [
+          -3775.0,
+          -4664.8
+        ],
+        [
+          -3775.0,
+          -4622.5
+        ],
+        [
+          -2817.5,
+          -4622.5
+        ],
+        [
+          -2817.5,
+          -5325.0
+        ],
+        [
+          -2802.5,
+          -5325.0
+        ],
+        [
+          -2802.5,
+          -7207.5
+        ],
+        [
+          -4477.5,
+          -7207.5
+        ],
+        [
+          -4477.5,
+          -4664.8
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 4.3,
+      "source": "glb:typeEHeya#11"
+    },
+    {
+      "id": "R3",
+      "level": "1F",
+      "polygon": [
+        [
+          -5547.5,
+          -1880.0
+        ],
+        [
+          -5547.5,
+          -2657.5
+        ],
+        [
+          -8117.5,
+          -2657.5
+        ],
+        [
+          -8117.5,
+          -72.5
+        ],
+        [
+          -5532.5,
+          -72.5
+        ],
+        [
+          -5532.5,
+          -1880.0
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 6.69,
+      "source": "glb:typeEHeya#12"
+    },
+    {
+      "id": "R4",
+      "level": "1F",
+      "polygon": [
+        [
+          -5497.5,
+          -2730.0
+        ],
+        [
+          -5497.5,
+          -2805.0
+        ],
+        [
+          -5547.5,
+          -2805.0
+        ],
+        [
+          -5547.5,
+          -3595.0
+        ],
+        [
+          -5532.5,
+          -3595.0
+        ],
+        [
+          -5532.5,
+          -5387.5
+        ],
+        [
+          -8117.5,
+          -5387.5
+        ],
+        [
+          -8117.5,
+          -2802.5
+        ],
+        [
+          -5532.5,
+          -2802.5
+        ],
+        [
+          -5532.5,
+          -2730.0
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 6.68,
+      "source": "glb:typeEHeya#13"
+    },
+    {
+      "id": "R5",
+      "level": "1F",
+      "polygon": [
+        [
+          -6370.0,
+          -7207.5
+        ],
+        [
+          -8102.5,
+          -7207.5
+        ],
+        [
+          -8102.5,
+          -6113.8
+        ],
+        [
+          -8117.5,
+          -6113.8
+        ],
+        [
+          -8117.5,
+          -5532.5
+        ],
+        [
+          -6370.0,
+          -5532.5
+        ]
+      ],
+      "floor_mm": 384,
+      "area_m2": 2.92,
+      "source": "glb:typeEHeya#14"
+    },
+    {
+      "id": "R6",
+      "level": "1F",
+      "polygon": [
+        [
+          -8117.5,
+          -10810.0
+        ],
+        [
+          -8102.5,
+          -10810.0
+        ],
+        [
+          -8102.5,
+          -10070.0
+        ],
+        [
+          -8117.5,
+          -10070.0
+        ],
+        [
+          -8117.5,
+          -9950.0
+        ],
+        [
+          -8102.5,
+          -9950.0
+        ],
+        [
+          -8102.5,
+          -9160.0
+        ],
+        [
+          -8117.5,
+          -9160.0
+        ],
+        [
+          -8117.5,
+          -9040.0
+        ],
+        [
+          -8102.5,
+          -9040.0
+        ],
+        [
+          -8102.5,
+          -8250.0
+        ],
+        [
+          -8117.5,
+          -8250.0
+        ],
+        [
+          -8117.5,
+          -7352.5
+        ],
+        [
+          -5400.0,
+          -7352.5
+        ],
+        [
+          -5400.0,
+          -7399.0
+        ],
+        [
+          -4610.0,
+          -7399.0
+        ],
+        [
+          -4610.0,
+          -7352.5
+        ],
+        [
+          -982.5,
+          -7352.5
+        ],
+        [
+          -982.5,
+          -10847.5
+        ],
+        [
+          -8117.5,
+          -10847.5
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 24.88,
+      "source": "glb:typeEHeya#28"
+    },
+    {
+      "id": "R7",
+      "level": "1F",
+      "polygon": [
+        [
+          -6297.5,
+          -5532.5
+        ],
+        [
+          -5387.5,
+          -5532.5
+        ],
+        [
+          -5387.5,
+          -3595.0
+        ],
+        [
+          -5372.5,
+          -3595.0
+        ],
+        [
+          -5372.5,
+          -2805.0
+        ],
+        [
+          -5387.5,
+          -2805.0
+        ],
+        [
+          -5387.5,
+          -2670.0
+        ],
+        [
+          -5372.5,
+          -2670.0
+        ],
+        [
+          -5372.5,
+          -1907.5
+        ],
+        [
+          -4622.5,
+          -1907.5
+        ],
+        [
+          -4622.5,
+          -3598.8
+        ],
+        [
+          -4477.5,
+          -3598.8
+        ],
+        [
+          -4477.5,
+          -2802.5
+        ],
+        [
+          -3712.5,
+          -2802.5
+        ],
+        [
+          -3712.5,
+          -3875.0
+        ],
+        [
+          -3727.5,
+          -3875.0
+        ],
+        [
+          -3727.5,
+          -4477.5
+        ],
+        [
+          -3775.0,
+          -4477.5
+        ],
+        [
+          -3775.0,
+          -4462.5
+        ],
+        [
+          -4490.0,
+          -4462.5
+        ],
+        [
+          -4490.0,
+          -4477.5
+        ],
+        [
+          -4622.5,
+          -4477.5
+        ],
+        [
+          -4622.5,
+          -7192.5
+        ],
+        [
+          -5400.0,
+          -7192.5
+        ],
+        [
+          -5400.0,
+          -7207.5
+        ],
+        [
+          -6297.5,
+          -7207.5
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 6.94,
+      "source": "glb:typeEHeya#30"
+    },
+    {
+      "id": "R8",
+      "level": "1F",
+      "polygon": [
+        [
+          -982.5,
+          -72.5
+        ],
+        [
+          -982.5,
+          -2657.5
+        ],
+        [
+          -4477.5,
+          -2657.5
+        ],
+        [
+          -4477.5,
+          -837.5
+        ],
+        [
+          -5387.5,
+          -837.5
+        ],
+        [
+          -5387.5,
+          -72.5
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 9.75,
+      "source": "glb:typeEHeya#34"
+    },
+    {
+      "id": "R9",
+      "level": "1F",
+      "polygon": [
+        [
+          -5387.5,
+          -1732.5
+        ],
+        [
+          -5387.5,
+          -982.5
+        ],
+        [
+          -4622.5,
+          -982.5
+        ],
+        [
+          -4622.5,
+          -1732.5
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 0.58,
+      "source": "glb:typeEHeya#37"
+    },
+    {
+      "id": "R10",
+      "level": "1F",
+      "polygon": [
+        [
+          -2615.2,
+          -5325.0
+        ],
+        [
+          -2615.2,
+          -4637.5
+        ],
+        [
+          -1880.0,
+          -4637.5
+        ],
+        [
+          -1880.0,
+          -4622.5
+        ],
+        [
+          -982.5,
+          -4622.5
+        ],
+        [
+          -982.5,
+          -7207.5
+        ],
+        [
+          -2657.5,
+          -7207.5
+        ],
+        [
+          -2657.5,
+          -5325.0
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 4.31,
+      "source": "glb:typeEHeya#8"
+    },
+    {
+      "id": "R11",
+      "level": "1F",
+      "polygon": [
+        [
+          -1880.0,
+          -4462.5
+        ],
+        [
+          -2657.5,
+          -4462.5
+        ],
+        [
+          -2657.5,
+          -2802.5
+        ],
+        [
+          -982.5,
+          -2802.5
+        ],
+        [
+          -982.5,
+          -4477.5
+        ],
+        [
+          -1880.0,
+          -4477.5
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 2.81,
+      "source": "glb:typeEHeya#9"
+    },
+    {
+      "id": "R12",
+      "level": "1F",
+      "polygon": [
+        [
+          -2802.5,
+          -3033.3
+        ],
+        [
+          -2802.5,
+          -2960.8
+        ],
+        [
+          -3567.5,
+          -2960.8
+        ],
+        [
+          -3567.5,
+          -3033.3
+        ],
+        [
+          -3602.5,
+          -3033.3
+        ],
+        [
+          -3602.5,
+          -2960.8
+        ],
+        [
+          -3567.5,
+          -2960.8
+        ],
+        [
+          -3567.5,
+          -2802.5
+        ],
+        [
+          -2802.5,
+          -2802.5
+        ],
+        [
+          -2802.5,
+          -2960.8
+        ],
+        [
+          -2767.5,
+          -2960.8
+        ],
+        [
+          -2767.5,
+          -3033.3
+        ]
+      ],
+      "floor_mm": 624,
+      "area_m2": 0.13,
+      "source": "glb:typeEShuu#33"
+    }
+  ],
+  "wall_stats": {
+    "outer_size_mm": [
+      8370.0,
+      11100.0
+    ],
+    "exterior_thickness_measured_mm": 132.0,
+    "interior_gap_measured_mm": 145.0,
+    "interior_region_m2": 5.854,
+    "interior_region_uncovered_m2": 0.12,
+    "count": {
+      "exterior": 4,
+      "standalone": 4,
+      "interior": 13
+    }
+  },
+  "skipped": [],
+  "unresolved": [],
+  "glb_exceptions": [
+    {
+      "kind": "agari_kamachi",
+      "level": "1F",
+      "start": [
+        -6333.8,
+        -7197.5
+      ],
+      "end": [
+        -6333.8,
+        -5542.5
+      ],
+      "note": "上がり框の位置。壁は作らない（框・靴箱などの造作は模型に入れない）",
+      "source": "glb:typeEAgar#5"
+    },
+    {
+      "kind": "door_above_floor",
+      "level": "1F",
+      "opening": "O20",
+      "note": "glb では室内の戸が FL+400 から始まっていた（下は壁の面）。床からのドアにした",
+      "source": "glb:typeETate#31"
+    },
+    {
+      "kind": "door_above_floor",
+      "level": "1F",
+      "opening": "O17",
+      "note": "glb では室内の戸が FL+400 から始まっていた（下は壁の面）。床からのドアにした",
+      "source": "glb:typeETate#43"
+    }
+  ],
+  "inventory": [
+    {
+      "type": "typeETate",
+      "label": "建具",
+      "role": "opening",
+      "count": 20
+    },
+    {
+      "type": "typeEInte",
+      "label": "家具・設備",
+      "role": "exclude",
+      "count": 19
+    },
+    {
+      "type": "typeEHeya",
+      "label": "部屋",
+      "role": "room",
+      "count": 11
+    },
+    {
+      "type": "typeEKabe",
+      "label": "単独の壁",
+      "role": "standalone_wall",
+      "count": 4
+    },
+    {
+      "type": "typeEShun",
+      "label": "枕棚・ハンガーパイプ",
+      "role": "omit",
+      "count": 3
+    },
+    {
+      "type": "typeEPoch",
+      "label": "ポーチ・段",
+      "role": "porch",
+      "count": 3
+    },
+    {
+      "type": "typeEKiso",
+      "label": "基礎",
+      "role": "foundation",
+      "count": 1
+    },
+    {
+      "type": "typeEGaih",
+      "label": "外壁",
+      "role": "exterior_wall",
+      "count": 1
+    },
+    {
+      "type": "typeEAgar",
+      "label": "上がり框",
+      "role": "omit",
+      "count": 1
+    },
+    {
+      "type": "typeESiki",
+      "label": "敷地",
+      "role": "site",
+      "count": 1
+    },
+    {
+      "type": "typeEShuu",
+      "label": "収納の内側",
+      "role": "room",
+      "count": 1
+    },
+    {
+      "type": "typeEYane",
+      "label": "屋根",
+      "role": "roof",
+      "count": 1
+    },
+    {
+      "type": "typeESten",
+      "label": "外部の天井",
+      "role": "porch_soffit",
+      "count": 1
+    }
+  ],
+  "rule_checks": [
+    {
+      "item": "基礎天端（GL から）",
+      "glb_mm": 480,
+      "rule": "levels.gl_to_foundation_top_mm",
+      "rule_mm": 450,
+      "match": false
+    },
+    {
+      "item": "1FL（GL から）",
+      "glb_mm": 624,
+      "rule": "levels.gl_to_1fl_mm",
+      "rule_mm": 600,
+      "match": false
+    },
+    {
+      "item": "1階の天井高",
+      "glb_mm": 2400,
+      "rule": "levels.ceiling_height_mm",
+      "rule_mm": 2400,
+      "match": true
+    }
+  ],
+  "assumptions": [
+    {
+      "field": "walls[W2]",
+      "note": "outside_trim: 家の外で単独の壁（袖壁）と重なる所（910mm）を、家の角（基礎の外形の辺）で止めた（glb では袖壁の外の面が外壁の部材に入っていた）"
+    },
+    {
+      "field": "walls[W4]",
+      "note": "outside_trim: 家の外で単独の壁（袖壁）と重なる所（910mm）を、家の角（基礎の外形の辺）で止めた（glb では袖壁の外の面が外壁の部材に入っていた）"
+    },
+    {
+      "field": "walls[W5]",
+      "note": "outside_trim: 家の外で外壁と重なっていた所を受け持つので、外壁と同じく屋根まで（to_roof）にした（glb の単独の壁の上端は 3481）"
+    },
+    {
+      "field": "walls[W5]",
+      "note": "standalone_rule: 両側とも家の外の単独の壁なので、会社ルール walls.standalone_thickness_mm の厚み 208mm にした（glb は 180mm）"
+    },
+    {
+      "field": "walls[W6]",
+      "note": "outside_trim: 家の外で外壁と重なっていた所を受け持つので、外壁と同じく屋根まで（to_roof）にした（glb の単独の壁の上端は 3024）"
+    },
+    {
+      "field": "walls[W6]",
+      "note": "standalone_rule: 両側とも家の外の単独の壁なので、会社ルール walls.standalone_thickness_mm の厚み 208mm にした（glb は 180mm）"
+    },
+    {
+      "field": "walls[W7]",
+      "note": "standalone_rule: 両側とも家の外の単独の壁なので、会社ルール walls.standalone_thickness_mm の厚み 208mm にした（glb は 180mm）"
+    },
+    {
+      "field": "walls[W8]",
+      "note": "outside_trim: 家の外で外壁と重なっていた所を受け持つので、外壁と同じく屋根まで（to_roof）にした（glb の単独の壁の上端は 3481）"
+    },
+    {
+      "field": "walls[W8]",
+      "note": "standalone_rule: 両側とも家の外の単独の壁なので、会社ルール walls.standalone_thickness_mm の厚み 208mm にした（glb は 180mm）"
+    },
+    {
+      "field": "walls[W9]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W10]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W11]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W12]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W13]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W14]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W15]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W16]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W17]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W18]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W19]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W20]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "walls[W21]",
+      "note": "interior_rebuilt: 仕上げ面の間 145mm の中心線に、会社ルールの厚みで作り直した"
+    },
+    {
+      "field": "openings[O17]",
+      "note": "door_from_floor: glb では FL+400 から始まる戸。床からのドアにした"
+    },
+    {
+      "field": "openings[O18]",
+      "note": "under_hanging_wall: 下がり壁の下の開口（壁は開口の上端より上だけ）。穴は開けない"
+    },
+    {
+      "field": "openings[O20]",
+      "note": "door_from_floor: glb では FL+400 から始まる戸。床からのドアにした"
+    }
+  ],
+  "id_changes": {
+    "base": "初回のため、番号はすべて新しく振った"
+  }
+}

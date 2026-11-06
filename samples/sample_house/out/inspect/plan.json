@@ -1,0 +1,531 @@
+{
+  "view": "plan",
+  "label": "平面（屋根を外して上から）",
+  "px_per_mm": 0.06,
+  "size_px": [
+    652,
+    799
+  ],
+  "uv_lo": [
+    -9990.0,
+    -11048.75
+  ],
+  "uv_hi": [
+    -781.25,
+    110.0
+  ],
+  "elements": [
+    {
+      "id": "W1",
+      "type": "wall",
+      "kind": "exterior",
+      "bbox_px": [
+        588,
+        51,
+        600,
+        717
+      ]
+    },
+    {
+      "id": "W2",
+      "type": "wall",
+      "kind": "exterior",
+      "bbox_px": [
+        152,
+        705,
+        600,
+        717
+      ]
+    },
+    {
+      "id": "W3",
+      "type": "wall",
+      "kind": "exterior",
+      "bbox_px": [
+        152,
+        62,
+        164,
+        706
+      ]
+    },
+    {
+      "id": "W4",
+      "type": "wall",
+      "kind": "exterior",
+      "bbox_px": [
+        152,
+        51,
+        600,
+        62
+      ]
+    },
+    {
+      "id": "W5",
+      "type": "wall",
+      "kind": "standalone",
+      "bbox_px": [
+        98,
+        704,
+        130,
+        717
+      ]
+    },
+    {
+      "id": "W6",
+      "type": "wall",
+      "kind": "standalone",
+      "bbox_px": [
+        130,
+        704,
+        152,
+        717
+      ]
+    },
+    {
+      "id": "W7",
+      "type": "wall",
+      "kind": "standalone",
+      "bbox_px": [
+        98,
+        62,
+        110,
+        706
+      ]
+    },
+    {
+      "id": "W8",
+      "type": "wall",
+      "kind": "standalone",
+      "bbox_px": [
+        98,
+        51,
+        152,
+        63
+      ]
+    },
+    {
+      "id": "W9",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        158,
+        488,
+        594,
+        497
+      ]
+    },
+    {
+      "id": "W10",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        371,
+        329,
+        380,
+        493
+      ]
+    },
+    {
+      "id": "W11",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        481,
+        220,
+        490,
+        493
+      ]
+    },
+    {
+      "id": "W12",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        317,
+        56,
+        326,
+        388
+      ]
+    },
+    {
+      "id": "W13",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        158,
+        379,
+        321,
+        388
+      ]
+    },
+    {
+      "id": "W14",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        371,
+        325,
+        594,
+        334
+      ]
+    },
+    {
+      "id": "W15",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        426,
+        220,
+        435,
+        329
+      ]
+    },
+    {
+      "id": "W16",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        371,
+        106,
+        380,
+        272
+      ]
+    },
+    {
+      "id": "W17",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        431,
+        234,
+        485,
+        243
+      ]
+    },
+    {
+      "id": "W18",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        158,
+        215,
+        321,
+        224
+      ]
+    },
+    {
+      "id": "W19",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        376,
+        215,
+        594,
+        224
+      ]
+    },
+    {
+      "id": "W20",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        321,
+        161,
+        376,
+        170
+      ]
+    },
+    {
+      "id": "W21",
+      "type": "wall",
+      "kind": "interior",
+      "bbox_px": [
+        321,
+        106,
+        376,
+        115
+      ]
+    },
+    {
+      "id": "O1",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W1",
+      "bbox_px": [
+        588,
+        333,
+        600,
+        435
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    },
+    {
+      "id": "O2",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W1",
+      "bbox_px": [
+        588,
+        114,
+        600,
+        216
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    },
+    {
+      "id": "O3",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W2",
+      "bbox_px": [
+        270,
+        705,
+        372,
+        717
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    },
+    {
+      "id": "O4",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W2",
+      "bbox_px": [
+        380,
+        705,
+        427,
+        717
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O5",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        152,
+        114,
+        164,
+        216
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    },
+    {
+      "id": "O6",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        152,
+        224,
+        164,
+        326
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 1700.0
+    },
+    {
+      "id": "O7",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        152,
+        551,
+        164,
+        599
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O8",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        152,
+        606,
+        164,
+        653
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O9",
+      "type": "opening",
+      "kind": "window",
+      "wall": "W3",
+      "bbox_px": [
+        152,
+        660,
+        164,
+        705
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 740.0
+    },
+    {
+      "id": "O10",
+      "type": "opening",
+      "kind": "entrance_door",
+      "wall": "W3",
+      "bbox_px": [
+        152,
+        423,
+        164,
+        491
+      ],
+      "head_fl_mm": 2225,
+      "width_mm": 1140.0
+    },
+    {
+      "id": "O11",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W11",
+      "bbox_px": [
+        481,
+        333,
+        490,
+        376
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 715.0
+    },
+    {
+      "id": "O12",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W12",
+      "bbox_px": [
+        317,
+        224,
+        326,
+        272
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O13",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W12",
+      "bbox_px": [
+        317,
+        169,
+        326,
+        216
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O14",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W14",
+      "bbox_px": [
+        380,
+        325,
+        422,
+        334
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 715.0
+    },
+    {
+      "id": "O15",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W14",
+      "bbox_px": [
+        489,
+        325,
+        536,
+        334
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O16",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W15",
+      "bbox_px": [
+        426,
+        289,
+        435,
+        326
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 615.0
+    },
+    {
+      "id": "O17",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W16",
+      "bbox_px": [
+        371,
+        169,
+        380,
+        216
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O18",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W20",
+      "bbox_px": [
+        325,
+        161,
+        372,
+        170
+      ],
+      "head_fl_mm": 2000,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O19",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W9",
+      "bbox_px": [
+        325,
+        488,
+        372,
+        497
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    },
+    {
+      "id": "O20",
+      "type": "opening",
+      "kind": "door",
+      "wall": "W9",
+      "bbox_px": [
+        489,
+        488,
+        536,
+        497
+      ],
+      "head_fl_mm": 2400,
+      "width_mm": 790.0
+    }
+  ],
+  "direction_assumption": "glb の +Y を北とした（推定）"
+}
