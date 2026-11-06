@@ -10,6 +10,8 @@
 
 出すのは「どのコミット・どのパス・何の種類か・ng_words の何番目か」だけ。言葉・アドレス・キーそのものは出さない。
 ng_words が空なら、調べられないので失敗にする（調べたつもりにならない）。
+scan の allow（★11/6）：許すファイル（パスと中身の番号の組。提出用のリポジトリに同梱する見本の家だけ）は、
+data・図面や画像の拡張子・中身の先頭の印の検査だけ外す。出してはいけない言葉・API キー・メールアドレスは調べる。
 使い方：.venv\\Scripts\\python -m tools.history_check     問題があれば終了コード 1
 """
 from __future__ import annotations
@@ -30,6 +32,8 @@ EMAIL_RE = re.compile(rb"(?<![A-Za-z0-9._%+\-])[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]
 # 許すアドレス：Anthropic と GitHub の noreply、例示用に予約されたドメイン（example.com など。誰のものでもない）
 ALLOWED_EMAIL = (rb"noreply@anthropic.com", rb"users.noreply.github.com",
                  rb"@example.com", rb"@example.org", rb"@example.net")
+# 許すファイルで外す検査（この3つだけ。言葉・API キー・メールアドレスの検査は外さない）
+ALLOWABLE = ("data", "drawing_or_image", "binary")
 
 
 def _git(args: list[str], repo: Path, data: bytes | None = None) -> bytes:
@@ -85,14 +89,25 @@ def scan_blob(path: str, blob: bytes, words: list[tuple[int, list[bytes]]]) -> l
     return found
 
 
-def scan(repo: Path = REPO_ROOT, ng_words: list[str] | None = None) -> dict:
-    """履歴全体を調べた結果。{"ok": bool, "commits": n, "blobs": n, "problems": [...]}（言葉・アドレスは入れない）。"""
+def _never_allowed(path: str) -> bool:
+    """許してはいけないパス（data/ の中・local_paths）。"""
+    low = path.lower()
+    return "data" in low.split("/") or "local_paths" in low
+
+
+def scan(repo: Path = REPO_ROOT, ng_words: list[str] | None = None, allow=None) -> dict:
+    """履歴全体を調べた結果。{"ok": bool, "commits": n, "blobs": n, "allowed": n, "problems": [...]}（言葉・アドレスは入れない）。
+    allow：許すファイル {パス: 中身の番号} か [(パス, 中身の番号)]。パスと中身の番号の両方が合うファイルだけ、ALLOWABLE の
+    検査を外す（allowed はその数）。パスに data/ か local_paths が入るものは許さない。"""
+    pairs = allow.items() if isinstance(allow, dict) else (allow or ())
+    allowed = {(p, s.lower()) for p, s in pairs if not _never_allowed(p)}
     words_list = load_ng_words() if ng_words is None else ng_words
     if not words_list:
-        return {"ok": False, "commits": 0, "blobs": 0,
+        return {"ok": False, "commits": 0, "blobs": 0, "allowed": 0,
                 "problems": [{"kind": "no_ng_words", "where": "-", "detail": "ng_words が空なので、施主名などを調べられません"}]}
     words = _variants(words_list)
     problems = []
+    allowed_blobs: set[str] = set()
     # すべてのコミットのファイル（パスつき。同じ中身は1回だけ読む）
     objs = _git(["rev-list", "--all", "--objects"], repo).decode("utf-8", errors="replace").splitlines()
     paths: dict[str, str] = {}
@@ -109,7 +124,12 @@ def scan(repo: Path = REPO_ROOT, ng_words: list[str] | None = None) -> dict:
             problems.append({"kind": "ng_word_in_path", "where": "（言葉を含むパス。パスは出さない）", "object": sha[:10],
                              "detail": "ファイルの名前かフォルダの名前に、出してはいけない言葉"})
             where = "（言葉を含むパス）"
+        ok = (paths[sha], sha.lower()) in allowed
+        if ok:
+            allowed_blobs.add(sha.lower())
         for kind, detail in scan_blob(paths[sha], blob, words):
+            if ok and kind in ALLOWABLE:
+                continue
             problems.append({"kind": kind, "where": where, "object": sha[:10], "detail": detail})
     # コミットの文・作者とコミットした人
     log = _git(["log", "--all", "--format=%H%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x01"], repo)
@@ -126,7 +146,8 @@ def scan(repo: Path = REPO_ROOT, ng_words: list[str] | None = None) -> dict:
     if author_mail:
         problems.append({"kind": "author_email", "where": f"{author_mail} 件のコミット", "object": "-",
                          "detail": "作者かコミットした人のアドレスが noreply ではない（公開すると見える。変えるには履歴の書き換えが要る）"})
-    return {"ok": not problems, "commits": len(commits), "blobs": len(blobs), "problems": problems}
+    return {"ok": not problems, "commits": len(commits), "blobs": len(blobs),
+            "allowed": sum(1 for _p, s in allowed if s in allowed_blobs), "problems": problems}
 
 
 def main(argv: list[str] | None = None) -> int:
