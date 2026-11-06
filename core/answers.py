@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
+import threading
 import unicodedata
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from core.privacy import assert_clean
 
 ANSWER_MAX = 400          # 答えの長さの上限（字）。図面の数値などを一言で書ける長さ
 PROMPT_MAX = 20           # 次の検品に渡す答えの数の上限（新しいものから。指示を短く保つ）
+LOCK = threading.Lock()   # answers.json の「読んで足して書く」は1つずつ（★11/6 見直し：2つの答えが同時に届くと片方が消えた）
 
 
 def answers_path(alias: str) -> Path:
@@ -78,8 +80,9 @@ def add(alias: str, question_id: str, question: str, options, answer: str, inspe
            "at": dt.datetime.now().astimezone().isoformat(timespec="seconds"), "inspected_at": inspected_at}
     assert_clean(json.dumps(rec, ensure_ascii=False), "人の答え")       # 書く前に確かめる
     key = (rec["question_id"], inspected_at, _norm(rec["question"]))
-    items = [a for a in load(alias) if (a.get("question_id"), a.get("inspected_at"), _norm(a.get("question"))) != key]
-    write_text_atomic(answers_path(alias), json.dumps(items + [rec], ensure_ascii=False, indent=2))
+    with LOCK:
+        items = [a for a in load(alias) if (a.get("question_id"), a.get("inspected_at"), _norm(a.get("question"))) != key]
+        write_text_atomic(answers_path(alias), json.dumps(items + [rec], ensure_ascii=False, indent=2))
     return rec
 
 

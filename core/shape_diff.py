@@ -5,7 +5,8 @@
 - 名札は画面の 3D と同じ model.glb（組んだ状態、模型の mm）から作る。組み立てをもう一度しないので速い（小さな家で 0.03 秒）。
 - 組み立ては同じ入力なら同じ形になる（★試した：同じ家を2回組むと、名札はぴったり同じ）。窓を 10mm 動かしただけでも、
   体積は同じだが重心が動く（約 0.004mm）ので見分けられる。
-- 見分けられないとき（前の glb がない・読めない）は「変わった」とみなす（人の直しを勝手に消さない）。
+- 見分けられないとき（前の glb がない・読めない・building.json や overrides.json より古い）は「変わった」とみなす
+  （人の直しを勝手に消さない）。
 """
 from __future__ import annotations
 
@@ -50,9 +51,27 @@ def signature(glb_path: Path) -> dict[str, dict] | None:
             if hasattr(g, "vertices") and hasattr(g, "faces")}
 
 
+MODEL_INPUTS = ("building.json", "overrides.json")     # 模型の形を決めるファイル（model.glb はこれより後に書かれるはず）
+
+
 def signature_of(alias: str) -> dict[str, dict] | None:
-    """物件の、いま書き出してある模型（out/<物件>/model/model.glb）の名札。"""
-    return signature(out_dir(alias) / "model" / "model.glb")
+    """物件の、いま書き出してある模型（out/<物件>/model/model.glb）の名札。
+    glb が building.json・overrides.json より古いときは None（★11/6 見直し：修正を取り消したあとの組み直しが失敗した・
+    別のプロセスが修正を書いた、などで、glb がいまの修正の形でない。その glb を「前」にすると、取り消した直しをもう一度承認したとき
+    「形が変わらない」と判断して、本当の直しを取り消してしまう。比べられない → 呼ぶ側は「変わった」とみなす）。"""
+    d = out_dir(alias)
+    glb = d / "model" / "model.glb"
+    try:
+        made = glb.stat().st_mtime_ns
+    except OSError:
+        return None
+    for name in MODEL_INPUTS:
+        try:
+            if (d / name).stat().st_mtime_ns > made:
+                return None
+        except OSError:                     # ない（修正がまだない）・読めないファイルは比べない
+            continue
+    return signature(glb)
 
 
 def _close(a: float, b: float) -> bool:

@@ -1,7 +1,7 @@
 """壁・開口・部屋の番号を、作り直しても変わらないようにする（SPEC §9-1：人の修正を当て直すため）。
 
 前回の building.json と照らし合わせ、同じものには前回の番号を引き継ぐ。
-- 壁：種類が同じ・向きがそろう・中心線のずれが POS_TOL 以内・長さの半分以上が重なる。
+- 壁：種類が同じ・向きがそろう・中心線のずれが POS_TOL 以内（厚みが変わったときは差の半分を足す）・長さの半分以上が重なる。
 - 開口：glb の出どころが同じ。なければ、種類が同じで中心が OPENING_TOL 以内。
 - 部屋：glb の出どころが同じ。
 新しいものには続きの番号を振る。前回あって今回ないものの番号は id_changes.removed に残す。
@@ -54,6 +54,11 @@ def _num(i: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def _thickness(w: dict) -> float:
+    t = w.get("thickness_mm")
+    return float(t) if isinstance(t, (int, float)) and not isinstance(t, bool) else 0.0
+
+
 def _wall_match_score(a: dict, b: dict) -> float:
     """同じ壁らしさ（重なりの長さ）。同じ壁でなければ 0。"""
     if a["kind"] != b["kind"] or a.get("level") != b.get("level"):
@@ -68,7 +73,11 @@ def _wall_match_score(a: dict, b: dict) -> float:
     if abs(dx * ex + dy * ey) < 0.999:
         return 0.0
     nx, ny = -dy, dx
-    if max(abs((bx0 - ax0) * nx + (by0 - ay0) * ny), abs((bx1 - ax0) * nx + (by1 - ay0) * ny)) > POS_TOL:
+    # 厚みが変わった壁は、片側の面を残して厚く・薄くするので、中心線が差の半分ずれる（会社ルールの厚みを変えたとき・
+    # 両側とも外の単独の壁を会社ルールの厚みにしたとき。★11/6 見直し：glb 100→180 の袖壁の梁が 40mm ずれて別の番号になった）
+    tol = POS_TOL + abs(_thickness(a) - _thickness(b)) / 2
+    off = max(abs((bx0 - ax0) * nx + (by0 - ay0) * ny), abs((bx1 - ax0) * nx + (by1 - ay0) * ny))
+    if off > tol:
         return 0.0
     t0, t1 = sorted(((bx0 - ax0) * dx + (by0 - ay0) * dy, (bx1 - ax0) * dx + (by1 - ay0) * dy))
     ov = min(la, t1) - max(0.0, t0)
@@ -77,7 +86,9 @@ def _wall_match_score(a: dict, b: dict) -> float:
     # 下端・上端が大きく違う（下がり壁と腰の部分など）は別の壁
     if abs(a.get("bottom_mm", 0) - b.get("bottom_mm", 0)) > 150:
         return 0.0
-    return ov
+    # 重なりが同じなら、中心線の近い方を選ぶ（差は 1mm 未満なので、重なりの長さの順は変えない）。
+    # ★11/6 見直し：面の接した2枚を両方とも相手の側へ厚くすると、4通りの組が同じ重なりになり、並び順で番号が入れ替わりえた
+    return ov - off * 1e-3
 
 
 def _assign(new: list[dict], old: list[dict], score, prefix: str) -> tuple[dict[str, str], list[str]]:

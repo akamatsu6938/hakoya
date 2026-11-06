@@ -258,13 +258,12 @@ def test_approve_once_and_undo_returns_to_pending(client, monkeypatch):
 
 
 def test_fix_that_does_not_change_the_model_is_undone(client, data, monkeypatch):
-    """承認して組み直しても模型の形が変わらない直しは、取り消して知らせる。
-    ★11/6：前は「天井に届く窓がない壁の窓の上の帯」で試していたが、その案は直す案を作る時点で断るようになった
-    （core/ai/tools.py。組み立て担当の直し）。ここでは形の比べ（core/shape_diff.py）が「変わらない」と答えた場合を直接確かめる。"""
-    from core import shape_diff as sd
-    _fake(monkeypatch, plan=[W9_TO_MAJORITY])
-    monkeypatch.setattr(sd, "changed_parts", lambda before, after: [])
-    client.post(URL, json={"text": "ほかとそろえて", "connection": "claude_code", "ids": ["W9"]})
+    """内壁 W5 の上端を天井（FL 624＋2400＝GL 3024）より上にしても、内壁は天井で切るので形に出ない（★試した：名札がぴったり同じ）
+    → 取り消して知らせる。★11/6 見直し：前は「天井に届く窓がない壁の窓の上の帯」で試していたが、① がその案を出さないように
+    した（core/ai/tools._band_possible）ので、偽の Claude の案が作られずに落ちていた。"""
+    _fake(monkeypatch, plan=[("propose_override", {"target": "W5", "field": "height", "value_source": "number", "number": 3100,
+                                                   "reason": "上端を上げる"})])
+    client.post(URL, json={"text": "W5 の上端を 3100 にして", "connection": "claude_code", "ids": ["W5"]})
     assert _wait(client, "R1")["proposals"][0]["state"] == "pending"
     res = client.post(f"{URL}/R1/approve", json={"index": 0}).json()
     assert res["changed"] is False and res["changed_parts"] == []

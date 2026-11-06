@@ -13,10 +13,15 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
+import threading
 from pathlib import Path
 
 from core import overrides as ov
 from core.paths import out_dir, write_text_atomic
+
+# findings.json の「読んで直して書く」（decide・revert_override）と、検品の最後の書き込み（save）は、このプロセスの中で1つずつ
+# （★11/6 見直し：決定が古い一覧を読んだあとに検品が新しい一覧を書くと、決定の書き込みで新しい検品の結果が丸ごと消えた）
+LOCK = threading.RLock()
 
 STATUSES = {"approve": "承認", "reject": "却下", "later": "あとで",
             "request": "依頼済み",     # 直す案のない指摘：この指摘のとおりに直す案を Claude に頼んだ（頼むのは画面の修正タブ。★11/5 夜）
@@ -82,7 +87,9 @@ def load(alias: str) -> dict | None:
 def save(alias: str, report: dict, path: Path | None = None) -> None:
     """一時ファイルに書いてから入れ替える（★11/5：MCP の道具など別のプロセスが同時に読んでも、書きかけを読まない）。
     path を渡すと、そこに書く（試験で書き出し先を変えるとき）。"""
-    write_text_atomic(path or findings_path(alias), json.dumps(report, ensure_ascii=False, indent=2))
+    text = json.dumps(report, ensure_ascii=False, indent=2)
+    with LOCK:
+        write_text_atomic(path or findings_path(alias), text)
 
 
 def code_findings(alias: str) -> list[dict]:
@@ -205,41 +212,43 @@ def decide(alias: str, fid: str, action: str) -> dict:
     承認した指摘を却下・あとで・未確認にはしない（修正が残ったままになる。やめるときは直しの取り消しから）。"""
     if action not in STATUSES:
         raise ValueError("action は approve / reject / later / request / reset のどれかです")
-    report = load(alias)
-    if report is None:
-        raise KeyError("まだ検品していません")
-    f = _find(report, fid)
-    applied = is_applied(alias, f)
-    if action == "approve":
-        if applied:
-            return f
-        p = f.get("proposal")
-        if not p:
-            raise ValueError("直す案のない指摘は承認できません（表で直すか、却下・あとでにしてください）")
-        raw = json.loads((out_dir(alias) / "building.json").read_text(encoding="utf-8"))
-        item = ov.add(alias, raw, p["target"], p["field"], p.get("to"), p["value_source"], p.get("reason") or f["message"],
-                      origin=f"finding:{fid}")
-        f["override"] = item["id"]
-    elif applied:
-        raise ValueError(f"{fid} は承認して、修正 {f['override']} になっています。やめるときは、直しの取り消し（取り消す）を使ってください")
-    f["status"] = STATUSES[action]
-    if action == "reset":
-        f.pop("decided_at", None)
-    else:
-        f["decided_at"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
-    save(alias, report)
-    return f
+    with LOCK:                                        # 読んでから書くまで、検品の書き込みを待たせる
+        report = load(alias)
+        if report is None:
+            raise KeyError("まだ検品していません")
+        f = _find(report, fid)
+        applied = is_applied(alias, f)
+        if action == "approve":
+            if applied:
+                return f
+            p = f.get("proposal")
+            if not p:
+                raise ValueError("直す案のない指摘は承認できません（表で直すか、却下・あとでにしてください）")
+            raw = json.loads((out_dir(alias) / "building.json").read_text(encoding="utf-8"))
+            item = ov.add(alias, raw, p["target"], p["field"], p.get("to"), p["value_source"], p.get("reason") or f["message"],
+                          origin=f"finding:{fid}")
+            f["override"] = item["id"]
+        elif applied:
+            raise ValueError(f"{fid} は承認して、修正 {f['override']} になっています。やめるときは、直しの取り消し（取り消す）を使ってください")
+        f["status"] = STATUSES[action]
+        if action == "reset":
+            f.pop("decided_at", None)
+        else:
+            f["decided_at"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+        save(alias, report)
+        return f
 
 
 def revert_override(alias: str, override_id: str) -> None:
     """修正を取り消したら、それを生んだ指摘を「未確認」に戻す。"""
-    report = load(alias)
-    if report is None:
-        return
-    changed = False
-    for f in report.get("findings", []) + report.get("code_findings", []):
-        if f.get("override") == override_id:
-            f["status"], f["override"] = "未確認", None
-            changed = True
-    if changed:
-        save(alias, report)
+    with LOCK:                                        # 読んでから書くまで、検品の書き込みを待たせる
+        report = load(alias)
+        if report is None:
+            return
+        changed = False
+        for f in report.get("findings", []) + report.get("code_findings", []):
+            if f.get("override") == override_id:
+                f["status"], f["override"] = "未確認", None
+                changed = True
+        if changed:
+            save(alias, report)

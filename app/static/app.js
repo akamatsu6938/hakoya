@@ -637,7 +637,7 @@ const evidenceText = (ev) => (ev || []).map((e) => (e && typeof e === 'object' ?
 // 未確認：承認・却下・あとで（直す案があれば承認＝直す。なければ Claude に直す案を頼む）／承認：「承認済み ✓」と取り消す／
 // 却下・あとで・依頼済み：その札と戻す。押した瞬間にボタンを押せなくし、終わったらお知らせ（toast）。タブは替えない
 const DONE_ST = ['承認', '却下', '依頼済み'];     // 決めた指摘（タブの数に入れない）。「あとで」はまだ決めていないほうに数える
-const ST_LABEL = { 承認: '承認済み ✓', 却下: '却下済み', あとで: 'あとで', 依頼済み: '直す案を頼みました（修正タブの「頼んだこと」）' };
+const ST_LABEL = { 承認: '承認済み ✓', 却下: '却下済み', あとで: 'あとで', 依頼済み: '直す案を頼みました（修正タブの「依頼と Claude の答え」）' };
 const fixing = { busy: false };                 // 直している（組み直している）間は、ほかの承認・取り消しを受けない（組み直しを重ねない）
 const cardSel = (fid) => `.cards .finding[data-fid="${CSS.escape(String(fid))}"]`;
 const NO_REQUEST = 'この版では使えません（直す案を Claude に頼む仕組みが、まだこの版に入っていません）';
@@ -746,25 +746,24 @@ async function confirmFixCost(what) {   // 費用の確かめ（検品・囲ん�
   return confirm(`${what} Claude に作ってもらいます。30秒〜数分かかり、Claude のプランの利用枠を使います。よろしいですか？`);
 }
 const plainEvidence = (ev) => (ev || []).map((e) => (e && typeof e === 'object' ? (e.ref || e.text || e.type || '') : e)).filter(Boolean).join('、');
-function requestText(f) {   // 指摘の見出しと本文から作る頼み文（修正タブの「頼んだこと」に出て、Claude に渡る）
+function requestText(f) {   // 指摘の見出しと本文から作る頼み文（修正タブの「依頼と Claude の答え」に出て、Claude に渡る）
   const ev = plainEvidence(f.evidence);
   return [`検品の指摘 ${f.id}「${headline(f)}」のとおりに直す案を作ってください。`,
     f.message && f.message !== headline(f) ? `指摘の内容：${f.message}` : '', ev ? `根拠：${ev}` : ''].filter(Boolean).join('\n');
 }
-// 頼む：修正担当の window.createFixRequest（修正タブの「頼んだこと」に出し、終わったら知らせる）。まだない版では知らせるだけ。
-// 返り値は待たない（Claude の答えまで 30秒〜数分かかる）。頼めたら true
-function askFixFromInspect(req) {   // ★11/6：② の sendFixRequest と同じ名前だったので変えた
-  if (typeof window.createFixRequest !== 'function') { toast(NO_REQUEST, { kind: 'info' }); return false; }
-  let pending;
-  try { pending = window.createFixRequest(req); } catch (e) { toast('頼めませんでした：' + e.message, { kind: 'err' }); return false; }
-  Promise.resolve(pending).catch((e) => toast(`直す案を頼めませんでした：${e?.message || e}`, { kind: 'err' }));
-  return true;
+// 頼む：修正担当の window.createFixRequest（修正タブの「依頼と Claude の答え」に出し、終わったら知らせる）。まだない版では知らせるだけ。
+// 待つのは依頼を作るところまで（すぐ返る。Claude の答えは裏で 30秒〜数分）。頼めたら依頼、頼めなかったら null。
+// ★11/6 見直し：前は返事を待たずに「頼めた」としていたので、同時に2つ動いていて断られた（409）ときも指摘が「依頼済み」になり、
+// お知らせも2つ出ていた（createFixRequest が知らせるので、ここでは知らせない）
+async function askFixFromInspect(req) {   // ★11/6：② の sendFixRequest と同じ名前だったので変えた
+  if (typeof window.createFixRequest !== 'function') { toast(NO_REQUEST, { kind: 'info' }); return null; }
+  try { return (await window.createFixRequest(req)) || null; } catch (e) { return null; }
 }
 async function requestFix(f, b) {   // 直す案のない指摘の承認：この指摘のとおりに直す案を Claude に頼み、指摘を「依頼済み」にする
   if (typeof window.createFixRequest !== 'function') { toast(NO_REQUEST, { kind: 'info' }); return; }
   if (!(await confirmFixCost('この指摘のとおりに直す案を'))) return;
   const card = b?.closest('.finding'); lockCard(card, b, '頼んでいます…');
-  if (!askFixFromInspect({ text: requestText(f), ids: (f.targets || []).map(String), findingId: f.id })) { unlockCard(card); return; }
+  if (!(await askFixFromInspect({ text: requestText(f), ids: (f.targets || []).map(String), findingId: f.id }))) { unlockCard(card); return; }
   try {
     await quietly(() => keepPlace(cardSel(f.id), async () => {
       await call('POST', `/api/findings/{a}/${encodeURIComponent(f.id)}`, { action: 'request' }); await renderFindings();
@@ -779,7 +778,7 @@ function findingActions(f, st, acts) {
   };
   if (st === '未確認') {
     btn('承認', 'approve', f.proposal ? '直す案のとおりに直します（修正として記録し、模型を組み直します。取り消せます）'
-      : 'この指摘のとおりに直す案を Claude に作ってもらいます（修正タブの「頼んだこと」に出ます）', (b) => (f.proposal ? approveFinding(f, b) : requestFix(f, b)));
+      : 'この指摘のとおりに直す案を Claude に作ってもらいます（修正タブの「依頼と Claude の答え」に出ます）', (b) => (f.proposal ? approveFinding(f, b) : requestFix(f, b)));
     btn('却下', '', '指摘を却下します（模型は変わりません。あとで戻せます）', (b) => decideQuiet(f, 'reject', b));
     btn('あとで', 'quiet', 'あとで決めます（模型は変わりません）', (b) => decideQuiet(f, 'later', b));
     return;
@@ -893,7 +892,7 @@ function questionItem(q, f) {   // f：指摘に付いた質問なら、その�
   body.insertAdjacentHTML('beforeend', `<div class="q-ans"><span class="lbl">答え</span><b>${esc(q.answer)}</b>${q.answered_at ? `<span class="when">${esc(fmtTime(q.answered_at))}</span>` : ''}</div>`);
   const acts = document.createElement('div'); acts.className = 'q-acts';
   const make = document.createElement('button'); make.type = 'button'; make.className = 'approve'; make.textContent = 'この答えで直す案を作る';
-  make.title = 'この答えのとおりに直す案を Claude に作ってもらいます（修正タブの「頼んだこと」に出ます）';
+  make.title = 'この答えのとおりに直す案を Claude に作ってもらいます（修正タブの「依頼と Claude の答え」に出ます）';
   make.addEventListener('click', () => requestFromAnswer(q, q.answer, f, make));
   const redo = document.createElement('button'); redo.type = 'button'; redo.className = 'quiet'; redo.textContent = '答え直す';
   redo.addEventListener('click', () => { body.innerHTML = ''; body.appendChild(answerForm(q, f)); body.querySelector('.q-opt, input')?.focus(); });
@@ -932,16 +931,16 @@ async function answerQuestion(q, answer, f, box) {
     $$('button, input', box).forEach((el) => { el.disabled = false; });
   }
 }
-async function requestFromAnswer(q, answer, f, b) {   // 答えのとおりに直す案を Claude に頼む（修正タブの「頼んだこと」）
+async function requestFromAnswer(q, answer, f, b) {   // 答えのとおりに直す案を Claude に頼む（修正タブの「依頼と Claude の答え」）
   if (typeof window.createFixRequest !== 'function') { toast(NO_REQUEST, { kind: 'info' }); return; }
   if (!(await confirmFixCost('この答えのとおりに直す案を'))) return;
   const opts = (q.options || []).map((o, i) => `${i + 1}. ${o}`).join(' ／ ');
   const text = [`検品の Claude の質問 ${q.id}「${q.question}」に、人が「${answer}」と答えました。この答えのとおりに直す案を作ってください。`,
     opts ? `選択肢：${opts}` : '', q.evidence ? `質問の根拠：${q.evidence}` : '',
     f ? `もとの指摘 ${f.id}「${headline(f)}」：${f.message || ''}` : ''].filter(Boolean).join('\n');
-  if (askFixFromInspect({ text, ids: f ? (f.targets || []).map(String) : [], findingId: f ? f.id : null }) && b) {
-    b.disabled = true; b.textContent = '頼みました（修正タブの「頼んだこと」）';
-  }
+  if (b) b.disabled = true;                                 // 依頼を作る間は押せない（二重に頼まない）
+  const req = await askFixFromInspect({ text, ids: f ? (f.targets || []).map(String) : [], findingId: f ? f.id : null });
+  if (b) { if (req) b.textContent = '頼みました（修正タブの「依頼と Claude の答え」）'; else b.disabled = false; }
 }
 
 // ---- 検品中の札（★11/5 夜 作者「Claude が考えています、という文章がわかりづらい」）：だれが・何をしていて・どのくらいかかるか
@@ -1848,6 +1847,7 @@ function fixCard(req) {
 }
 
 const proposalElementId = (p) => { const f = String(p.field || ''); return f.startsWith('eave_mm.') ? `${p.target}:${f.slice(8)}` : String(p.target); };
+// 壁の上端の「屋根まで」は日本語で（★11/6 見直し：② の札とお知らせだけ to_roof のまま出ていた）
 const changeText = (p) => (p.field === '_delete' ? '取り除いた' : `${FIELD[p.field] || p.field} ${valText(p.from)} → ${valText(p.to)}`);
 const doneText = (p) => `${p.target} ${changeText(p)}`;
 
@@ -2472,6 +2472,10 @@ async function refresh() {
     await renderChecks(); renderDownloads(); await renderFindings(); await loadModel();
     renderModelInfo(); updateStatusBar(); updateChrome();
     inspectButtons(state.inspecting);
+    // ★11/6 見直し：依頼の承認の印も読み直す（直しの履歴から取り消したあと、カードに古い修正の番号の「取り消す」が残り、
+    // 番号を使い回した別の直しを消すところだった）。囲んだ部材の印も付け直す（読み直すと平面図・3D の印が消えるため）
+    loadFixRequests();
+    if (lasso.selection.length) markLassoSelection();
     await syncVersion();                                   // 自分の直しで、もう一度読み直さないように
   } finally { state.refreshing = false; }
   scheduleThumb();

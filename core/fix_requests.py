@@ -6,10 +6,11 @@
 - 保存先：out/<物件>/fix_requests.json（{"next_id": 次の番号, "requests": [古い順]}）。一時ファイルに書いてから入れ替える。
   書く前に、出してはいけない言葉が入っていないか確かめる（入っていれば答えは残さず、失敗にする）。
 - 依頼の形（画面にもこのまま返す）：{id:"R1", at, status, text, kind, model, model_label, connection, selection, groups,
-  message, proposals:[{…直す案…, state, override_id, note}], questions:[{id, question, options, evidence, answered?}],
+  message, proposals:[{…直す案…, state, override_id, override_at, note}], questions:[{id, question, options, evidence, answered?}],
   cost_usd, duration_s, error, finding_id, parent_id, human_words}
   - status：running（Claude が考えている）・done・error・interrupted（HAKOYA を止めたので途中で止まった）
-  - 直す案の state：pending（まだ）・approved（直した。override_id）・rejected・no_change（模型が変わらないので取り消した）・failed
+  - 直す案の state：pending（まだ）・approved（直した。override_id と、その修正の時刻 override_at）・rejected・
+    no_change（模型が変わらないので取り消した）・failed
 - 裏の thread で動かす。同じ物件で同時に動かすのは MAX_RUNNING（2）まで。
 - この HAKOYA の中で動いていない running（前に起動した HAKOYA が動かしていたもの）は、読むときに interrupted にする。
 - 直す案を承認したあと、その修正が取り消されていたら（直しの履歴から取り消したなど）、読むときに pending に戻す。
@@ -68,13 +69,27 @@ def _write(alias: str, data: dict) -> None:
     write_text_atomic(path(alias), text)
 
 
-def _override_ids(alias: str) -> set[str] | None:
-    """いま記録にある修正の番号（読めなければ None。そのときは承認の印を直さない）。"""
+def _current_overrides(alias: str) -> dict[str, dict] | None:
+    """いま記録にある修正（番号 → 修正。読めなければ None。そのときは承認の印を直さない）。"""
     from core import overrides as ov
     try:
-        return {x.get("id") for x in ov.load(alias)}
+        return {x.get("id"): x for x in ov.load(alias)}
     except (OSError, ValueError):
         return None
+
+
+def _still_recorded(p: dict, current: dict[str, dict]) -> bool:
+    """承認した案の修正が、いまも記録にあるか。修正の番号は取り消すと使い回される（core/overrides.add は「いちばん大きい番号＋1」）
+    ので、承認したときに控えた修正の時刻（override_at）と、部材・項目・値も比べる（★11/6 見直し：承認した案の修正を直しの履歴から
+    取り消したあと、一覧を読み直す前に表で直すと同じ OV 番号になり、案が承認のままに見えて「取り消す」で表の直しを消すところだった）。
+    override_at のない記録（前の版で承認したもの）は、番号だけで比べる。"""
+    x = current.get(p["override_id"])
+    if x is None:
+        return False
+    if not p.get("override_at"):
+        return True
+    return (x.get("at"), x.get("target"), x.get("field"), x.get("to")) == (p["override_at"], p.get("target"), p.get("field"),
+                                                                            p.get("to"))
 
 
 def _settle(alias: str, data: dict) -> bool:
@@ -87,9 +102,9 @@ def _settle(alias: str, data: dict) -> bool:
             changed = True
         for p in r.get("proposals") or []:
             if p.get("state") == "approved" and p.get("override_id"):
-                current = _override_ids(alias) if current is None else current
-                if current is not None and p["override_id"] not in current:
-                    p.update(state="pending", override_id=None, note=UNDONE_NOTE)
+                current = _current_overrides(alias) if current is None else current
+                if current is not None and not _still_recorded(p, current):
+                    p.update(state="pending", override_id=None, override_at=None, note=UNDONE_NOTE)
                     changed = True
     return changed
 

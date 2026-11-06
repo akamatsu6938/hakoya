@@ -268,6 +268,13 @@ def state(alias: str):
     return _safe_json({"saved_at": _iso(newest), "version": newest or 0})
 
 
+# 模型を変える窓口（修正の記録 overrides.json・指摘の決定 findings.json の「読んで足して書く」と、組み直し write_outputs）は、
+# この HAKOYA の中では1つずつ（★11/6 見直し：鍵が別々だと、表の直しと依頼の承認が同時に overrides.json を書いて片方の修正が消え、
+# 組み直しが2つ重なると STL を消し合って失敗し（足したばかりの直しを取り消す）、古い修正で組んだ model.glb が承認の直後に
+# 上書きされて、本当の直しを「形が変わらない」と取り消した）。MCP の道具（別のプロセス）とは、この鍵では分けられない。
+MODEL_LOCK = threading.RLock()
+
+
 @app.post("/api/build/{alias}")
 def build_property(alias: str):
     """glb を読み直して building.json を作り（番号は前回から引き継ぐ）、模型を組み立てて書き出す。"""
@@ -276,8 +283,9 @@ def build_property(alias: str):
         raise HTTPException(409, "この物件はいま検品中です。検品が終わってから組み立ててください")
     from core import settings_store
     try:
-        write_building(alias, build(alias, settings_store.load()["company"]))   # 設定の会社ルールで作る（★11/4 B工務店）
-        summary = write_outputs(alias)
+        with MODEL_LOCK:
+            write_building(alias, build(alias, settings_store.load()["company"]))   # 設定の会社ルールで作る（★11/4 B工務店）
+            summary = write_outputs(alias)
     except (ValueError, OSError) as e:      # HAKOYA が書いた説明（「3階建てはまだ扱えません」など）は画面に出す
         msg = _user_message(e)
         if msg is None:
@@ -387,27 +395,28 @@ def split_set(alias: str, body: SplitIn):
     _check_alias(alias)
     if RUNS.get(alias, {}).get("running"):
         raise HTTPException(409, "この物件はいま検品中です。検品が終わってから分け目を動かしてください")
-    hc = _house_cut(alias)
-    if not hc or not hc.get("cuts"):
-        raise HTTPException(409, "この家は分けずに入るので、分け目はありません（先に「読み込んで組み立てる」を押してください）")
-    if len(body.cuts_mm) != len(hc["cuts"]) or not all(np.isfinite(body.cuts_mm)):
-        raise HTTPException(400, "分け目の数が違います")
-    b, parts, _, rules = make_model(alias)
-    u = np.array(hc["u"], float)
-    cuts = sorted(bs.snap_to_face(b, u, float(t), float(rules["model"]["scale"])) for t in body.cuts_mm)
-    trial = bs.choose(b, parts, rules, {"u": list(u), "cuts": cuts, "source": "human"})
-    if trial is None or trial.source != "human":
-        raise HTTPException(400, "その分け目では、分けた部品のどれかが造形範囲に入りません。もう少し真ん中寄りにしてください")
-    before = bs.load_saved(alias)
-    bs.save_human(alias, u, cuts)
-    try:
-        summary = write_outputs(alias)
-    except Exception:
-        if before:
-            bs.save_human(alias, np.array(before["u"], float), before["cuts"])
-        else:
-            bs.clear_saved(alias)
-        raise
+    with MODEL_LOCK:
+        hc = _house_cut(alias)
+        if not hc or not hc.get("cuts"):
+            raise HTTPException(409, "この家は分けずに入るので、分け目はありません（先に「読み込んで組み立てる」を押してください）")
+        if len(body.cuts_mm) != len(hc["cuts"]) or not all(np.isfinite(body.cuts_mm)):
+            raise HTTPException(400, "分け目の数が違います")
+        b, parts, _, rules = make_model(alias)
+        u = np.array(hc["u"], float)
+        cuts = sorted(bs.snap_to_face(b, u, float(t), float(rules["model"]["scale"])) for t in body.cuts_mm)
+        trial = bs.choose(b, parts, rules, {"u": list(u), "cuts": cuts, "source": "human"})
+        if trial is None or trial.source != "human":
+            raise HTTPException(400, "その分け目では、分けた部品のどれかが造形範囲に入りません。もう少し真ん中寄りにしてください")
+        before = bs.load_saved(alias)
+        bs.save_human(alias, u, cuts)
+        try:
+            summary = write_outputs(alias)
+        except Exception:
+            if before:
+                bs.save_human(alias, np.array(before["u"], float), before["cuts"])
+            else:
+                bs.clear_saved(alias)
+            raise
     return _safe_json({"house_cut": summary.get("house_cut"), "checks": summary.get("checks", [])})
 
 
@@ -418,8 +427,9 @@ def split_reset(alias: str):
     _check_alias(alias)
     if RUNS.get(alias, {}).get("running"):
         raise HTTPException(409, "この物件はいま検品中です。検品が終わってから戻してください")
-    bs.clear_saved(alias)
-    summary = write_outputs(alias)
+    with MODEL_LOCK:
+        bs.clear_saved(alias)
+        summary = write_outputs(alias)
     return _safe_json({"house_cut": summary.get("house_cut"), "checks": summary.get("checks", [])})
 
 
@@ -454,12 +464,13 @@ class OverrideIn(BaseModel):
 def add_override(alias: str, body: OverrideIn):
     """表で直した値を、人が承認した修正として1件記録し、模型を組み立て直す。"""
     _check_alias(alias)
-    raw = json.loads(_building_path(alias).read_text(encoding="utf-8"))
-    try:
-        item = ov.add(alias, raw, body.target, body.field, body.to, "human:table", body.reason or "表で直した")
-    except (KeyError, ValueError) as e:
-        raise HTTPException(400, str(e).strip("'\""))
-    summary = _rebuild_or_undo(alias, item["id"])
+    with MODEL_LOCK:
+        raw = json.loads(_building_path(alias).read_text(encoding="utf-8"))
+        try:
+            item = ov.add(alias, raw, body.target, body.field, body.to, "human:table", body.reason or "表で直した")
+        except (KeyError, ValueError) as e:
+            raise HTTPException(400, str(e).strip("'\""))
+        summary = _rebuild_or_undo(alias, item["id"])
     return _safe_json({"override": item, "checks": summary["checks"]})
 
 
@@ -480,12 +491,13 @@ def _rebuild_or_undo(alias: str, override_id: str | None) -> dict:
 @app.delete("/api/overrides/{alias}/{override_id}")
 def undo_override(alias: str, override_id: str):
     _check_alias(alias)
-    try:
-        item = ov.undo(alias, override_id)
-    except KeyError as e:
-        raise HTTPException(404, str(e).strip("'\""))
-    fd.revert_override(alias, override_id)      # この修正を生んだ指摘は「未確認」に戻す
-    summary = write_outputs(alias)
+    with MODEL_LOCK:
+        try:
+            item = ov.undo(alias, override_id)
+        except KeyError as e:
+            raise HTTPException(404, str(e).strip("'\""))
+        fd.revert_override(alias, override_id)      # この修正を生んだ指摘は「未確認」に戻す
+        summary = write_outputs(alias)
     return _safe_json({"undone": item, "checks": summary["checks"]})
 
 
@@ -591,23 +603,21 @@ class DecisionIn(BaseModel):
     action: str
 
 
-DECIDE_LOCK = threading.Lock()       # 指摘を決めるのは1つずつ（同じ指摘の承認が同時に2つ届いても、修正を2件にしない）
-
-
 @app.post("/api/findings/{alias}/{fid}")
 def decide_finding(alias: str, fid: str, body: DecisionIn):
     """指摘を承認／却下／あとで／依頼済み（request：直す案を Claude に頼んだ）／未確認に戻す（reset）にする。
-    承認すると修正として記録し、模型を組み直す。もう承認してある指摘は、何もしないで今の指摘を返す（already: true。組み直さない）。"""
+    承認すると修正として記録し、模型を組み直す。もう承認してある指摘は、何もしないで今の指摘を返す（already: true。組み直さない）。
+    指摘を決めるのは1つずつ（同じ指摘の承認が同時に2つ届いても、修正を2件にしない。組み直しも MODEL_LOCK の中）。"""
     _check_alias(alias)
-    with DECIDE_LOCK:
+    with MODEL_LOCK:
         before = {x.get("id") for x in ov.load(alias)}
         try:
             f = fd.decide(alias, fid, body.action)
         except (KeyError, ValueError) as e:
             raise HTTPException(400, str(e).strip("'\""))
-    added = f.get("override") if body.action == "approve" and f.get("override") not in before else None
-    if added:
-        _rebuild_or_undo(alias, added)
+        added = f.get("override") if body.action == "approve" and f.get("override") not in before else None
+        if added:
+            _rebuild_or_undo(alias, added)
     return _safe_json({"finding": f, "already": body.action == "approve" and not added})
 
 
@@ -732,11 +742,12 @@ def lasso_approve(alias: str, body: LassoApproveIn):
     """直す案を承認して修正として記録し、模型を組み直す。数値はサーバーが出どころから計算し直す。"""
     _check_alias(alias)
     from core.ai.lasso import approve
-    try:
-        item = approve(alias, body.model_dump())
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    summary = _rebuild_or_undo(alias, item["id"])
+    with MODEL_LOCK:
+        try:
+            item = approve(alias, body.model_dump())
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        summary = _rebuild_or_undo(alias, item["id"])
     return _safe_json({"override": item, "checks": summary["checks"]})
 
 
@@ -746,7 +757,7 @@ def lasso_approve(alias: str, body: LassoApproveIn):
 # 今までの /api/lasso/*（テストや録画が使う）は、そのまま残す。
 
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
-FIX_LOCK = threading.Lock()          # 承認・却下は1つずつ（二度押しで同じ案を2回直さない）
+# 承認・却下は1つずつ（二度押しで同じ案を2回直さない）：MODEL_LOCK を使う（表の直し・指摘の承認・分け目と同じ鍵。★11/6 見直し）
 NO_CHANGE_NOTE = "この直しでは模型が変わりませんでした（取り消しました）"
 FIX_STATE_JA = {"approved": "もう承認しました（やめるときは「取り消す」）", "rejected": "却下しました",
                 "no_change": "模型が変わらなかったので取り消しました"}
@@ -849,8 +860,8 @@ def fix_create(alias: str, body: FixRequestIn):
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(400, "一言を書いてください（例：この壁厚だけおかしい。ほかとそろえて）")
-    try:
-        assert_clean(text + "\n" + (body.finding_id or ""), "一言")
+    try:   # 記録に残る文は全部、書く前に確かめる（★11/6 見直し：囲みの名前・parent_id は確かめておらず、記録を書くときに 500 になった）
+        assert_clean("\n".join([text, body.finding_id or "", body.parent_id or "", *(g.label for g in body.groups or [])]), "一言")
     except PrivacyError as e:
         raise HTTPException(400, str(e))
     try:
@@ -904,7 +915,7 @@ def fix_approve(alias: str, rid: str, body: FixIndexIn):
     _effective(alias)
     if RUNS.get(alias, {}).get("running"):
         raise HTTPException(409, "この物件はいま検品中です。検品が終わってから承認してください")
-    with FIX_LOCK:
+    with MODEL_LOCK:
         req, p = _fix_proposal(alias, rid, body.index)
         if p.get("state") in FIX_STATE_JA:
             raise HTTPException(409, f"この案は{FIX_STATE_JA[p['state']]}")
@@ -928,7 +939,9 @@ def fix_approve(alias: str, rid: str, body: FixIndexIn):
             req = fr.set_proposal(alias, rid, body.index, state="no_change", override_id=None, note=NO_CHANGE_NOTE, **values)
             return _safe_json({"request": req, "override": item, "changed": False, "changed_parts": [],
                                "checks": summary["checks"]})
-        req = fr.set_proposal(alias, rid, body.index, state="approved", override_id=item["id"], note="", **values)
+        # override_at：修正の番号は取り消すと使い回されるので、承認したときの修正の時刻も控える（fix_requests._still_recorded）
+        req = fr.set_proposal(alias, rid, body.index, state="approved", override_id=item["id"], override_at=item.get("at"),
+                              note="", **values)
         return _safe_json({"request": req, "override": item, "changed": True, "changed_parts": parts,
                            "checks": summary["checks"]})
 
@@ -938,7 +951,7 @@ def fix_reject(alias: str, rid: str, body: FixIndexIn):
     """直す案を却下する（模型は変えない）。承認した案は「取り消す」でやめる。"""
     from core import fix_requests as fr
     _check_alias(alias)
-    with FIX_LOCK:
+    with MODEL_LOCK:
         _, p = _fix_proposal(alias, rid, body.index)
         if p.get("state") == "approved":
             raise HTTPException(409, "承認した案です。やめるときは「取り消す」を押してください")
