@@ -523,7 +523,7 @@ function stlRows(s) {
 }
 
 function renderDownloads() {
-  const files = [['model_bambu.3mf', '3MF（Bambu Studio 形式・外壁のファジースキン設定済み）おすすめ'], ['model.3mf', '3MF（ふつうの形式・設定は手で）'], ['model.glb', 'GLB（3D 表示用）']];
+  const files = [['model_bambu.3mf', '3MF（Bambu Studio 形式）おすすめ'], ['model.3mf', '3MF（ふつうの形式・設定は手で）'], ['model.glb', 'GLB（3D 表示用）']];
   const s = state.checks;
   // 道具の帯の主のボタン：Bambu Studio 形式を作らない設定のときは、ふつうの 3MF
   const noBambu = s && s.bambu_3mf && s.bambu_3mf.ok === false;
