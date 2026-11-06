@@ -13,7 +13,7 @@
 - 自分の Claude Code からつなぐ（MCP）：[docs/mcp.md](docs/mcp.md)
 - 紹介動画の作り方（録画・CG・声・組み立てまで Claude Code で）：[docs/video-making.md](docs/video-making.md)
 
-Walk in home（住宅の提案に使う営業用 CAD）の 3D データ（glb）を読み込むだけで、**1/50 の住宅模型の 3D プリント用データ（3MF）**を作る Windows のソフトです。
+Walk in home（住宅の提案に使う営業用 CAD）の 3D データ（glb）を読み込むだけで、**1/50 の住宅模型の 3D プリント用データ**（3MF）を作る Windows のソフトです。
 形の計算はコード（Python）、模型の検品と直す案は Claude が受け持ちます。
 
 ## なぜ作ったか
