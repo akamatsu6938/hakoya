@@ -11,6 +11,7 @@
 - 作りの説明（設計書）：[docs/design.md](docs/design.md)
 - 仕様書（詳しい決まり）：[SPEC.md](SPEC.md)
 - 自分の Claude Code からつなぐ（MCP）：[docs/mcp.md](docs/mcp.md)
+- 紹介動画の作り方（録画・CG・声・組み立てまで Claude Code で）：[docs/video-making.md](docs/video-making.md)
 
 Walk in home（住宅の提案に使う営業用 CAD）の 3D データ（glb）を読み込むだけで、**1/50 の住宅模型の 3D プリント用データ（3MF）**を作る Windows のソフトです。
 形の計算はコード（Python）、模型の検品と直す案は Claude が受け持ちます。
@@ -118,7 +119,7 @@ Windows 11（作者が確かめた環境。Windows 10 は未確認）、Python 3
 | `samples/sample_house/` | 見本の家（glb と、組み立て・検品の結果）と、この README の絵 |
 | `tests/` | テスト（pytest） |
 | `tools/` | 平面図の絵・まとめて検査・印刷の見込みなどの道具 |
-| `docs/` | 利用マニュアル（manual.md）・設計書（design.md）・MCP のつなぎ方・開発の記録・決めたこと・失敗の記録 |
+| `docs/` | 利用マニュアル（manual.md）・設計書（design.md）・MCP のつなぎ方・紹介動画の作り方（video-making.md）・開発の記録・決めたこと・失敗の記録 |
 
 ## B工務店（架空）で試す
 - このリポジトリに入っている会社の決まりは、見本の **B工務店（架空）** だけです（`rules/bkoumuten.yaml`・`skills/company-bkoumuten/`）。値はどれも架空です。起動すると、これが最初から選ばれています。
