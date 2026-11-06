@@ -3,7 +3,8 @@
 - auto_inspect：組み立てたあとの検品。claude_code（Claude、自分のプラン）／api_key（Claude、API キー）／
   off（コードの検査だけ、AI なし）／none（しない）。
   既定は off（勝手にプランや API の利用枠を使わない。それでも検品の欄は動く）。SPEC §12「組み立てると自動で検品が始まる」。
-- 社外用の exe（HAKOYA_EDITION=external）ではプランの接続（claude_code）を出さない（規約。SPEC §7-4）。
+- 社外用の exe（HAKOYA_EDITION=external）と、自社の会社ルールがない版（提出用の公開リポジトリ）では、
+  プランの接続（claude_code）を出さない（規約。SPEC §7-4。★11/6）。
 - api_key を選ぶときは、費用の上限を見せて1回だけ確かめる（api_cost_ack）。
 - company：「読み込んで組み立てる」で使う会社ルール（rules/<会社>.yaml）。既定は core.rules.DEFAULT_COMPANY（★11/4 B工務店。SPEC §5）。
   自社の会社ルールがない（公開の版）ときは、core.rules.default_company()（B工務店（架空））。
@@ -113,9 +114,18 @@ def _in_other_mode() -> bool:
     return edition() != "external" and mode() == "other"
 
 
+def own_rules_present() -> bool:
+    """自社の会社ルール（rules/jisha.yaml）があるか。ない＝提出用の公開リポジトリ（作者の手元ではない）。"""
+    from core.rules import DEFAULT_COMPANY, RULES_DIR
+    return (RULES_DIR / f"{DEFAULT_COMPANY}.yaml").exists()
+
+
 def _connections(m: str) -> list[str]:
+    """★11/6：自社の会社ルールがない版（公開リポジトリ）では、どの起動でもプランの接続を出さない（Anthropic の決まり：
+    アプリの作り手が、ほかの人に Claude のプランのログインを使わせない。API キー・MCP・AI なしは使える）。"""
     out = []
-    if edition() != "external" and m != "other" and find_spec("claude_agent_sdk") is not None:
+    if (edition() != "external" and m != "other" and own_rules_present()
+            and find_spec("claude_agent_sdk") is not None):
         out.append("claude_code")
     return out + ["api_key", "off", "none"]
 

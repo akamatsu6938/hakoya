@@ -22,7 +22,8 @@ REPO_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 # own＝自社用（start.bat・HAKOYA.exe）：全部の機能。データは data/
 # other＝他社用（start_other.bat・HAKOYA_external.exe）：AI は API キーと AI なしだけ。データは data/other/（最初は空）
 # sample＝見本用（start_sample.bat・HAKOYA.exe --mode sample）：審査・動画用。見本の家だけ。データは data/sample/
-# 決め方：HAKOYA_MODE（own・other・sample）。なければ、社外用の版と自社の会社ルールがない版（公開リポジトリ）は other、ほかは own。
+# 決め方：HAKOYA_MODE（own・other・sample）。なければ、社外用の版は other、ほかは own（★11/6 作者：公開リポジトリでも
+# start.bat は自社用。会社ルールは見本の B工務店で、会社ルールのタブ（学習）も使える。前は自社の会社ルールがない版は other だった）。
 # 社外用の版は、いつも other（HAKOYA_MODE でも変えられない）。データの置き場所は HAKOYA_DATA_DIR で変えられる
 MODES = ("own", "other", "sample")
 MODE_FOLDERS = {"own": "", "other": "other", "sample": "sample"}     # 自社用の data/ の中のフォルダ（own は data/ そのもの）
@@ -40,11 +41,8 @@ def edition() -> str:
 
 
 def default_mode() -> str:
-    """HAKOYA_MODE がないときの起動のしかた。社外用の版と、自社の会社ルールがない版（提出用の公開リポジトリ）は他社用。"""
-    if edition() == "external":
-        return "other"
-    from core.rules import DEFAULT_COMPANY, RULES_DIR      # core.rules は読み込みのときに paths を使わない（循環しない）
-    return "own" if (RULES_DIR / f"{DEFAULT_COMPANY}.yaml").exists() else "other"
+    """HAKOYA_MODE がないときの起動のしかた。社外用の版は他社用、ほかは自社用（提出用の公開リポジトリも。★11/6）。"""
+    return "other" if edition() == "external" else "own"
 
 
 def launch_mode() -> str:
@@ -266,21 +264,48 @@ def write_text_atomic(path: Path, text: str) -> None:
 
 # ---------------------------------------------------------------- 見本用のデータ（★11/5）
 DEMO_ALIAS = "デモ用"        # 見本用に写す、組み立て済みの見本の家（自社用のデータから。ほかの物件は写さない）
+# ★11/6 作者：公開リポジトリでも、見本用は最初から見本の家が入っている（組み立て＋検品の結果まで）。
+# 同梱の見本（house.glb と、組み立て済みの out/ の中身）。名前は ASCII（日本語のファイル名を避ける）。公開用の書き出しが足す
+SAMPLE_BUNDLE = REPO_ROOT / "samples" / "sample_house"
+SAMPLE_ALIAS = "見本の家"     # 同梱の見本を写すときの仮名（動画に出てくる家）
 
 
-def ensure_sample_data(src: Path | None = None, dst: Path | None = None) -> str:
-    """見本用のデータ（data/sample/）を用意する。dst に local_paths.yaml がなければ、自社用のデータ（src）の組み立て済みの
-    「デモ用」の out/デモ用/ を丸ごと写し、local_paths.yaml には「デモ用」だけを書く（glb・図面の場所はそのまま同じ。
-    出してはいけない言葉も写す：見本用でも、画面に送る前の見張りが同じ言葉で止めるように）。
-    返り値："copied"（写した）・"ready"（もう用意してある）・"missing"（自社用に組み立て済みのデモ用がない。何もしない。画面が案内を出す）。
+def _copy_sample_bundle(bundle: Path, dst: Path) -> str:
+    """同梱の見本を data/sample/ に写す。glb も写し（exe の展開先は起動のたびに変わることがあるため）、local_paths.yaml には
+    写した glb の場所を書く（local_paths.yaml を最後に書く：途中で止まったら次の起動で写し直す）。"""
+    glb = dst / "glb" / "house.glb"
+    out = dst / "out" / SAMPLE_ALIAS
+    if out.exists():                            # 前に途中で止まった写し
+        shutil.rmtree(out)
+    glb.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(bundle / "house.glb", glb)
+    shutil.copytree(bundle / "out", out)
+    entry = {"glb": str(glb.resolve())}
+    text = ("# 見本用（start_sample.bat）の物件。HAKOYA が同梱の見本の家（samples/sample_house）を写した\n"
+            + yaml.safe_dump({SAMPLE_ALIAS: entry}, allow_unicode=True, sort_keys=False))
+    if parse_local_paths(text).get(SAMPLE_ALIAS) != entry:      # 書く前に、読み直して同じになるか確かめる
+        raise ValueError("見本用の local_paths.yaml を作れませんでした")
+    write_text_atomic(dst / "local_paths.yaml", text)
+    return "copied"
+
+
+def ensure_sample_data(src: Path | None = None, dst: Path | None = None, bundle: Path | None = None) -> str:
+    """見本用のデータ（data/sample/）を用意する。dst に local_paths.yaml がなければ写す。
+    - 同梱の見本（bundle。既定は samples/sample_house）があれば、それを「見本の家」として写す（公開リポジトリ・★11/6）。
+    - なければ、自社用のデータ（src）の組み立て済みの「デモ用」の out/デモ用/ を丸ごと写し、local_paths.yaml には「デモ用」だけを
+      書く（glb・図面の場所はそのまま同じ。出してはいけない言葉も写す：見本用でも、画面に送る前の見張りが同じ言葉で止めるように）。
+    返り値："copied"（写した）・"ready"（もう用意してある）・"missing"（写すものがない。何もしない。画面が案内を出す）。
     場所は表示しない・記録に書かない。"""
     src = Path(src) if src is not None else own_data_dir()
     dst = Path(dst) if dst is not None else DATA_DIR
+    bundle = Path(bundle) if bundle is not None else SAMPLE_BUNDLE
     target = dst / "local_paths.yaml"
     if target.exists():
         return "ready"
     if src.resolve() == dst.resolve():          # 自社用のデータそのものには書かない
         return "missing"
+    if (bundle / "house.glb").is_file() and (bundle / "out" / "building.json").is_file():
+        return _copy_sample_bundle(bundle, dst)
     conf_path = src / "local_paths.yaml"
     if not conf_path.exists():
         return "missing"

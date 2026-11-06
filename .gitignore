@@ -9,6 +9,9 @@ data/
 *.3mf
 local_paths.yaml
 
+# 同梱の見本の家（glb・組み立て済みの結果）。開発のリポジトリにはコミットしない。公開用の書き出しが最後のコミットで足す（★11/6）
+samples/
+
 # Python
 .venv/
 __pycache__/

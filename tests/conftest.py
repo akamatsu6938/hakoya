@@ -44,6 +44,16 @@ if not JISHA_RULES.exists():
     _rules.base_text = _skip_jisha(_rules.base_text)
 
 
+@pytest.fixture(autouse=True)
+def _plan_connection_like_the_author_pc(monkeypatch):
+    """自社の会社ルールがない版（公開リポジトリ）では、アプリはプランの接続を出さない（★11/6）。プランの接続を使う流れの
+    テストが公開の版でも同じに動くよう、テストの中では作者の手元と同じ扱いにする。出さないことは test_views.py が
+    own_rules_present を差し替えて確かめる。jisha.yaml があるときは何も変えない。"""
+    if not JISHA_RULES.exists():
+        from core import settings_store
+        monkeypatch.setattr(settings_store, "own_rules_present", lambda: True)
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "jisha: 自社の会社ルール（rules/jisha.yaml）が要るテスト（なければ飛ばす）")
 

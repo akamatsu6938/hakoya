@@ -71,21 +71,25 @@ def test_external_edition_is_always_other(tmp_path, monkeypatch):
     assert ss.mode() == "other"
 
 
-def test_public_edition_without_own_rules_starts_as_other(tmp_path, monkeypatch):
-    """提出用の公開リポジトリ（自社の会社ルールがない）は、HAKOYA_MODE がなければ他社用で始まる。書けば自社用にもできる。"""
+def test_public_edition_without_own_rules_starts_as_own(tmp_path, monkeypatch):
+    """提出用の公開リポジトリ（自社の会社ルールがない）も、HAKOYA_MODE がなければ自社用で始まる（★11/6 作者。前は他社用）。
+    会社ルールは B工務店（架空）で、会社ルールのタブ（学習）も使える。ただしプランの接続は、どの起動でも出さない。"""
     import core.rules
     rules = tmp_path / "rules"
     rules.mkdir()
     (rules / "bkoumuten.yaml").write_text((RULES_DIR / "bkoumuten.yaml").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setattr(core.rules, "RULES_DIR", rules)
+    monkeypatch.setattr(ss, "own_rules_present", lambda: False)               # テスト共通の差し替えを外して、公開の版の扱い
     monkeypatch.delenv("HAKOYA_EDITION", raising=False)
     monkeypatch.delenv("HAKOYA_MODE", raising=False)
-    assert paths.default_mode() == "other" and paths.launch_mode() == "other"
-    (rules / f"{core.rules.DEFAULT_COMPANY}.yaml").write_text("walls: {}\n", encoding="utf-8")
-    assert paths.default_mode() == "own"                                      # 自社の会社ルールがあれば自社用
-    monkeypatch.setenv("HAKOYA_MODE", "own")
-    (rules / f"{core.rules.DEFAULT_COMPANY}.yaml").unlink()
-    assert paths.launch_mode() == "own"                                       # 書けば、ない版でも自社用
+    assert paths.default_mode() == "own" and paths.launch_mode() == "own"
+    for m in ("own", "sample", "other"):
+        assert "claude_code" not in ss._connections(m)                         # プランの接続はどの起動でも出さない
+        assert ss._connections(m)[-3:] == ["api_key", "off", "none"]            # API キー・AI なしは使える
+    monkeypatch.setattr(paths, "MODE", "own")
+    with pytest.raises(ValueError, match="この版では"):
+        ss.check_connection("claude_code")
+    assert ss.features()["rules_tab"] is True and ss.features()["plan_connection"] is False
 
 
 def test_each_mode_has_its_own_data_folder(tmp_path, monkeypatch):
@@ -289,9 +293,54 @@ def _own_data(root: Path) -> Path:
     return own
 
 
+def _bundle(root: Path) -> Path:
+    """同梱の見本（samples/sample_house）の形の、架空の中身。"""
+    b = root / "samples" / "sample_house"
+    (b / "out" / "model").mkdir(parents=True)
+    (b / "house.glb").write_bytes(b"glTF-sample")
+    (b / "out" / "building.json").write_text(json.dumps({"alias": "見本の家"}, ensure_ascii=False), encoding="utf-8")
+    (b / "out" / "findings.json").write_text('{"findings": [{"id": "F1"}]}', encoding="utf-8")
+    (b / "out" / "model" / "checks.json").write_text('{"checks": []}', encoding="utf-8")
+    return b
+
+
+def test_sample_data_copies_the_bundled_sample_house(tmp_path, capsys):
+    """公開リポジトリ：自社用のデータがなくても、同梱の見本の家（組み立て＋検品の結果まで）を写す（★11/6 作者）。"""
+    bundle, sample = _bundle(tmp_path), tmp_path / "sample"
+    assert paths.ensure_sample_data(tmp_path / "nothing", sample, bundle) == "copied"
+    conf = paths.load_local_paths(sample / "local_paths.yaml")
+    assert paths.aliases(sample / "local_paths.yaml") == ["見本の家"]
+    assert Path(conf["見本の家"]["glb"]) == (sample / "glb" / "house.glb").resolve()       # glb も写し、写した方を指す
+    assert (sample / "glb" / "house.glb").read_bytes() == b"glTF-sample"
+    for rel in ("building.json", "findings.json", "model/checks.json"):
+        assert (sample / "out" / "見本の家" / rel).read_bytes() == (bundle / "out" / rel).read_bytes()
+    assert ss.is_sample_alias("見本の家")                                       # 見本用の一覧に出る
+    assert capsys.readouterr().out == ""                                       # 何も表示しない（場所を出さない）
+    (sample / "out" / "見本の家" / "findings.json").write_text("{}", encoding="utf-8")
+    assert paths.ensure_sample_data(tmp_path / "nothing", sample, bundle) == "ready"   # 2回目からは何もしない
+    assert (sample / "out" / "見本の家" / "findings.json").read_text(encoding="utf-8") == "{}"
+    own = _own_data(tmp_path / "b")
+    assert paths.ensure_sample_data(own, tmp_path / "s2", bundle) == "copied"        # 同梱があれば、自社用のデモ用より先
+    assert paths.aliases(tmp_path / "s2" / "local_paths.yaml") == ["見本の家"]
+    (bundle / "out" / "building.json").unlink()                                       # 組み立て済みがない同梱は使わない
+    assert paths.ensure_sample_data(own, tmp_path / "s3", bundle) == "copied"
+    assert paths.aliases(tmp_path / "s3" / "local_paths.yaml") == ["デモ用"]
+
+
+def test_sample_data_redoes_a_broken_bundle_copy(tmp_path):
+    bundle, sample = _bundle(tmp_path), tmp_path / "sample"
+    (sample / "out" / "見本の家").mkdir(parents=True)
+    (sample / "out" / "見本の家" / "half.json").write_text("{", encoding="utf-8")
+    assert paths.ensure_sample_data(tmp_path / "nothing", sample, bundle) == "copied"
+    assert not (sample / "out" / "見本の家" / "half.json").exists()
+
+
+NOB = Path("__no_bundle__")              # 同梱の見本がない場合（作者の手元の samples/ に左右されないように）
+
+
 def test_sample_data_copies_only_the_demo_house(tmp_path, capsys):
     own, sample = _own_data(tmp_path), tmp_path / "sample"
-    assert paths.ensure_sample_data(own, sample) == "copied"
+    assert paths.ensure_sample_data(own, sample, tmp_path / NOB) == "copied"
     conf = paths.load_local_paths(sample / "local_paths.yaml")
     assert paths.aliases(sample / "local_paths.yaml") == ["デモ用"]                 # デモ用だけ（見本の家・物件A は写さない）
     assert conf["デモ用"]["glb"] == str(tmp_path / "glb" / "demo.glb")               # glb の場所は同じ（glb は写さない）
@@ -311,14 +360,16 @@ def test_sample_data_needs_a_built_demo_house(tmp_path):
     import yaml
     own, sample = _own_data(tmp_path), tmp_path / "sample"
     (own / "out" / "デモ用" / "building.json").unlink()                           # 組み立てていない
-    assert paths.ensure_sample_data(own, sample) == "missing" and not sample.exists()
-    assert paths.ensure_sample_data(tmp_path / "nothing", sample) == "missing"   # 自社用のデータがない
-    assert paths.ensure_sample_data(own, own) == "ready"                        # 自社用のデータそのものには書かない
+    nob = tmp_path / NOB
+    assert paths.ensure_sample_data(own, sample, nob) == "missing" and not sample.exists()
+    assert paths.ensure_sample_data(tmp_path / "nothing", sample, nob) == "missing"   # 自社用のデータも同梱の見本もない
+    assert paths.ensure_sample_data(own, own, nob) == "ready"                   # 自社用のデータそのものには書かない
+    assert paths.ensure_sample_data(own, own, _bundle(tmp_path / "c")) == "ready"   # 同梱があっても、自社用のデータには書かない
     other = _own_data(tmp_path / "b")
     conf = paths.load_local_paths(other / "local_paths.yaml")
     del conf["デモ用"]
     (other / "local_paths.yaml").write_text(yaml.safe_dump(conf, allow_unicode=True), encoding="utf-8")
-    assert paths.ensure_sample_data(other, sample) == "missing" and not sample.exists()   # 登録していない
+    assert paths.ensure_sample_data(other, sample, nob) == "missing" and not sample.exists()   # 登録していない
 
 
 def test_sample_data_redoes_a_broken_copy(tmp_path):
@@ -326,7 +377,7 @@ def test_sample_data_redoes_a_broken_copy(tmp_path):
     own, sample = _own_data(tmp_path), tmp_path / "sample"
     (sample / "out" / "デモ用").mkdir(parents=True)
     (sample / "out" / "デモ用" / "half.json").write_text("{", encoding="utf-8")
-    assert paths.ensure_sample_data(own, sample) == "copied"
+    assert paths.ensure_sample_data(own, sample, tmp_path / NOB) == "copied"
     assert not (sample / "out" / "デモ用" / "half.json").exists() and (sample / "out" / "デモ用" / "building.json").exists()
 
 

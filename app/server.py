@@ -1369,7 +1369,7 @@ def _port_in_use(port: int) -> bool:
 
 
 def _prepare_sample_data() -> None:
-    """見本用：初めて起動したときに、自社用のデータから組み立て済みの「デモ用」だけを写す（場所は出さない）。"""
+    """見本用：初めて起動したときに、同梱の見本の家（公開リポジトリ）か、自社用のデータの組み立て済みの「デモ用」だけを写す（場所は出さない）。"""
     from core.paths import ensure_sample_data
     try:
         state = ensure_sample_data()
@@ -1380,9 +1380,10 @@ def _prepare_sample_data() -> None:
         print(f"見本用のデータを用意できませんでした（{type(e).__name__}。空き容量や権限を確かめてください）")
         return
     if state == "copied":
-        print("見本用のデータを用意しました（自社用のデータから、組み立て済みの「デモ用」だけを写しました）")
+        print("見本用のデータを用意しました（組み立て済みの見本の家を写しました）")
     elif state == "missing":
-        print("見本用の家がまだありません。自社用（start.bat）で「デモ用」を組み立ててから、もう一度起動してください")
+        print("見本用の家がまだありません。同梱の見本の家（samples\\sample_house）があるか確かめるか、"
+              "自社用（start.bat）で「デモ用」を組み立ててから、もう一度起動してください")
 
 
 def main() -> int:
