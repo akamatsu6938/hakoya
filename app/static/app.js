@@ -12,7 +12,8 @@ const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const api = (path) => path.replace('{a}', encodeURIComponent(state.alias));
 const state = { alias: null, building: null, root: null, exploded: false, pick: null, hl: null,
   ws: 'model', pane: '3d', mode: 'own', settings: null, props: [], focus: null, hidden: new Set(), checks: null,
-  overrides: [], refreshing: false, inspecting: false, orbiting: false, savedAt: null, treeOpen: new Set(['parts']) };
+  overrides: [], refreshing: false, inspecting: false, orbiting: false, savedAt: null, treeOpen: new Set(['parts']),
+  fuzzy: null };   // 外壁の仕上げ（GET /api/print_options の fuzzy_skin：on・source・company_default）
 const KIND = { window: '窓', door: 'ドア', entrance_door: '玄関ドア', exterior: '外壁', interior: '内壁', standalone: '単独の壁' };
 const SIDE = { W: '西', E: '東', S: '南', N: '北' };
 const ROOF_SHAPE = { gable: '切妻', hip: '寄棟', multi: '複数の面' };   // 片流れは今までどおり書かない
@@ -523,8 +524,13 @@ function stlRows(s) {
 }
 
 function renderDownloads() {
-  const files = [['model_bambu.3mf', '3MF（Bambu Studio 形式）おすすめ'], ['model.3mf', '3MF（ふつうの形式・設定は手で）'], ['model.glb', 'GLB（3D 表示用）']];
   const s = state.checks;
+  // 名前は、書き出した 3MF にざらざらの設定を入れたかで分ける（checks.json の fuzzy_skin。前の版の書き出しにはない）。★11/6
+  // ふつうの形式は Bambu Studio が形だけ読む（設定が消える）ので、ざらざらにするときは開いてから手で
+  const fz = s && s.fuzzy_skin;
+  const files = [['model_bambu.3mf', !fz ? '3MF（Bambu Studio 形式）おすすめ' : fz.on ? '3MF（Bambu Studio 形式・外壁ざらざら）おすすめ' : '3MF（Bambu Studio 形式・ざらざらなし）おすすめ'],
+    ['model.3mf', !fz ? '3MF（ふつうの形式・設定は手で）' : fz.on ? '3MF（ふつうの形式・外壁ざらざらは手で）' : '3MF（ふつうの形式）'],
+    ['model.glb', 'GLB（3D 表示用）']];
   // 道具の帯の主のボタン：Bambu Studio 形式を作らない設定のときは、ふつうの 3MF
   const noBambu = s && s.bambu_3mf && s.bambu_3mf.ok === false;
   const main = $('#dl-main');
@@ -1429,8 +1435,8 @@ $('#plan').addEventListener('pointermove', (e) => {
     if (label) label.textContent = splitLabelText(sd, d.cuts, j, j === i ? '動かしている分け目' : label.textContent.split('｜')[0]);
   }
 });
-async function afterExport() {     // 書き出し直したあと：検査・平面図・書き出し・下の帯
-  await reloadChecks(); await loadPlan(); await renderChecks(); renderDownloads(); renderModelInfo(); updateStatusBar();
+async function afterExport() {     // 書き出し直したあと：検査・平面図・外壁の仕上げ・書き出し・下の帯
+  await reloadChecks(); await loadPlan(); await loadPrintOptions(); await renderChecks(); renderDownloads(); renderModelInfo(); updateStatusBar();
 }
 async function endSplitDrag() {
   const d = splitUi.drag; if (!d) return;
@@ -1468,6 +1474,41 @@ $('#split-reset').addEventListener('click', async () => {
   } catch (err) { setStatus('戻せませんでした：' + err.message, 'err'); }
   finally { splitUi.busy = false; $('#split-reset').disabled = false; }
 });
+
+// ---------------------------------------------------------------- 外壁の仕上げ（ざらざらにするか。★11/6 作者「適用するかしないかを決めれるように」）
+// 物件ごとに決める（data/out/<物件>/print_options.json）。決めていなければ会社ルール（塗り壁ならざらざら）。形は変わらず、3MF の設定だけ
+const finishUi = { busy: false };
+async function loadPrintOptions() {
+  if (!state.alias) { state.fuzzy = null; renderFinish(); return; }
+  try { state.fuzzy = (await call('GET', '/api/print_options/{a}')).fuzzy_skin || null; } catch (e) { state.fuzzy = null; }
+  renderFinish();
+}
+function renderFinish() {
+  const fz = state.fuzzy; const ready = !!(fz && state.alias && state.built);
+  const box = $('#fuzzy-on');
+  box.checked = ready && !!fz.on; box.disabled = !ready || finishUi.busy;
+  $('#fuzzy-reset').disabled = !ready || finishUi.busy || fz.source !== 'property';
+  $('#fuzzy-source').textContent = !ready ? '' : `会社ルールの既定：${fz.company_default ? 'あり' : 'なし'}。`
+    + (fz.source === 'property' ? 'この物件で決めています（「既定に戻す」で会社ルールのとおりに戻せます）。' : 'いまは会社ルールのとおりです。');
+}
+async function changeFinish(method, body, done) {
+  if (finishUi.busy || !state.alias) { renderFinish(); return; }
+  finishUi.busy = true; $('#fuzzy-on').disabled = true; $('#fuzzy-reset').disabled = true;
+  setStatus('書き出し中…（外壁の仕上げを変えて、3MF を作り直しています）', 'busy');
+  try {
+    const res = await call(method, '/api/print_options/{a}', body);
+    state.fuzzy = res.fuzzy_skin || state.fuzzy;
+    await afterExport();
+    setStatus(done, 'ok');
+    await syncVersion();
+  } catch (err) { setStatus('外壁の仕上げを変えられませんでした：' + err.message, 'err'); }
+  finally { finishUi.busy = false; renderFinish(); }      // 失敗したときは、チェックを前の値（state.fuzzy）に戻す
+}
+$('#fuzzy-on').addEventListener('change', () => {
+  const on = $('#fuzzy-on').checked;
+  changeFinish('POST', { fuzzy_skin: on }, on ? '外壁をざらざら（ファジースキン）にして、書き出し直しました' : '外壁のざらざらを外して、書き出し直しました');
+});
+$('#fuzzy-reset').addEventListener('click', () => changeFinish('DELETE', null, '外壁の仕上げを会社ルールの既定に戻して、書き出し直しました'));
 
 // ---------------------------------------------------------------- 囲んで直す（3D）
 // 画面に見えている部材だけを選ぶ。当たり判定用の形（/api/pick）を部材ごとの色で塗って画素を数え（pick3d.js）、
@@ -2469,6 +2510,7 @@ async function refresh() {
     renderTree(); renderInspector();
     await reloadChecks();
     await loadPlan();
+    await loadPrintOptions();
     await renderChecks(); renderDownloads(); await renderFindings(); await loadModel();
     renderModelInfo(); updateStatusBar(); updateChrome();
     inspectButtons(state.inspecting);
@@ -2527,11 +2569,11 @@ async function autoInspect() {
 
 function clearProperty() {
   state.alias = null; state.building = null; state.built = false; state.report = null; state.focus = null; state.checks = null;
-  state.overrides = []; state.savedAt = null; state.savedFromServer = false; state.pick = null;
+  state.overrides = []; state.savedAt = null; state.savedFromServer = false; state.pick = null; state.fuzzy = null;
   if (state.root) { scene.remove(state.root); state.root = null; }
   if (state.exploded) setExploded(false);
   clearLasso(); setLassoMode(false); setLasso3dMode(false); framePlate();
-  $('#plan').innerHTML = ''; updateSplitControls();
+  $('#plan').innerHTML = ''; updateSplitControls(); renderFinish();
   for (const id of ['#levels', '#openings', '#walls', '#roofs', '#roof-eaves', '#history', '#checks', '#downloads',
     '#findings', '#questions', '#code-findings', '#inspect-progress', '#tree']) $(id).innerHTML = '';
   $('#inspect-summary').textContent = '';
@@ -2642,7 +2684,7 @@ function stopPolling() { if (poll.timer) clearInterval(poll.timer); poll.timer =
 function canAutoRefresh() {   // 人が何かをしている途中（ドラッグ・囲み・小窓・直しかけの値）は読み直さない
   if (document.querySelector('dialog[open]') || !$('#file-pop').hidden) return false;
   if (lasso.on || lasso.on3d || lasso.line || lasso.line3d || lasso.selection.length) return false;
-  if (splitUi.drag || splitUi.busy || state.orbiting || state.refreshing || state.selfWriting || $('#status').classList.contains('busy')) return false;
+  if (splitUi.drag || splitUi.busy || finishUi.busy || state.orbiting || state.refreshing || state.selfWriting || $('#status').classList.contains('busy')) return false;
   if (document.querySelector('tr.approve:not([hidden]), .sel-approve:not([hidden])')) return false;
   return true;
 }

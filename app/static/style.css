@@ -853,3 +853,10 @@ body[data-mode="sample"] .no-sample { display: none !important; }
   .fr-spin, #lasso-result .prop.ps-applying button.primary::before { animation: none; }
   .fix-req.flash { animation: none; }
 }
+
+/* 外壁の仕上げ（印刷タブ）：ざらざら（ファジースキン）にするかのチェック。★11/6 */
+#sec-finish .finish-check { display: flex; align-items: center; gap: 8px; min-height: 26px; color: var(--ink); font-size: var(--fs-m); cursor: pointer; }
+#sec-finish .finish-check:has(input:disabled) { color: var(--ink-3); cursor: default; }
+#sec-finish .finish-check + .fine { margin-top: 2px; }
+#sec-finish #fuzzy-source:empty { display: none; }
+#sec-finish .row-acts .small { border-radius: 2px; }

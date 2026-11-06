@@ -137,7 +137,7 @@ def test_state_changes_when_any_file_changes(client, data_dir):
     first = client.get(url).json()
     assert first == {"saved_at": _iso(now), "version": (d / "building.json").stat().st_mtime_ns}
     seen = {first["version"]}
-    for i, rel in enumerate(("overrides.json", "findings.json", "print_split.json", "model/checks.json"), 1):
+    for i, rel in enumerate(("overrides.json", "findings.json", "print_split.json", "print_options.json", "model/checks.json"), 1):
         _write(d / rel, {}, now + i * 10)                                    # どのファイルが変わっても、数が変わる
         st = client.get(url).json()
         assert st["version"] not in seen and st["saved_at"] == _iso(now + i * 10)

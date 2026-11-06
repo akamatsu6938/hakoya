@@ -34,14 +34,16 @@ def _level_info(b: dict, rules: dict) -> tuple[float, float | None, float]:
     return fl, z_cut, ftop
 
 
-def fuzzy_face_findings(b: dict, rules: dict) -> list[dict]:
+def fuzzy_face_findings(b: dict, rules: dict, enabled: bool | None = None) -> list[dict]:
     """外壁の外の面が、ざらざらの層（基礎の外形の内側の帯。model.fuzzy_skin_band_mm）の中にない外壁。
     ★11/5 デモ用：外壁の厚みを 162→180 に直したとき、中心線のまわりに厚くしたため外の面が 9mm 外へ出て、南の外壁の1階の面が
-    全部ざらざらでなくなった（今は外の面を動かさず内側へ厚くする。core/overrides.py）。塗り壁の会社だけ見る。"""
+    全部ざらざらでなくなった（今は外の面を動かさず内側へ厚くする。core/overrides.py）。ざらざらにする物件だけ見る：
+    enabled は物件の外壁の仕上げ（core/print_options.py。★11/6）。None なら会社ルール（塗り壁の会社だけ）。"""
     from core.builder import UPPER_WALL_ABOVE_FL, outside_house
     from core.overrides import _inward
     m = rules.get("model") or {}
-    if m.get("exterior_finish") != "plaster" or not m.get("fuzzy_skin_band_mm"):
+    on = m.get("exterior_finish") == "plaster" if enabled is None else bool(enabled)
+    if not on or not m.get("fuzzy_skin_band_mm"):
         return []
     band_mm = float(m["fuzzy_skin_band_mm"])
     band = band_mm * float(m.get("scale", 50))
@@ -159,6 +161,6 @@ def split_outside_findings(b: dict, rules: dict) -> list[dict]:
     return out
 
 
-def shape_findings(b: dict, rules: dict) -> list[dict]:
-    """形の検査の指摘をまとめて返す（b は人の修正を当てた家）。"""
-    return fuzzy_face_findings(b, rules) + missing_footing_findings(b, rules) + split_outside_findings(b, rules)
+def shape_findings(b: dict, rules: dict, fuzzy: bool | None = None) -> list[dict]:
+    """形の検査の指摘をまとめて返す（b は人の修正を当てた家。fuzzy は外壁をざらざらにするか。None なら会社ルール）。"""
+    return fuzzy_face_findings(b, rules, fuzzy) + missing_footing_findings(b, rules) + split_outside_findings(b, rules)

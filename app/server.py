@@ -255,7 +255,7 @@ def thumb_get(alias: str):
 
 
 # ---------------------------------------------------------------- 物件のファイルが変わったか（★11/5：画面が数秒ごとに見て、変わったら読み直す）
-STATE_FILES = ("building.json", "overrides.json", "findings.json", "print_split.json", "model/checks.json")
+STATE_FILES = ("building.json", "overrides.json", "findings.json", "print_split.json", "print_options.json", "model/checks.json")
 
 
 @app.get("/api/state/{alias}")
@@ -433,6 +433,84 @@ def split_reset(alias: str):
     return _safe_json({"house_cut": summary.get("house_cut"), "checks": summary.get("checks", [])})
 
 
+# ---------------------------------------------------------------- 外壁の仕上げ（ざらざらにするか。★11/6 作者「適用するかしないかを決めれるように」）
+
+def _print_rules(alias: str) -> dict:
+    """この物件の会社ルール（組み立てた会社。まだ組み立てていなければ設定の会社）。書き出し（make_model）と同じ決め方。"""
+    from core import settings_store
+    from core.rules import default_company, load_rules
+    p = _building_path(alias)
+    if p.exists():
+        try:
+            return load_rules(json.loads(p.read_text(encoding="utf-8"))["source"].get("company_rules", default_company()))
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    return load_rules(settings_store.load()["company"])
+
+
+def _fuzzy_state(alias: str) -> dict:
+    from core import print_options as po
+    rules = _print_rules(alias)
+    on, source = po.effective_fuzzy(alias, rules)
+    return {"on": on, "source": source, "company_default": po.company_default(rules)}
+
+
+@app.get("/api/print_options/{alias}")
+def print_options_get(alias: str):
+    """外壁をざらざらにするか（on）・物件で決めたか会社ルールの既定か（source）・会社ルールの既定（company_default）。"""
+    _check_alias(alias)
+    return _safe_json({"fuzzy_skin": _fuzzy_state(alias)})
+
+
+class PrintOptionsIn(BaseModel):
+    fuzzy_skin: bool
+
+
+def _set_print_options(alias: str, change) -> dict:
+    """物件の選び方を変えて書き出し直す（分け目と同じ守り）。書き出せなければ、前の選び方に戻す。"""
+    from core import print_options as po
+    _check_alias(alias)
+    if RUNS.get(alias, {}).get("running"):
+        raise HTTPException(409, "この物件はいま検品中です。検品が終わってから変えてください")
+    if not _building_path(alias).exists():
+        raise HTTPException(409, "まだ組み立てていません。「読み込んで組み立てる」を押してください")
+    with MODEL_LOCK:
+        before = po.saved_fuzzy(alias)
+        change()
+        try:
+            summary = write_outputs(alias)
+        except Exception:
+            if before is None:
+                po.clear(alias)
+            else:
+                po.set_fuzzy(alias, before)
+            raise
+    return {"fuzzy_skin": _fuzzy_state(alias), "checks": summary.get("checks", [])}
+
+
+@app.post("/api/print_options/{alias}")
+def print_options_set(alias: str, body: PrintOptionsIn):
+    """外壁をざらざら（ファジースキン）にするかを、この物件で決めて、書き出し直す。形は変わらない（3MF の設定だけ）。"""
+    from core import print_options as po
+    return _safe_json(_set_print_options(alias, lambda: po.set_fuzzy(alias, body.fuzzy_skin)))
+
+
+@app.delete("/api/print_options/{alias}")
+def print_options_reset(alias: str):
+    """物件で決めた値をやめて、会社ルールの既定に戻し、書き出し直す。"""
+    from core import print_options as po
+    return _safe_json(_set_print_options(alias, lambda: po.clear(alias)))
+
+
+def _exported_fuzzy(alias: str) -> bool:
+    """書き出した 3MF に、ざらざらの設定を入れたか（checks.json。前の版の書き出しには印がないので「入れていない」）。"""
+    p = out_dir(alias) / "model" / "checks.json"
+    try:
+        return bool((json.loads(p.read_text(encoding="utf-8")).get("fuzzy_skin") or {}).get("on"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 PIECE_STL = re.compile(r"^(roof|roof_ext|roof_lower|roof_lower_ext|foundation|floor1|exterior1|floor2|exterior2)_p\d{1,2}\.stl$")   # 分けた STL（屋根の面・本体の分け目）
 
 
@@ -444,7 +522,9 @@ def model_file(alias: str, name: str):
     p = out_dir(alias) / "model" / name
     if not p.exists():
         raise HTTPException(409, "まだ書き出していません")
-    return FileResponse(p, media_type=MODEL_FILES.get(name, "model/stl"), filename=f"hakoya_{name}")
+    # 保存する名前：ざらざらの設定を入れた 3MF は、名前でも分かるように _fuzzy を付ける（英字だけ。★11/6）
+    fname = f"hakoya_{name[:-4]}_fuzzy.3mf" if name.endswith(".3mf") and _exported_fuzzy(alias) else f"hakoya_{name}"
+    return FileResponse(p, media_type=MODEL_FILES.get(name, "model/stl"), filename=fname)
 
 
 @app.get("/api/overrides/{alias}")

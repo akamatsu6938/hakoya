@@ -109,7 +109,7 @@ HAKOYA（箱家）が**どういう形で作られているか**の説明です�
 | `answers.json` | 検品の Claude の質問への人の答え | 人 |
 | `model/` | `model.3mf`・`model_bambu.3mf`・部品ごとの STL・`model.glb`・`checks.json`（検査・部品・分け目） | コード（組み立て・直しのたびに作り直す） |
 
-そのほか：`reading.json`（高性能読み込みの入れ切り）・`print_split.json`（人が動かした分け目）・`inspect/`（検品の面の絵と部材の位置）・`inspect_log.jsonl`・`lasso_log.jsonl`（やりとりと費用の記録）。
+そのほか：`reading.json`（高性能読み込みの入れ切り）・`print_split.json`（人が動かした分け目）・`print_options.json`（外壁をざらざらにするか。下）・`inspect/`（検品の面の絵と部材の位置）・`inspect_log.jsonl`・`lasso_log.jsonl`（やりとりと費用の記録）。
 起動ごとの `data/settings.json`（会社ルール・自動の検品・最近の物件。API キーは入れない）と、`data/rules/<会社>.learned.json`（承認した学んだルール）もあります。
 
 **building.json**（`adapters/walkinhome.py`。座標は実寸 mm・平面図の向き）
@@ -171,6 +171,11 @@ HAKOYA（箱家）が**どういう形で作られているか**の説明です�
 
 **answers.json**（`core/answers.py`）：`[{"question_id": "Q1", "question": "…", "options": […], "answer": "1. …", "at": "…", "inspected_at": "…"}]`。次の検品で「前に人が答えたこと」として Claude に渡します。
 
+**print_options.json**（`core/print_options.py`。★11/6）：`{"fuzzy_skin": true}`。印刷タブの「外壁の仕上げ」で人が決めた、外壁をざらざら（ファジースキン）にするか。
+- ないとき（決めていない）は会社ルール（`model.exterior_finish` が `plaster` なら付ける）。「既定に戻す」でこの値を消します。
+- 変わるのは 3MF の外壁の部品の設定（`fuzzy_skin=external` など）・書き出しの案内の文・ざらざらの層の検査・保存の名前（付けた 3MF は `…_fuzzy.3mf`）だけで、形（ざらざらの層の部品）はいつも同じに作ります。
+- 書き出した結果は `model/checks.json` の `"fuzzy_skin": {"on": true, "source": "property", "company_default": false}`（`source` は `property`＝物件で決めた／`company`＝会社ルールのとおり）。`parts` の中の `fuzzy_skin` は「ざらざらの層の部品か」という形の印で、こちらとは別です。
+
 **data/local_paths.yaml**（**リポジトリに入らない**。`.gitignore`）
 
 ```yaml
@@ -208,6 +213,8 @@ ng_words: ["（施主の名字）", "（住所の一部）"]   # 全体の出し
 **検品の指摘の承認**：直す案があれば `overrides.json` に足して組み直します。直す案がなければ、その指摘のとおりの依頼を修正タブに作り、指摘は「依頼済み」にします。
 
 **表で直す**：人が入れた数値をそのまま1件の直しにします（出どころは `human:table`）。
+
+**外壁の仕上げ（印刷タブ）**：チェックで `POST /api/print_options/<物件>`（`{"fuzzy_skin": true|false}`）、「既定に戻す」で `DELETE`。分け目を動かすときと同じく、検品中は断り（409）、`print_options.json` を書いてから書き出し直し、書き出せなければ前の値に戻します。今の値は `GET /api/print_options/<物件>`（`on`・`source`・`company_default`）。形は変わらないので、直しの記録（`overrides.json`）には入れません。
 
 模型を変える操作（直しの記録・指摘の決定・組み直し）は、サーバーの中で1つずつ行います（同時に2つ書いて片方が消えないように）。
 

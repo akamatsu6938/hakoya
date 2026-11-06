@@ -118,6 +118,11 @@ def get_building(ctx: ToolContext) -> dict:
         "skipped": b.get("skipped", []),
         "direction_note": "東西南北は glb の +Y を北とみなしている（推定）",
     }
+    # 外壁をざらざら（ファジースキン）にするか（物件ごとに印刷タブで決める。決めていなければ会社ルール。★11/6）。
+    # on が false の物件では、ざらざらの観点（立面の外壁の色）は見ない
+    from core.print_options import effective_fuzzy
+    fz_on, fz_source = effective_fuzzy(ctx.alias, ctx.rules)
+    out["fuzzy_skin"] = {"on": fz_on, "source": fz_source}
     # 予防：会社ルール（学んだルールを含む）と比べて「いつもと違う」所。家ごとに変わる値（窓の上端・勾配など）は比べない
     from core.rule_check import differences
     diffs = differences(b, ctx.rules)

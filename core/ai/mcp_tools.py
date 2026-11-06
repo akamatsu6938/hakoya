@@ -414,7 +414,8 @@ def _write_json_atomic(path: Path, data, what: str) -> None:
 def _outputs_stale(alias: str) -> bool:
     d = paths.out_dir(alias)
     checks = d / "model" / "checks.json"
-    newest = max(_mtime(d / "building.json"), _mtime(ov.overrides_path(alias)), _mtime(d / "print_split.json"))
+    newest = max(_mtime(d / "building.json"), _mtime(ov.overrides_path(alias)), _mtime(d / "print_split.json"),
+                 _mtime(d / "print_options.json"))
     return not checks.exists() or _mtime(checks) < newest
 
 
@@ -814,6 +815,16 @@ def rebuild(alias: str) -> dict:
 
 FILE_NOTES = {"model.3mf": "3MF（Bambu Studio などで開く）", "model_bambu.3mf": "Bambu Studio 形式の 3MF（外壁のざらざらの設定つき）",
               "model.glb": "画面の 3D 表示用の GLB", "checks.json": "コードの検査の結果"}
+FILE_NOTES_PLAIN = {**FILE_NOTES, "model_bambu.3mf": "Bambu Studio 形式の 3MF（ざらざらなし）"}
+
+
+def _file_notes(model: Path) -> dict:
+    """書き出しの説明。外壁をざらざらにしない物件（checks.json の fuzzy_skin.on が false）は「ざらざらなし」（★11/6）。"""
+    try:
+        fz = json.loads((model / "checks.json").read_text(encoding="utf-8")).get("fuzzy_skin")
+    except (OSError, ValueError, AttributeError):
+        fz = None
+    return FILE_NOTES_PLAIN if isinstance(fz, dict) and fz.get("on") is False else FILE_NOTES
 
 
 def export(alias: str) -> dict:
@@ -827,7 +838,8 @@ def export(alias: str) -> dict:
             raise ToolError(f"書き出せませんでした（{type(e).__name__}）") from None
     model = paths.out_dir(ctx.alias) / "model"
     names = sorted(p.name for p in model.iterdir() if p.is_file()) if model.is_dir() else []
-    files = [{"name": f"model/{n}", "what": FILE_NOTES.get(n, "部品ごとの STL" if n.endswith(".stl") else "")} for n in names]
+    notes = _file_notes(model)
+    files = [{"name": f"model/{n}", "what": notes.get(n, "部品ごとの STL" if n.endswith(".stl") else "")} for n in names]
     return {"rewritten": rewritten, "files": files, "url": hakoya_url(ctx.alias),
             "where": "HAKOYA のデータのフォルダの中の、この物件の model フォルダ",
             "note": "ファイルは HAKOYA の画面の「書き出し」タブから保存できます（場所はここでは渡しません）。"

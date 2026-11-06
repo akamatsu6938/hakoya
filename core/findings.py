@@ -141,8 +141,9 @@ def code_findings(alias: str) -> list[dict]:
                     "message": f"窓の間の柱の検査が途中で止まりました（{type(e).__name__}）。ほかの検査の結果は出ています",
                     "evidence": ["コードの検査（窓の間の柱）"]})
     try:   # 形の検査：ざらざらの層から外れた外壁・glb の基礎がない壁・家の外の外壁の分かれ方（★11/5。core/shape_checks.py）
+        from core.print_options import effective_fuzzy
         from core.shape_checks import shape_findings
-        out += shape_findings(ov.apply(b, ov.load(alias))[0], company)
+        out += shape_findings(ov.apply(b, ov.load(alias))[0], company, effective_fuzzy(alias, company)[0])   # ざらざらなしの物件は層を見ない
     except Exception as e:  # noqa: BLE001  この検査の失敗で、ほかの指摘を止めない（失敗したことは知らせる）
         out.append({"view": "plan", "kind": "shape", "severity": "低", "targets": [], "source": "code",
                     "title": "形の検査が止まった",

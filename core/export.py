@@ -193,8 +193,12 @@ def body_pieces(owner_key: str, parts: dict[str, ModelPart], rules: dict, house)
 
 def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = True) -> dict:
     from core import body_split as bs
+    from core import print_options as po
     b, parts, ov_results, rules = make_model(alias, company)
     scale = float(rules["model"]["scale"])
+    # 外壁をざらざら（ファジースキン）にするか：物件で決めた値、なければ会社ルール（塗り壁なら付ける）。★11/6 作者
+    # 形（外壁の表面の層）はいつも同じ。変わるのは 3MF に書く設定と、案内の文だけ
+    fuzzy_on, fuzzy_source = po.effective_fuzzy(alias, rules)
     dst = out_dir(alias) / "model"
     dst.mkdir(parents=True, exist_ok=True)
     for old in dst.glob("*.stl"):                       # 前の書き出しの STL（分け方が変わると名前が変わる）を消す
@@ -234,7 +238,7 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
         members = [p for p in parts.values() if (p.object_key or p.key) == key]
         if key not in split:
             objects.append({"name": parts[key].label.split("（")[0],
-                            "parts": [{"name": p.label, "fuzzy_skin": p.fuzzy_skin and m.get("exterior_finish") == "plaster",
+                            "parts": [{"name": p.label, "fuzzy_skin": p.fuzzy_skin and fuzzy_on,
                                        **_print_mesh(p, scale)} for p in members]})
             continue
         # 屋根：面ごとに分けて、上の面を床に付けて置く（core/print_split.py）。本体：家の分け目で分け、床を下のまま（core/body_split.py）
@@ -253,7 +257,7 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
                 trimesh.Trimesh(vertices=v, faces=f, process=True).export(dst / fname)
                 files.append(fname)
                 prt.append({"name": p.label if n == 1 else f"{p.label} {i}/{n}", "verts": v, "tris": f,
-                            "fuzzy_skin": p.fuzzy_skin and m.get("exterior_finish") == "plaster"})
+                            "fuzzy_skin": p.fuzzy_skin and fuzzy_on})
             objects.append({"name": name, "parts": prt})
             allv = np.vstack([q["verts"] for q in prt])
             combined = trimesh.Trimesh(vertices=allv, faces=np.vstack([q["tris"] + sum(len(r["verts"]) for r in prt[:j])
@@ -288,15 +292,21 @@ def write_outputs(alias: str, company: str | None = None, bambu_enabled: bool = 
               {"thickness": float(m["fuzzy_skin_thickness_mm"]), "point_distance": float(m["fuzzy_skin_point_distance_mm"])})
     # Bambu Studio が入っていれば、Bambu 形式の 3MF（画面で開いても部品ごとの設定が残る）も作る（core/bambu.py）
     bambu = to_bambu_3mf(dst / "model.3mf", dst / "model_bambu.3mf") if bambu_enabled else {"ok": False, "reason": "作らない設定"}
+    no_fuzzy = "ざらざら（ファジースキン）は付けていません。付けるときは、印刷タブの「外壁の仕上げ」で選べます"
     if bambu["ok"]:
         checks.append({"part": "export", "level": "情報", "item": "bambu_3mf",
-                       "message": "Bambu 形式の 3MF（model_bambu.3mf）を作りました。外壁だけファジースキン（外側の輪郭）が設定済みです"})
+                       "message": "Bambu 形式の 3MF（model_bambu.3mf）を作りました。" +
+                                  ("外壁だけざらざら（ファジースキン・外側の輪郭）を設定しています" if fuzzy_on else no_fuzzy)})
     else:
         checks.append({"part": "export", "level": "情報", "item": "bambu_3mf",
-                       "message": f"{bambu['reason']}。model.3mf を開いたら、外壁の部品を選んで「その他」→「ファジースキン」→「外側の輪郭」にしてください"})
+                       "message": f"{bambu['reason']}。" +
+                                  ("model.3mf を開いたら、外壁の部品を選んで「その他」→「ファジースキン」→「外側の輪郭」にしてください"
+                                   if fuzzy_on else no_fuzzy)})
+    # parts の fuzzy_skin は形の印（ざらざらの層の部品か。動画の道具が使う）。3MF に設定を書いたかは、下の fuzzy_skin.on
     summary = {"parts": {k: {"label": p.label, "fuzzy_skin": p.fuzzy_skin, "object": p.object_key or k,
                              "flip_for_print": p.flip_for_print and k not in split_members, "notes": p.notes} for k, p in parts.items()},
                "overrides": ov_results, "checks": checks, "bambu_3mf": bambu, "print_pieces": piece_info,
+               "fuzzy_skin": {"on": fuzzy_on, "source": fuzzy_source, "company_default": po.company_default(rules)},
                "house_cut": house.to_json() if house is not None else None,
                "stl_files": sorted(f.name for f in dst.glob("*.stl"))}
     (dst / "checks.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

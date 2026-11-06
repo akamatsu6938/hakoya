@@ -276,18 +276,25 @@
       </details>
     </div>
 
-    <!-- 印刷：書き出し・分け目・Bambu Studio・検査 -->
+    <!-- 印刷：書き出し・外壁の仕上げ・分け目・Bambu Studio・検査 -->
     <div class="ws-panel" data-ws="print" hidden>
       <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>書き出し</summary>
         <div class="sec-body"><p class="fine">3D プリンターに送るファイルです。ふつうは、いちばん上の 3MF（Bambu Studio 形式）を保存して開きます。</p><ul id="downloads" class="dl"></ul></div>
+      </details>
+      <details class="sec" id="sec-finish" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>外壁の仕上げ</summary>
+        <div class="sec-body">
+          <label class="finish-check"><input type="checkbox" id="fuzzy-on" disabled>外壁をざらざら（ファジースキン）にする</label>
+          <p class="fine">塗り壁の演出に。ふつうの 3MF・Bambu Studio 形式の 3MF の外壁の部品に設定を入れます（形は変わりません）。</p>
+          <p class="fine" id="fuzzy-source"></p>
+          <div class="row-acts"><button id="fuzzy-reset" class="small" disabled title="この物件で決めた値をやめて、会社ルールの既定で書き出し直します"><svg class="ic"><use href="#i-reset"/></svg><span>既定に戻す</span></button></div></div>
       </details>
       <details class="sec" id="sec-split" open hidden><summary><svg class="ic chev"><use href="#i-chev"/></svg>本体の分け目</summary>
         <div class="sec-body"><p class="fine" id="split-info"></p>
           <div class="row-acts"><button id="split-show-plan" class="small"><svg class="ic"><use href="#i-top"/></svg><span>平面図で分け目を見る</span></button></div></div>
       </details>
       <details class="sec"><summary><svg class="ic chev"><use href="#i-chev"/></svg>Bambu Studio で開くとき</summary>
-        <div class="sec-body"><p class="fine">会社ルールの外壁が塗り壁のときは、「Bambu Studio 形式」の 3MF を開くと、外壁の部品にだけファジースキン（外側の輪郭）が設定されています（サイディングの会社ルールでは付けません）。ファジースキンは形には出ません。スライスしてプレビューで外壁を拡大すると、線が細かく波打って見えます。</p>
-          <p class="fine">ふつうの形式の 3MF は形だけ読まれるので、外壁の部品（1階の外壁・屋根の外壁）を選び、「その他」→「ファジースキン」→「外側の輪郭」にしてください。2つ目以降のパーツはプレートの外に置いてあります。プレートを足して「並べる」で配置してください。</p></div>
+        <div class="sec-body"><p class="fine">上の「外壁の仕上げ」で「ざらざらにする」にすると、「Bambu Studio 形式」の 3MF を開いたとき、外壁の部品にだけファジースキン（外側の輪郭）が設定されています（決めていなければ会社ルールのとおり。塗り壁なら付け、サイディングなら付けません）。ファジースキンは形には出ません。スライスしてプレビューで外壁を拡大すると、線が細かく波打って見えます。</p>
+          <p class="fine">ふつうの形式の 3MF は形だけ読まれるので、ざらざらにするときは、外壁の部品（1階の外壁・屋根の外壁）を選び、「その他」→「ファジースキン」→「外側の輪郭」にしてください。2つ目以降のパーツはプレートの外に置いてあります。プレートを足して「並べる」で配置してください。</p></div>
       </details>
       <details class="sec" open><summary><svg class="ic chev"><use href="#i-chev"/></svg>検査<span class="sec-count" id="n-checks"></span><span class="help" tabindex="0" title="コードが模型を調べた結果です。会社ルールや図面と比べた結果と、部品ごとの形・大きさを並べます。黄と赤の印が付いた行は、確かめる所です。"><svg class="ic ic-s"><use href="#i-help"/></svg></span></summary>
         <div class="sec-body"><ul id="checks" class="list checks"></ul></div>
