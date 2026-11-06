@@ -141,7 +141,11 @@ def _same(a, b, compare: str | None) -> bool:
 def entries(company: str) -> list[tuple[str, dict]]:
     """その会社の組み立て済みの物件（仮名・building.json）。"""
     out = []
-    for a in aliases():
+    try:
+        names = aliases()
+    except FileNotFoundError:        # ★11/6：物件をまだ1つも登録していない（公開リポジトリを開いたばかりの自社用）。集計なし
+        return out
+    for a in names:
         p = out_dir(a) / "building.json"
         if not p.exists():
             continue

@@ -108,6 +108,15 @@ def test_repeated_human_corrections_are_counted():
     assert s["corrections.standalone.thickness_mm"]["status"] == "same"
 
 
+def test_no_properties_yet_gives_empty_stats(monkeypatch, tmp_path):
+    """物件をまだ1つも登録していない（local_paths.yaml がない。公開リポジトリを開いたばかりの自社用）ときは、
+    止まらずに集計なし（★11/6：会社ルールのタブに「思いがけないエラー（FileNotFoundError）」が出ていた）。"""
+    from core import paths
+    monkeypatch.setattr(rs, "aliases", lambda: paths.aliases(tmp_path / "local_paths.yaml"))
+    assert rs.entries("bkoumuten") == []
+    assert rs.collect("bkoumuten") == rs.compute([], load_rules("bkoumuten"))
+
+
 @pytest.mark.realdata
 def test_real_properties_oracle():
     """物件A（平屋）・物件B（2階建て）の答え合わせ（2026-11-03 に確かめた値）。
